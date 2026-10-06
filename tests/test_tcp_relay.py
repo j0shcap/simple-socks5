@@ -1,7 +1,8 @@
+import os
 import socket
 import selectors
 import unittest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 
 from src.constants import RELAY_BUFFER_SIZE, RELAY_WRITE_TIMEOUT, AddressTypeCodes
 from src.models import DetailedAddress
@@ -44,6 +45,23 @@ class TestTCPRelay(unittest.TestCase):
         self.assertEqual(relay.get_proxy_address().port, 5000)
         # Both sockets should be registered with the selector
         self.assertEqual(selector.register.call_count, 2)
+
+    def test_connect_timeout_set_before_connect(self):
+        with patch.dict(os.environ, {"SOCKS5_CONNECT_TIMEOUT": "0.5"}):
+            _, _, proxy, _ = self._create_relay()
+        self.assertEqual(proxy.mock_calls[:2], [call.settimeout(0.5), call.connect(("93.184.216.34", 80))])
+
+    @patch("src.relays.tcp_relay.selectors.DefaultSelector")
+    @patch("src.relays.tcp_relay.generate_tcp_socket")
+    def test_connect_timeout_closes_socket_and_selector(self, mock_gen_socket, mock_sel_cls):
+        mock_gen_socket.return_value.connect.side_effect = TimeoutError("timed out")
+        dst = DetailedAddress(name="test", ip="10.255.255.1", port=80, address_type=AddressTypeCodes.IPv4)
+
+        with self.assertRaises(TimeoutError):
+            TCPRelay(MagicMock(), dst)
+
+        mock_gen_socket.return_value.close.assert_called_once()
+        mock_sel_cls.return_value.close.assert_called_once()
 
     @patch("src.relays.tcp_relay.selectors.DefaultSelector")
     @patch("src.relays.tcp_relay.generate_tcp_socket")
@@ -200,8 +218,10 @@ class TestTCPRelay(unittest.TestCase):
 
         relay.listen_and_relay()
 
+        client.settimeout.assert_called_once_with(RELAY_WRITE_TIMEOUT)
+        # Replaces the connect timeout set before connect()
+        self.assertEqual(proxy.settimeout.call_args_list[-1], call(RELAY_WRITE_TIMEOUT))
         for sock in (client, proxy):
-            sock.settimeout.assert_called_once_with(RELAY_WRITE_TIMEOUT)
             sock.setsockopt.assert_called_once_with(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
             sock.setblocking.assert_not_called()
 

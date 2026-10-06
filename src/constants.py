@@ -1,3 +1,4 @@
+import math
 import os
 from enum import Enum
 
@@ -11,12 +12,36 @@ def auth_required() -> bool:
     return os.environ.get("SOCKS5_AUTH_REQUIRED", "false").lower() == "true"
 
 
+DEFAULT_HANDSHAKE_TIMEOUT: float = 10.0  # seconds a client has to finish greeting, auth and request
+DEFAULT_CONNECT_TIMEOUT: float = 10.0  # seconds to connect to the destination
+
+
+def _positive_seconds_env(name: str, default: float) -> float:
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return default
+    try:
+        value = float(raw)
+    except ValueError:
+        value = math.nan
+    if not math.isfinite(value) or value <= 0:
+        raise ValueError(f"{name} must be a positive number of seconds, got {raw!r}")
+    return value
+
+
+def handshake_timeout() -> float:
+    return _positive_seconds_env("SOCKS5_HANDSHAKE_TIMEOUT", DEFAULT_HANDSHAKE_TIMEOUT)
+
+
+def connect_timeout() -> float:
+    return _positive_seconds_env("SOCKS5_CONNECT_TIMEOUT", DEFAULT_CONNECT_TIMEOUT)
+
+
 # Buffer and timeout constants
 RELAY_BUFFER_SIZE: int = 65536
 TCP_SELECTOR_TIMEOUT: int = 3  # seconds
 # Bounds a whole sendall() call, so a reader slower than RELAY_BUFFER_SIZE per this many seconds is dropped
 RELAY_WRITE_TIMEOUT: float = 300.0  # seconds
-AUTH_TIMEOUT: float = 45.0  # seconds
 LOG_FILE_MAX_BYTES: int = 1048576  # 1 MB
 DNS_LOOKUP_TIMEOUT: float = 2.0  # seconds
 UDP_RECV_TIMEOUT: int = 120  # seconds

@@ -2,7 +2,7 @@ import struct
 import socket
 
 from .base import BaseHandler
-from ..constants import SOCKS_VERSION, MethodCodes, USERNAME, PASSWORD, AUTH_TIMEOUT, auth_required
+from ..constants import SOCKS_VERSION, MethodCodes, USERNAME, PASSWORD, auth_required
 from ..exceptions import InvalidVersionError
 from ..logger import get_logger
 from ..utils import generate_connection_method_response
@@ -12,15 +12,6 @@ logger = get_logger(__name__)
 
 class TCPHandler(BaseHandler):
     connection: socket.socket
-
-    def __init__(self, connection: socket.socket):
-        """
-        Initializes a new instance of the TCPRequestHandler class.
-
-        Args:
-            connection (socket.socket): The client socket.
-        """
-        self.connection = connection
 
     def handle_request(self) -> bool:
         """
@@ -85,6 +76,9 @@ class TCPHandler(BaseHandler):
                 logger.warning("No acceptable authentication methods")
                 return False
 
+        except TimeoutError:
+            logger.warning("Handshake timed out")
+            return False
         except socket.error as e:
             logger.exception(f"Socket error during handshake: {e}")
             return False
@@ -143,8 +137,6 @@ class TCPHandler(BaseHandler):
             o STATUS - status code (1 byte): X'00' for success, X'01' for failure
                 - Connection must be closed if status is not X'00'
         """
-        original_timeout = self.connection.gettimeout()
-        self.connection.settimeout(AUTH_TIMEOUT)
         try:
             # Receive and verify the version
             version = self._recv_exact(1)
@@ -176,16 +168,14 @@ class TCPHandler(BaseHandler):
                 logger.warning(f"Invalid authentication request: {username}")
                 self.connection.sendall(b"\x01\x01")  # version 1, status 1 (failure)
                 return False
-        except socket.timeout:
-            logger.exception("Socket timed out waiting for data")
+        except TimeoutError:
+            logger.warning("Handshake timed out during authentication")
             return False
         except socket.error as e:
             logger.exception(
                 f"Socket error during username/password authentication: {e}"
             )
             return False
-        finally:
-            self.connection.settimeout(original_timeout)
 
     def _handle_gssapi_auth(self) -> bool:
         """

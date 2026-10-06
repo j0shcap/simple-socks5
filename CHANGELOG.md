@@ -19,6 +19,8 @@ contain breaking changes, and each one is listed under **Breaking changes**.
   logged.
 - README `Security` section: open-proxy risk, requiring authentication, publishing only on
   trusted interfaces, cleartext credentials, and pinning `:2.0.0` for the pre-2.1 behaviour.
+- `SOCKS5_HANDSHAKE_TIMEOUT` and `SOCKS5_CONNECT_TIMEOUT` (seconds, default `10`). An invalid
+  value exits at startup with an error.
 
 ### Changed
 - `latest` and `logging-disabled` now move only on stable releases; pushes to `main` publish
@@ -53,3 +55,17 @@ contain breaking changes, and each one is listed under **Breaking changes**.
   write), so the transfer completes.
 - TCP half-close: a client or server that closes its sending side still receives the reply.
   Before, the first end-of-stream from either side closed the whole connection.
+- Handshake slowloris: a client that connected and then sent nothing (or one byte at a time)
+  held a connection slot forever, so 200 idle connections locked out every client. The
+  greeting, authentication and request must now arrive within `SOCKS5_HANDSHAKE_TIMEOUT`
+  seconds in total; a client that is still sending is disconnected without a reply. The
+  separate 45-second authentication timeout is gone.
+- Connection bursts: the listen backlog was 5, so on Linux clients connecting during a burst
+  waited 1 to 3 seconds for TCP retransmits before the proxy accepted them. It is now the
+  system maximum (`SOMAXCONN`).
+- Outbound connect timeout: CONNECT to an unreachable host waited for the OS default (75 s on
+  macOS, about 2 minutes on Linux) and replied `0x01`. It now gives up after
+  `SOCKS5_CONNECT_TIMEOUT` seconds and replies `0x04` (host unreachable).
+- Accurate SOCKS reply codes (RFC 1928): network unreachable replies `0x03`, host unreachable
+  and connect timeouts `0x04`, an unknown address type `0x08`, and a domain name that isn't
+  valid UTF-8 `0x04`. These all replied `0x01` before.

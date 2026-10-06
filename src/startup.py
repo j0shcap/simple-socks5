@@ -1,5 +1,6 @@
 """
-Startup advisories describing the proxy's exposure (open proxy, default credentials).
+Startup checks: environment validation and advisories describing the proxy's exposure (open proxy,
+default credentials).
 """
 import ipaddress
 import logging
@@ -75,3 +76,9 @@ def collect_startup_advisories(host: str) -> list[Advisory]:
         auth_explicitly_disabled(),
         uses_default_credentials(constants.USERNAME, constants.PASSWORD),
     )
+
+
+def validate_environment() -> None:
+    """Raises ValueError naming the first invalid environment variable, so a bad value fails at startup."""
+    constants.handshake_timeout()
+    constants.connect_timeout()

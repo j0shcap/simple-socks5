@@ -1,15 +1,16 @@
 import socket
 import threading
+import time
 from socketserver import StreamRequestHandler, ThreadingMixIn, TCPServer
 
-from .constants import CommandCodes
+from .constants import AddressTypeCodes, CommandCodes, handshake_timeout
+from .errors import reply_code_for
+from .exceptions import HandshakeTimeoutError
 from .handlers import TCPHandler
 from .relays import TCPRelay, UDPRelay
 from .utils import (
-    generate_general_socks_server_failure_reply,
     generate_command_not_supported_reply,
-    generate_connection_refused_reply,
-    generate_host_unreachable_reply,
+    generate_failed_reply,
     generate_succeeded_reply,
     connection_established_template,
 )
@@ -30,6 +31,9 @@ class ThreadingTCPServer(ThreadingMixIn, TCPServer):
     """
 
     daemon_threads = True
+    # socketserver's default backlog of 5 overflows when many clients connect at once, and Linux then
+    # retransmits the dropped handshakes after 1 s, 3 s, ..., delaying both their accept and their rejection
+    request_queue_size = socket.SOMAXCONN
     _connection_semaphore = threading.BoundedSemaphore(MAX_CONNECTIONS)
 
     def process_request(self, request, client_address):
@@ -113,7 +117,9 @@ class TCPProxyServer(StreamRequestHandler):
             client_address: Client address returned by BaseServer.get_request().
             server: BaseServer object used for handling the request.
         """
-        request_handler = TCPHandler(self.connection)
+        # Greeting, authentication and request must all arrive before this deadline
+        deadline = time.monotonic() + handshake_timeout()
+        request_handler = TCPHandler(self.connection, deadline=deadline)
 
         if not request_handler.handle_request():
             logger.error("Handshake failed")
@@ -122,10 +128,16 @@ class TCPProxyServer(StreamRequestHandler):
 
         try:
             dst_request: Request = request_handler.parse_request()
-        except Exception:
-            logger.error("Failed to parse SOCKS5 request")
-            self._send_error_reply(generate_general_socks_server_failure_reply())
+        except HandshakeTimeoutError:
+            # The client never finished its request, so it gets no reply
+            logger.warning("Handshake timed out waiting for the request")
             return
+        except Exception as e:
+            logger.error(f"Failed to parse SOCKS5 request: {e}")
+            self._send_error_reply(generate_failed_reply(AddressTypeCodes.IPv4, reply_code_for(e)))
+            return
+
+        self.connection.settimeout(None)  # Clears the handshake deadline
 
         peer = self.connection.getpeername()
         self.client_address: DetailedAddress = DetailedAddress(
@@ -150,15 +162,10 @@ class TCPProxyServer(StreamRequestHandler):
             else:
                 self._send_error_reply(generate_command_not_supported_reply(atyp))
 
-        except ConnectionRefusedError:
-            logger.error(f"Connection refused: {dst_request.address}")
-            self._send_error_reply(generate_connection_refused_reply(atyp))
-        except socket.gaierror:
-            logger.error(f"Host unreachable: {dst_request.address}")
-            self._send_error_reply(generate_host_unreachable_reply(atyp))
         except Exception as e:
-            logger.error(f"Exception: {e}")
-            self._send_error_reply(generate_general_socks_server_failure_reply(atyp))
+            reply_code = reply_code_for(e)
+            logger.error(f"{reply_code.name} for {dst_request.address}: {e}")
+            self._send_error_reply(generate_failed_reply(atyp, reply_code))
 
     def handle_connect(self, dst_address: DetailedAddress) -> None:
         """

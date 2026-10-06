@@ -1,10 +1,18 @@
+import logging
 import threading
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 import struct
 import socket
+from src.handlers.base import BaseHandler
 from src.handlers.tcp import TCPHandler
-from src.exceptions import InvalidVersionError, InvalidRequestError
+from src.exceptions import (
+    AddressTypeNotSupportedError,
+    HandshakeTimeoutError,
+    InvalidDomainNameError,
+    InvalidRequestError,
+    InvalidVersionError,
+)
 from src.constants import AddressTypeCodes, MethodCodes
 from src.models import Request
 
@@ -315,6 +323,154 @@ class TestTCPRequestHandlerIPv4(unittest.TestCase):
         ip, atyp = self.handler._resolve_hostname("example.com")
         self.assertEqual(ip, "example.com")
         self.assertEqual(atyp, AddressTypeCodes.IPv4.value)
+
+
+class FakeClock:
+    def __init__(self, now: float = 0.0):
+        self.now = now
+
+    def __call__(self) -> float:
+        return self.now
+
+
+class TestRecvExactDeadline(unittest.TestCase):
+    def setUp(self):
+        self.clock = FakeClock()
+        patcher = patch("src.handlers.base.time.monotonic", self.clock)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.connection = MagicMock()
+
+    def test_recv_exact_sets_remaining_timeout(self):
+        def recv(n):
+            self.clock.now += 0.25
+            return b"x"
+
+        self.connection.recv.side_effect = recv
+        handler = BaseHandler(self.connection, deadline=1.0)
+
+        self.assertEqual(handler._recv_exact(3), b"xxx")
+        timeouts = [c.args[0] for c in self.connection.settimeout.call_args_list]
+        self.assertEqual(timeouts, [1.0, 0.75, 0.5])
+
+    def test_recv_exact_drip_feed_hits_deadline(self):
+        def recv(n):
+            self.clock.now += 0.6
+            return b"x"
+
+        self.connection.recv.side_effect = recv
+        handler = BaseHandler(self.connection, deadline=1.0)
+
+        with self.assertRaises(HandshakeTimeoutError):
+            handler._recv_exact(10)
+        self.assertEqual(self.connection.recv.call_count, 2)
+
+    def test_recv_exact_expired_deadline_skips_recv(self):
+        self.clock.now = 1.0
+        handler = BaseHandler(self.connection, deadline=1.0)
+
+        with self.assertRaises(HandshakeTimeoutError):
+            handler._recv_exact(1)
+        self.connection.recv.assert_not_called()
+
+    def test_recv_exact_timeout_becomes_handshake_timeout(self):
+        self.connection.recv.side_effect = socket.timeout("timed out")
+        handler = BaseHandler(self.connection, deadline=1.0)
+
+        with self.assertRaises(HandshakeTimeoutError):
+            handler._recv_exact(1)
+
+    def test_recv_exact_without_deadline_never_sets_timeout(self):
+        self.connection.recv.side_effect = [b"ab"]
+        handler = BaseHandler(self.connection)
+
+        self.assertEqual(handler._recv_exact(2), b"ab")
+        self.connection.settimeout.assert_not_called()
+
+
+class TestParseAddress(unittest.TestCase):
+    """Typed errors for bad addresses, and every request byte read before any DNS lookup."""
+
+    def setUp(self):
+        self.events = []
+        self.connection = MagicMock()
+        self.handler = BaseHandler(self.connection)
+        self.handler._gethostbyaddr = lambda ip: self.events.append("lookup") or ip
+        self.handler._resolve_hostname = (
+            lambda name: self.events.append("lookup") or ("1.2.3.4", AddressTypeCodes.IPv4.value)
+        )
+
+    def feed(self, *chunks: bytes) -> None:
+        remaining = list(chunks)
+
+        def recv(n):
+            self.events.append("recv")
+            return remaining.pop(0)
+
+        self.connection.recv.side_effect = recv
+
+    def test_unknown_atyp_raises_address_type_not_supported(self):
+        with self.assertRaises(AddressTypeNotSupportedError) as caught:
+            self.handler._parse_address(0x05)
+        self.assertIsInstance(caught.exception, InvalidRequestError)
+
+    def test_non_utf8_domain_raises_invalid_domain_name(self):
+        self.feed(b"\x02", b"\xff\xfe", struct.pack("!H", 80))
+        with self.assertRaises(InvalidDomainNameError):
+            self.handler._parse_address(AddressTypeCodes.DOMAIN_NAME.value)
+
+    def test_port_read_before_lookup(self):
+        cases = {
+            AddressTypeCodes.IPv4: (socket.inet_aton("1.2.3.4"), struct.pack("!H", 80)),
+            AddressTypeCodes.IPv6: (socket.inet_pton(socket.AF_INET6, "::1"), struct.pack("!H", 80)),
+            AddressTypeCodes.DOMAIN_NAME: (b"\x07", b"example", struct.pack("!H", 80)),
+        }
+        for address_type, chunks in cases.items():
+            with self.subTest(address_type=address_type.name):
+                self.events.clear()
+                self.feed(*chunks)
+                address = self.handler._parse_address(address_type.value)
+                self.assertEqual(address.port, 80)
+                self.assertEqual(self.events, ["recv"] * len(chunks) + ["lookup"])
+
+
+class TestHandshakeTimeout(unittest.TestCase):
+    """A handshake timeout closes quietly: no STATUS byte, and a warning without a traceback."""
+
+    def setUp(self):
+        self.connection = MagicMock()
+        self.handler = TCPHandler(self.connection)
+
+    def assert_quiet_warning(self, logs):
+        self.assertTrue(any(r.levelname == "WARNING" for r in logs.records))
+        self.assertFalse([r for r in logs.records if r.exc_info or r.levelno >= 40])
+
+    def test_auth_does_not_reset_socket_timeout(self):
+        self.connection.recv.side_effect = [b"\x01", b"\x01", b"u", b"\x01", b"p"]
+        self.handler._handle_username_password_auth()
+        self.connection.settimeout.assert_not_called()
+
+    def test_auth_timeout_returns_false_without_status(self):
+        self.connection.recv.side_effect = [b"\x01", HandshakeTimeoutError("expired")]
+        with self.assertLogs("src.handlers", level="DEBUG") as logs:
+            self.assertFalse(self.handler._handle_username_password_auth())
+        self.connection.sendall.assert_not_called()
+        self.assert_quiet_warning(logs)
+
+    def test_greeting_timeout_logs_warning_without_traceback(self):
+        self.connection.recv.side_effect = HandshakeTimeoutError("expired")
+        with self.assertLogs("src.handlers", level="DEBUG") as logs:
+            self.assertFalse(self.handler.handle_request())
+        self.connection.sendall.assert_not_called()
+        self.assert_quiet_warning(logs)
+
+    def test_request_timeout_propagates_without_traceback(self):
+        self.connection.recv.side_effect = [struct.pack("!BBBB", 5, 1, 0, 1), HandshakeTimeoutError("expired")]
+        with self.assertLogs("src.handlers", level="DEBUG") as logs, self.assertRaises(HandshakeTimeoutError):
+            # assertLogs needs at least one record; the handler itself must add none above DEBUG
+            logging.getLogger("src.handlers").debug("start")
+            self.handler.parse_request()
+        self.assertFalse([r for r in logs.records if r.exc_info or r.levelno >= 30])
 
 
 class TestAuthEnforcement(unittest.TestCase):
