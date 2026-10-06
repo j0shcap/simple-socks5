@@ -3,6 +3,14 @@ Startup advisories describing the proxy's exposure (open proxy, default credenti
 """
 import ipaddress
 import logging
+import os
+from typing import Mapping
+
+from . import constants
+
+# Mirrors the credential fallbacks in constants.py; tests guard against drift.
+DEFAULT_USERNAME: str = "myusername"
+DEFAULT_PASSWORD: str = "mypassword"
 
 Advisory = tuple[int, str]  # (logging level, message)
 
@@ -34,6 +42,15 @@ def is_loopback_host(host: str) -> bool:
     return (mapped or address).is_loopback
 
 
+def auth_explicitly_disabled(environ: Mapping[str, str] = os.environ) -> bool:
+    """True only when SOCKS5_AUTH_REQUIRED is present and set to 'false', not merely defaulted."""
+    return environ.get("SOCKS5_AUTH_REQUIRED", "").lower() == "false"
+
+
+def uses_default_credentials(username: str, password: str) -> bool:
+    return username == DEFAULT_USERNAME and password == DEFAULT_PASSWORD
+
+
 def startup_advisories(
     host: str, auth_required: bool, auth_explicitly_disabled: bool, default_credentials: bool
 ) -> list[Advisory]:
@@ -46,3 +63,13 @@ def startup_advisories(
     if default_credentials:
         advisories.append((logging.WARNING, DEFAULT_CREDENTIALS_MESSAGE))
     return advisories
+
+
+def collect_startup_advisories(host: str) -> list[Advisory]:
+    """Gathers the live configuration (environment and credentials) and returns its advisories."""
+    return startup_advisories(
+        host,
+        constants.auth_required(),
+        auth_explicitly_disabled(),
+        uses_default_credentials(constants.USERNAME, constants.PASSWORD),
+    )
