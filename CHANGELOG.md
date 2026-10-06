@@ -73,6 +73,16 @@ contain breaking changes, and each one is listed under **Breaking changes**.
 - Accurate SOCKS reply codes (RFC 1928): network unreachable replies `0x03`, host unreachable
   and connect timeouts `0x04`, an unknown address type `0x08`, and a domain name that isn't
   valid UTF-8 `0x04`. These all replied `0x01` before.
+- A malformed UDP datagram (too short, a non-zero reserved field, an unknown address type or a
+  truncated address) ended the UDP association and sent a stray failure reply on its control
+  connection; a single spoofed datagram was enough. It is now dropped and the association keeps
+  working. A datagram to a destination that can't be sent to (such as port 0) is dropped too.
+- A request now gets exactly one SOCKS reply. An error after the success reply (for example
+  during a CONNECT tunnel) used to send a second, failure reply, injecting 10 bytes into the
+  stream; it is now only logged.
+- A UDP association now ends as soon as its TCP control connection closes, as RFC 1928
+  requires. Before, its relay port kept relaying datagrams for up to 2 minutes after the client
+  disconnected. The 2-minute idle timeout stays, but only datagrams from the client reset it.
 
 ### Security
 - Usernames and passwords are compared in constant time, and both are always checked, so

@@ -1,7 +1,10 @@
+import selectors
 import socket
+import time
 
 from .base import BaseRelay
 from ..constants import RELAY_BUFFER_SIZE, UDP_RECV_TIMEOUT, UDP_FORWARD_TIMEOUT
+from ..exceptions import MalformedDatagramError
 from ..models import DetailedAddress, BaseAddress
 from ..logger import get_logger
 from ..handlers import UDPHandler
@@ -28,7 +31,8 @@ class UDPRelay(BaseRelay):
         sock = generate_udp_socket(self.dst_address.address_type)
         try:
             sock.bind(("", 0))  # Bind to any available port
-            sock.settimeout(UDP_RECV_TIMEOUT)
+            # select() can report a datagram that is then discarded (e.g. a bad checksum), so a read must not block
+            sock.setblocking(False)
         except Exception:
             sock.close()
             raise
@@ -36,41 +40,90 @@ class UDPRelay(BaseRelay):
         self.set_proxy_address()
 
     def listen_and_relay(self):
+        """
+        Relays client datagrams until the control connection closes or no client datagram arrives for
+        UDP_RECV_TIMEOUT seconds (RFC 1928 §7: the association ends with its TCP connection).
+        """
+        selector = selectors.DefaultSelector()
         try:
+            selector.register(self.client_connection, selectors.EVENT_READ)
+            selector.register(self.proxy_connection, selectors.EVENT_READ)
+            idle_deadline = time.monotonic() + UDP_RECV_TIMEOUT
             while True:
-                data, addr = self.proxy_connection.recvfrom(RELAY_BUFFER_SIZE)
+                remaining = idle_deadline - time.monotonic()
+                if remaining <= 0:
+                    logger.debug("UDP relay timed out waiting for data")
+                    return
+                ready = {key.fileobj for key, _ in selector.select(timeout=remaining)}
 
-                if addr[0] != self.expected_client_ip:
-                    logger.debug(
-                        f"(UDP) Dropped datagram from unauthorized source: {addr[0]}"
-                    )
-                    continue
+                # Checked first, so nothing more is relayed once the control connection has closed
+                if self.client_connection in ready and not self._control_connection_open():
+                    logger.debug("UDP association ended: control connection closed")
+                    return
 
-                datagram = UDPHandler.parse_udp_datagram(data)
+                if self.proxy_connection in ready:
+                    try:
+                        data, addr = self.proxy_connection.recvfrom(RELAY_BUFFER_SIZE)
+                    except BlockingIOError:
+                        continue
+                    if self._handle_datagram(data, addr):
+                        idle_deadline = time.monotonic() + UDP_RECV_TIMEOUT
 
-                if datagram.frag != 0:
-                    logger.debug(
-                        f"(UDP) Dropped fragmented datagram: {addr} -> "
-                        f"{datagram.dst_addr}:{datagram.dst_port}, "
-                        f"Size: {len(datagram.data)} bytes"
-                    )
-                    continue
-
-                try:
-                    self._forward_packet(datagram, addr)
-                except (ValueError, KeyError) as e:
-                    logger.debug(f"(UDP) Dropped unsupported datagram from {addr}: {e}")
-                    continue
-
-        except socket.timeout:
-            logger.debug("UDP relay timed out waiting for data")
         except OSError as e:
             logger.error(f"UDP relay socket error: {e}")
         finally:
+            selector.close()
             try:
                 self.proxy_connection.close()
             except OSError:
                 pass
+
+    def _control_connection_open(self) -> bool:
+        """
+        Reads from the readable control connection. Returns False on EOF or error.
+
+        Nothing is expected on it after the reply, so any data is discarded.
+        """
+        try:
+            data = self.client_connection.recv(RELAY_BUFFER_SIZE)
+        except OSError as e:
+            logger.debug(f"UDP control connection error: {e}")
+            return False
+        if data:
+            logger.debug(f"(UDP) Ignored {len(data)} bytes on the control connection")
+        return bool(data)
+
+    def _handle_datagram(self, data: bytes, addr: tuple) -> bool:
+        """
+        Forwards one datagram received on the relay socket, or drops it.
+
+        Returns whether it came from the client, which is what keeps the association alive.
+        """
+        if addr[0] != self.expected_client_ip:
+            logger.debug(
+                f"(UDP) Dropped datagram from unauthorized source: {addr[0]}"
+            )
+            return False
+
+        try:
+            datagram = UDPHandler.parse_udp_datagram(data)
+        except MalformedDatagramError as e:
+            logger.debug(f"(UDP) Dropped datagram from {addr}: {e}")
+            return True
+
+        if datagram.frag != 0:
+            logger.debug(
+                f"(UDP) Dropped fragmented datagram: {addr} -> "
+                f"{datagram.dst_addr}:{datagram.dst_port}, "
+                f"Size: {len(datagram.data)} bytes"
+            )
+            return True
+
+        try:
+            self._forward_packet(datagram, addr)
+        except (ValueError, KeyError, OSError) as e:
+            logger.debug(f"(UDP) Dropped unsupported datagram from {addr}: {e}")
+        return True
 
     def _forward_packet(self, datagram, client_addr: tuple) -> None:
         with socket.socket(

@@ -21,7 +21,7 @@ from .utils import (
     connection_established_template,
 )
 from .logger import get_logger
-from .models import Request, DetailedAddress
+from .models import BindAddress, Request, DetailedAddress
 
 logger = get_logger(__name__)
 
@@ -129,6 +129,8 @@ class TCPProxyServer(StreamRequestHandler):
     client_address: DetailedAddress
     connection: socket.socket
     server: ThreadingTCPServer
+    # Set as soon as a reply is attempted: the client must never receive a second one
+    _reply_sent: bool = False
 
     def handle(self):
         """
@@ -185,6 +187,9 @@ class TCPProxyServer(StreamRequestHandler):
                 self._send_error_reply(generate_command_not_supported_reply(atyp))
 
         except Exception as e:
+            if self._reply_sent:
+                logger.error(f"Error after replying to the {dst_request.address} request: {e}")
+                return
             reply_code = reply_code_for(e)
             logger.error(f"{reply_code.name} for {dst_request.address}: {e}")
             self._send_error_reply(generate_failed_reply(atyp, reply_code))
@@ -197,10 +202,7 @@ class TCPProxyServer(StreamRequestHandler):
         tcp_relay = TCPRelay(self.connection, dst_address)
 
         # Send reply with bind address and port
-        success_reply = generate_succeeded_reply(
-            dst_address.address_type, *tcp_relay.get_proxy_address()
-        )
-        self.connection.sendall(success_reply)
+        self._send_success_reply(dst_address.address_type, tcp_relay.get_proxy_address())
 
         # Start TCP relay
         tcp_relay.listen_and_relay()
@@ -213,10 +215,7 @@ class TCPProxyServer(StreamRequestHandler):
         udp_relay = UDPRelay(self.connection, dst_address)
 
         # Send reply with allocated port and server IP
-        success_reply = generate_succeeded_reply(
-            dst_address.address_type, *udp_relay.get_proxy_address()
-        )
-        self.connection.sendall(success_reply)
+        self._send_success_reply(dst_address.address_type, udp_relay.get_proxy_address())
 
         # Start UDP relay
         udp_relay.listen_and_relay()
@@ -228,10 +227,22 @@ class TCPProxyServer(StreamRequestHandler):
         logger.error("BIND command not supported")
         self._send_error_reply(generate_command_not_supported_reply(address.address_type))
 
+    def _send_success_reply(self, address_type: AddressTypeCodes, bind_address: BindAddress) -> None:
+        """
+        Sends the success reply to the client. A failed send propagates.
+        """
+        # Set before sending, so a partially written reply is never followed by a failure reply
+        self._reply_sent = True
+        self.connection.sendall(generate_succeeded_reply(address_type, *bind_address))
+
     def _send_error_reply(self, reply: bytes) -> None:
         """
-        Sends an error reply to the client, swallowing OSError on send failure.
+        Sends an error reply to the client unless a reply was already sent, swallowing OSError on send failure.
         """
+        if self._reply_sent:
+            logger.debug("Suppressed a second SOCKS reply")
+            return
+        self._reply_sent = True
         try:
             self.connection.sendall(reply)
         except OSError as e:

@@ -3,11 +3,16 @@ import struct
 
 from .base import BaseHandler
 from ..logger import get_logger
-from ..exceptions import InvalidRequestError
+from ..exceptions import MalformedDatagramError
 from ..models import UDPDatagram
 from ..utils import map_address_int_to_enum
 
 logger = get_logger(__name__)
+
+
+def _require(data: bytes, length: int, reason: str) -> None:
+    if len(data) < length:
+        raise MalformedDatagramError(f"{reason}: {len(data)} bytes")
 
 
 class UDPHandler(BaseHandler):
@@ -42,28 +47,38 @@ class UDPHandler(BaseHandler):
         o  DST.ADDR - desired destination address
         o  DST.PORT - desired destination port
         o  DATA - user data
-        """
 
-        # Parse the SOCKS UDP request header
+        Raises:
+            MalformedDatagramError: The header is truncated, RSV isn't zero, ATYP is unknown or the
+                domain name isn't valid UTF-8.
+        """
+        _require(data, 4, "too short")
         rsv, frag, atyp = struct.unpack("!HBB", data[:4])
+        if rsv != 0:
+            raise MalformedDatagramError(f"RSV must be 0, got {rsv:#06x}")
 
         if atyp == 1:  # IPv4
+            _require(data, 10, "truncated IPv4 address or port")
             dst_addr = socket.inet_ntoa(data[4:8])
             dst_port = struct.unpack("!H", data[8:10])[0]
             user_data = data[10:]
         elif atyp == 3:  # Domain name
-            domain_length = data[4]
-            dst_addr = data[5 : 5 + domain_length].decode()
-            dst_port = struct.unpack("!H", data[5 + domain_length : 7 + domain_length])[
-                0
-            ]
-            user_data = data[7 + domain_length :]
+            _require(data, 5, "missing domain name length")
+            domain_end = 5 + data[4]
+            _require(data, domain_end + 2, "truncated domain name or port")
+            try:
+                dst_addr = data[5:domain_end].decode()
+            except UnicodeDecodeError:
+                raise MalformedDatagramError("domain name is not valid UTF-8") from None
+            dst_port = struct.unpack("!H", data[domain_end:domain_end + 2])[0]
+            user_data = data[domain_end + 2:]
         elif atyp == 4:  # IPv6
+            _require(data, 22, "truncated IPv6 address or port")
             dst_addr = socket.inet_ntop(socket.AF_INET6, data[4:20])
             dst_port = struct.unpack("!H", data[20:22])[0]
             user_data = data[22:]
         else:
-            raise InvalidRequestError(atyp)
+            raise MalformedDatagramError(f"unsupported address type {atyp}")
 
         return UDPDatagram(
             frag=frag,
