@@ -19,6 +19,8 @@ LOG_FILE_MAX_BYTES: int = 1048576  # 1 MB
 DNS_LOOKUP_TIMEOUT: float = 2.0  # seconds
 UDP_RECV_TIMEOUT: int = 120  # seconds
 UDP_FORWARD_TIMEOUT: int = 10  # seconds
+SHUTDOWN_GRACE_PERIOD: float = 5.0  # seconds in-flight connections get after SIGTERM/SIGINT
+SHUTDOWN_FORCE_CLOSE_TIMEOUT: float = 0.5  # seconds before the grace deadline to force-close stragglers
 
 # See https://www.ietf.org/rfc/rfc1928.txt for more information about the below codes
 
