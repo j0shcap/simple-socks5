@@ -1,9 +1,10 @@
 import socket
+import threading
 import unittest
 from unittest.mock import MagicMock, patch
 
 from src.exceptions import InvalidVersionError, InvalidRequestError
-from src.server import TCPProxyServer
+from src.server import TCPProxyServer, ThreadingTCPServer
 
 
 class TestHandleParseRequestErrors(unittest.TestCase):
@@ -94,6 +95,87 @@ class TestSendErrorReply(unittest.TestCase):
         handler = self._make_handler()
         handler.connection.sendall.side_effect = OSError("transport endpoint closed")
         handler._send_error_reply(b"\x05\x01\x00\x01\x00\x00\x00\x00\x00\x00")
+
+
+class TestConnectionTracking(unittest.TestCase):
+    """Verify ThreadingTCPServer tracks in-flight requests so shutdown can drain or close them."""
+
+    def setUp(self):
+        self.server = ThreadingTCPServer(("127.0.0.1", 0), TCPProxyServer, bind_and_activate=False)
+        self.addCleanup(self.server.server_close)
+        self.server._connection_semaphore = MagicMock()
+
+    def _process(self, request, during=lambda: None):
+        def handle(server, request, client_address):
+            during()
+
+        with patch("socketserver.ThreadingMixIn.process_request_thread", handle):
+            self.server.process_request_thread(request, ("127.0.0.1", 9999))
+
+    def test_request_tracked_during_handling_and_removed_after(self):
+        request = MagicMock(spec=socket.socket)
+        seen = []
+        self._process(request, during=lambda: seen.append(self.server.close_connections()))
+        self.assertEqual(seen, [1])
+        self.assertEqual(self.server.close_connections(), 0)
+
+    def test_semaphore_still_released(self):
+        self._process(MagicMock(spec=socket.socket))
+        self.server._connection_semaphore.release.assert_called_once()
+
+    def test_request_removed_when_handling_raises(self):
+        def fail():
+            raise RuntimeError("handler failed")
+
+        with self.assertRaises(RuntimeError):
+            self._process(MagicMock(spec=socket.socket), during=fail)
+        self.assertTrue(self.server.wait_for_connections(0))
+        self.server._connection_semaphore.release.assert_called_once()
+
+    def test_wait_returns_true_when_idle(self):
+        self.assertTrue(self.server.wait_for_connections(0))
+
+    def test_wait_returns_false_on_timeout(self):
+        started, release = threading.Event(), threading.Event()
+
+        def hold():
+            started.set()
+            release.wait(5)
+
+        worker = threading.Thread(target=self._process, args=(MagicMock(spec=socket.socket), hold))
+        worker.start()
+        self.addCleanup(worker.join)
+        self.addCleanup(release.set)
+        started.wait(5)
+
+        self.assertFalse(self.server.wait_for_connections(0.01))
+        release.set()
+        self.assertTrue(self.server.wait_for_connections(5))
+
+    def test_close_connections_shuts_down_each_and_counts(self):
+        requests = [MagicMock(spec=socket.socket), MagicMock(spec=socket.socket)]
+        counts = []
+
+        def process_both(remaining):
+            if remaining:
+                self._process(remaining[0], during=lambda: process_both(remaining[1:]))
+            else:
+                counts.append(self.server.close_connections())
+
+        process_both(requests)
+        self.assertEqual(counts, [2])
+        for request in requests:
+            request.shutdown.assert_called_once_with(socket.SHUT_RDWR)
+            request.close.assert_not_called()
+
+    def test_close_connections_skips_already_closed_socket(self):
+        closed, live = MagicMock(spec=socket.socket), MagicMock(spec=socket.socket)
+        closed.shutdown.side_effect = OSError("Bad file descriptor")
+        counts = []
+        self._process(closed, during=lambda: self._process(
+            live, during=lambda: counts.append(self.server.close_connections())))
+        self.assertEqual(counts, [1])
+        live.shutdown.assert_called_once_with(socket.SHUT_RDWR)
 
 
 if __name__ == "__main__":

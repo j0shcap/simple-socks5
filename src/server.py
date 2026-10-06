@@ -43,11 +43,45 @@ class ThreadingTCPServer(ThreadingMixIn, TCPServer):
             logger.warning("Connection limit reached, rejecting connection")
             self.shutdown_request(request)
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Daemon request threads aren't tracked by ThreadingMixIn, so track their sockets for shutdown.
+        self._active_requests: set[socket.socket] = set()
+        self._active_cond = threading.Condition()
+
     def process_request_thread(self, request, client_address):
+        with self._active_cond:
+            self._active_requests.add(request)
         try:
             super().process_request_thread(request, client_address)
         finally:
+            with self._active_cond:
+                self._active_requests.discard(request)
+                self._active_cond.notify_all()
             self._connection_semaphore.release()
+
+    def wait_for_connections(self, timeout: float) -> bool:
+        """
+        Waits up to timeout seconds for every in-flight request to finish. Returns True if none remain.
+        """
+        with self._active_cond:
+            return self._active_cond.wait_for(lambda: not self._active_requests, timeout)
+
+    def close_connections(self) -> int:
+        """
+        Shuts down every in-flight request socket so its handler thread wakes up, sees EOF and closes it.
+        Returns the number of sockets shut down.
+        """
+        with self._active_cond:
+            requests = list(self._active_requests)
+        closed = 0
+        for request in requests:
+            try:
+                request.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                continue  # The handler closed it in the meantime
+            closed += 1
+        return closed
 
 
 class TCPProxyServer(StreamRequestHandler):
