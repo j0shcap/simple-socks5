@@ -25,6 +25,13 @@ contain breaking changes, and each one is listed under **Breaking changes**.
   `:main` only. An image is published only after the tests and a container smoke test pass.
 - README Quick Start leads with an authenticated example published on `127.0.0.1`; the
   no-auth example is labelled for trusted networks only.
+- Docker image base is now `python:3.13-slim`, pinned by digest (Python 3.10 reaches end of life
+  in October 2026). The image also sets `PYTHONUNBUFFERED=1` and `PYTHONDONTWRITEBYTECODE=1`.
+- **Behaviour change:** the Docker image now logs at `info` by default instead of `debug`, so it
+  no longer logs every relayed chunk. Set `-e LOGGING_LEVEL=debug` to restore the old output.
+  This also applies when you override the container command without `-L`.
+- The Docker image runs `python` directly as PID 1 (exec-form `CMD`), so it receives
+  `docker stop`'s SIGTERM.
 - `app.py` reads the `LOGGING_LEVEL` environment variable when `-L/--logging-level` isn't
   given. Precedence is `-L`, then `LOGGING_LEVEL`, then `debug`; an invalid value exits with
   an error.
@@ -32,6 +39,7 @@ contain breaking changes, and each one is listed under **Breaking changes**.
 ### Fixed
 - SIGTERM and SIGINT now shut the server down gracefully: it stops accepting connections, gives
   in-flight connections up to 5 seconds to finish, closes the rest and exits with code 0.
+  `docker stop` previously waited 10 seconds and killed the container (exit code 137).
 - README: the default port is `1080`, not `9999`; removed the claim of configurable
   connection limits; the authentication example now sets `SOCKS5_AUTH_REQUIRED=true`.
 - The outbound socket leaked when a CONNECT target refused the connection; it is now closed

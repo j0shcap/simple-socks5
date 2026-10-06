@@ -69,14 +69,14 @@ python3 app.py [--host HOST | -H HOST] [--port PORT | -P PORT] [--logging-level 
 | `SOCKS5_USERNAME` | `myusername` | Username for RFC 1929 authentication. |
 | `SOCKS5_PASSWORD` | `mypassword` | Password for RFC 1929 authentication. |
 | `SOCKS5_AUTH_REQUIRED` | `false` | Set to `true` to require authentication. |
-| `LOGGING_LEVEL` | `debug` | Logging level used when `-L` isn't given. Same choices as `-L`. |
+| `LOGGING_LEVEL` | `debug` (Docker image: `info`) | Logging level used when `-L` isn't given. Same choices as `-L`. |
 
 ## Docker
 
 The examples below forward `SOCKS5_USERNAME` and `SOCKS5_PASSWORD` from your shell (export them as in [Quick Start](#quick-start)).
 
 ```bash
-# Default (logging enabled)
+# Default (logs at info; add -e LOGGING_LEVEL=debug to log every relayed chunk)
 docker run -p 127.0.0.1:1080:1080 -e SOCKS5_AUTH_REQUIRED=true \
   -e SOCKS5_USERNAME -e SOCKS5_PASSWORD jcaponigro20/simple-socks5
 
@@ -84,11 +84,13 @@ docker run -p 127.0.0.1:1080:1080 -e SOCKS5_AUTH_REQUIRED=true \
 docker run -p 127.0.0.1:1080:1080 -e SOCKS5_AUTH_REQUIRED=true \
   -e SOCKS5_USERNAME -e SOCKS5_PASSWORD jcaponigro20/simple-socks5:logging-disabled
 
-# Custom build
-docker build --build-arg LOGGING_LEVEL=info -t my-socks5 .
+# Custom build with a different default logging level
+docker build --build-arg LOGGING_LEVEL=debug -t my-socks5 .
 ```
 
 The container always listens on `0.0.0.0` inside Docker; the `-p` flag decides which host interfaces the port is published on.
+
+`docker stop` (SIGTERM) shuts the proxy down gracefully: it stops accepting connections, gives open connections up to 5 seconds to finish, then closes them and exits with code 0. Ctrl-C (SIGINT) does the same.
 
 ## Authentication
 
