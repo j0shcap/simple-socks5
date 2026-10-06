@@ -31,7 +31,8 @@ class UDPRelay(BaseRelay):
         sock = generate_udp_socket(self.dst_address.address_type)
         try:
             sock.bind(("", 0))  # Bind to any available port
-            sock.settimeout(UDP_RECV_TIMEOUT)
+            # select() can report a datagram that is then discarded (e.g. a bad checksum), so a read must not block
+            sock.setblocking(False)
         except Exception:
             sock.close()
             raise
@@ -61,7 +62,10 @@ class UDPRelay(BaseRelay):
                     return
 
                 if self.proxy_connection in ready:
-                    data, addr = self.proxy_connection.recvfrom(RELAY_BUFFER_SIZE)
+                    try:
+                        data, addr = self.proxy_connection.recvfrom(RELAY_BUFFER_SIZE)
+                    except BlockingIOError:
+                        continue
                     if self._handle_datagram(data, addr):
                         idle_deadline = time.monotonic() + UDP_RECV_TIMEOUT
 

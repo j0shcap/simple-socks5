@@ -124,6 +124,7 @@ class TestUDPRelay(unittest.TestCase):
 
         relay = UDPRelay(client_conn, dst)
         mock_sock.bind.assert_called_once_with(("", 0))
+        mock_sock.setblocking.assert_called_once_with(False)
         self.assertEqual(relay.get_proxy_address().ip, "0.0.0.0")
         self.assertEqual(relay.get_proxy_address().port, 5000)
 
@@ -196,6 +197,27 @@ class TestListenAndRelay(unittest.TestCase):
             self.assert_relay_ends(thread)
         forward.assert_called_once()
         self.assertEqual(forward.call_args[0][0].data, b"hello")
+
+    def test_spurious_readiness_keeps_association(self):
+        """select() may report a datagram that recvfrom then finds discarded (e.g. a bad UDP checksum)."""
+        real_recvfrom = self.relay.proxy_connection.recvfrom
+        calls = []
+
+        def recvfrom(size):
+            calls.append(size)
+            if len(calls) == 1:
+                raise BlockingIOError
+            return real_recvfrom(size)
+
+        self.relay.proxy_connection = MagicMock(wraps=self.relay.proxy_connection)
+        self.relay.proxy_connection.recvfrom.side_effect = recvfrom
+        forwarded = threading.Event()
+        with patch.object(self.relay, "_forward_packet", side_effect=lambda *_: forwarded.set()):
+            thread = self.start_relay()
+            self.send_datagrams(build_udp_datagram("10.0.0.1", 53, b"hello"))
+            self.assertTrue(forwarded.wait(JOIN_TIMEOUT))
+            self.control.close()
+            self.assert_relay_ends(thread)
 
     def test_relay_socket_error_ends_association(self):
         self.relay.proxy_connection = MagicMock(wraps=self.relay.proxy_connection)
