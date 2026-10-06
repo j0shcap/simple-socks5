@@ -2,7 +2,7 @@ import socket
 import selectors
 
 from .base import BaseRelay
-from ..constants import RELAY_BUFFER_SIZE, RELAY_WRITE_TIMEOUT, TCP_SELECTOR_TIMEOUT
+from ..constants import RELAY_BUFFER_SIZE, RELAY_WRITE_TIMEOUT, TCP_SELECTOR_TIMEOUT, connect_timeout
 from ..models import DetailedAddress
 from ..logger import get_logger
 from ..utils import (
@@ -45,6 +45,8 @@ class TCPRelay(BaseRelay):
         """
         # Generate proxy connection
         self.proxy_connection = generate_tcp_socket(self.dst_address.address_type)
+        # Replaced by the relay's write timeout in _prepare_sockets()
+        self.proxy_connection.settimeout(connect_timeout())
         self.proxy_connection.connect((self.dst_address.ip, self.dst_address.port))
         self.set_proxy_address()
         # Register sockets with selector
