@@ -69,7 +69,11 @@ python3 app.py [--host HOST | -H HOST] [--port PORT | -P PORT] [--logging-level 
 | `SOCKS5_USERNAME` | `myusername` | Username for RFC 1929 authentication. |
 | `SOCKS5_PASSWORD` | `mypassword` | Password for RFC 1929 authentication. |
 | `SOCKS5_AUTH_REQUIRED` | `false` | Set to `true` to require authentication. |
+| `SOCKS5_HANDSHAKE_TIMEOUT` | `10` | Seconds a client has to finish the greeting, authentication and request. A client that is still sending when it runs out is disconnected without a reply. |
+| `SOCKS5_CONNECT_TIMEOUT` | `10` | Seconds to connect to the destination. A timeout replies `0x04` (host unreachable). |
 | `LOGGING_LEVEL` | `debug` (Docker image: `info`) | Logging level used when `-L` isn't given. Same choices as `-L`. |
+
+Timeouts accept any positive number of seconds, such as `2.5`. An invalid value stops the proxy at startup with an error.
 
 ## Docker
 
