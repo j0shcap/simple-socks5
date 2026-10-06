@@ -35,6 +35,8 @@ contain breaking changes, and each one is listed under **Breaking changes**.
 - `app.py` reads the `LOGGING_LEVEL` environment variable when `-L/--logging-level` isn't
   given. Precedence is `-L`, then `LOGGING_LEVEL`, then `debug`; an invalid value exits with
   an error.
+- TCP relay buffer raised from 4 KiB to 64 KiB, about 7× the throughput. The UDP relay's
+  receive buffer, which shares the setting, grows to match.
 
 ### Fixed
 - SIGTERM and SIGINT now shut the server down gracefully: it stops accepting connections, gives

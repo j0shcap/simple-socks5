@@ -3,7 +3,7 @@ import selectors
 import unittest
 from unittest.mock import MagicMock, patch
 
-from src.constants import RELAY_WRITE_TIMEOUT, AddressTypeCodes
+from src.constants import RELAY_BUFFER_SIZE, RELAY_WRITE_TIMEOUT, AddressTypeCodes
 from src.models import DetailedAddress
 from src.relays.tcp_relay import TCPRelay
 
@@ -224,6 +224,7 @@ class TestTCPRelay(unittest.TestCase):
         client.recv.return_value = b"data"
         result = relay._recv_data(client)
         self.assertEqual(result, b"data")
+        client.recv.assert_called_once_with(RELAY_BUFFER_SIZE)
 
     def test_recv_data_raises_on_error(self):
         relay, client, proxy, _ = self._create_relay()
