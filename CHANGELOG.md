@@ -38,8 +38,10 @@ contain breaking changes, and each one is listed under **Breaking changes**.
 
 ### Fixed
 - SIGTERM and SIGINT now shut the server down gracefully: it stops accepting connections, gives
-  in-flight connections up to 5 seconds to finish, closes the rest and exits with code 0.
-  `docker stop` previously waited 10 seconds and killed the container (exit code 137).
+  in-flight connections up to 5 seconds to finish, closes the rest and exits with code 0. This
+  includes connections accepted just before the signal. An open UDP association can take the
+  full 5 seconds. `docker stop` previously waited 10 seconds and killed the container (exit
+  code 137).
 - README: the default port is `1080`, not `9999`; removed the claim of configurable
   connection limits; the authentication example now sets `SOCKS5_AUTH_REQUIRED=true`.
 - The outbound socket leaked when a CONNECT target refused the connection; it is now closed
