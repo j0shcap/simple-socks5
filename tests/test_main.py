@@ -87,6 +87,32 @@ class TestMainStartupAdvisories(unittest.TestCase):
                 self.assertIn("Server started", output)
                 self.assertNotIn(password, output)
 
+    def test_signal_during_serve_forever_logs_shutdown_and_returns(self):
+        server = self.server_class.return_value.__enter__.return_value
+        for signum in (signal.SIGTERM, signal.SIGINT):
+            with self.subTest(signal=signum.name):
+                shutdown_called = threading.Event()
+                server.shutdown.side_effect = shutdown_called.set
+                self.serve_forever.side_effect = lambda: signal.getsignal(signum)(signum, None)
+
+                output = self.run_main()
+
+                self.assertIn("Server shutting down...", output)
+                self.assertIn("Server terminated.", output)
+                self.assertTrue(shutdown_called.wait(5))
+                server.server_close.assert_called()
+
+    def test_signal_handlers_restored_after_main(self):
+        previous = {signum: signal.getsignal(signum) for signum in (signal.SIGTERM, signal.SIGINT)}
+        self.run_main()
+        self.assertEqual({signum: signal.getsignal(signum) for signum in previous}, previous)
+
+    def test_startup_failure_exits_1(self):
+        self.server_class.side_effect = OSError("Address already in use")
+        with self.assertRaises(SystemExit) as caught:
+            self.run_main()
+        self.assertEqual(caught.exception.code, 1)
+
 
 class FakeClock:
     def __init__(self, now=100.0):

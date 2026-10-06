@@ -84,16 +84,17 @@ def main(args: Namespace):
         with ThreadingTCPServer(
             (ProxyConfiguration.get_host(), ProxyConfiguration.get_port()), TCPProxyServer
         ) as tcp_server:
+            graceful_shutdown = GracefulShutdown(tcp_server)
+            graceful_shutdown.install()
             logger.info(f"Server started on {ProxyConfiguration.get_address()}")
 
             try:
                 tcp_server.serve_forever()
-            except KeyboardInterrupt:
-                logger.info("Server shutting down...")
             finally:
-                tcp_server.shutdown()
                 tcp_server.server_close()
-                logger.info("Server terminated.")
+                # Handlers stay installed while draining, so a repeated signal can't interrupt it.
+                graceful_shutdown.drain()
+                graceful_shutdown.restore()
     except OSError as e:
         logger.error(f"Error starting server: {e}")
         exit(1)
