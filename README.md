@@ -1,7 +1,6 @@
 # Simple SOCKS5 Proxy Server
 
-[![Python Tests](https://github.com/j0shcap/simple-socks5/actions/workflows/python-tests.yml/badge.svg)](https://github.com/j0shcap/simple-socks5/actions/workflows/python-tests.yml)
-[![Docker Image CI](https://github.com/j0shcap/simple-socks5/actions/workflows/docker-image.yml/badge.svg)](https://github.com/j0shcap/simple-socks5/actions/workflows/docker-image.yml)
+[![CI](https://github.com/j0shcap/simple-socks5/actions/workflows/ci.yml/badge.svg)](https://github.com/j0shcap/simple-socks5/actions/workflows/ci.yml)
 
 A SOCKS Protocol Version 5 proxy server written in Python. Implements [RFC 1928](https://www.ietf.org/rfc/rfc1928.txt) (SOCKS5) and [RFC 1929](https://www.ietf.org/rfc/rfc1929.txt) (username/password authentication).
 
