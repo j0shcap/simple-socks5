@@ -49,6 +49,7 @@ jobs:
         pytest --cov=src --cov-fail-under=60
 
   smoke:
+    name: smoke (${{ matrix.variant.name }})
     needs: test
     runs-on: ubuntu-latest
     strategy:
