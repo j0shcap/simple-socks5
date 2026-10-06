@@ -1,0 +1,157 @@
+name: CI
+
+on:
+  push:
+    branches: [ "main" ]
+    tags: [ "v*" ]
+  pull_request:
+    branches: [ "main" ]
+
+permissions:
+  contents: read
+
+# Never cancel an in-flight publish; a newer pending run on the same ref supersedes an older pending one.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  IMAGE_NAME: simple-socks5
+  PLATFORMS: linux/amd64,linux/arm/v7,linux/arm64
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+
+    steps:
+    - uses: actions/checkout@v7
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v7
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        python -m pip install flake8 pytest pytest-cov
+
+    - name: Lint with flake8
+      run: |
+        flake8 src/ tests/
+
+    - name: Test with pytest
+      run: |
+        pytest --cov=src --cov-fail-under=60
+
+  smoke:
+    needs: test
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        variant:
+          - name: default
+            build-args: ""
+          - name: logging-disabled
+            build-args: LOGGING_LEVEL=disabled
+
+    steps:
+    - uses: actions/checkout@v7
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v4
+
+    - name: Build image (linux/amd64)
+      uses: docker/build-push-action@v7
+      with:
+        context: .
+        platforms: linux/amd64
+        load: true
+        push: false
+        build-args: ${{ matrix.variant.build-args }}
+        tags: ${{ env.IMAGE_NAME }}:ci-${{ matrix.variant.name }}
+
+    - name: Smoke test
+      run: bash .github/scripts/smoke-test.sh "$IMAGE_NAME:ci-${{ matrix.variant.name }}"
+
+  publish:
+    needs: [test, smoke]
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+    - uses: actions/checkout@v7
+
+    - name: Check release tag
+      id: guard
+      if: startsWith(github.ref, 'refs/tags/')
+      run: bash .github/scripts/release-guard.sh "$GITHUB_REF_NAME" >> "$GITHUB_OUTPUT"
+
+    - name: Set up QEMU
+      uses: docker/setup-qemu-action@v4
+      with:
+        platforms: arm,arm64
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v4
+
+    - name: Log in to Docker Hub
+      uses: docker/login-action@v4
+      with:
+        username: ${{ secrets.DOCKERHUB_USERNAME }}
+        password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+    - name: Docker metadata
+      id: meta
+      uses: docker/metadata-action@v6
+      with:
+        images: ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}
+        flavor: latest=auto
+        tags: |
+          type=raw,value=main,enable=${{ github.ref == 'refs/heads/main' }}
+          type=semver,pattern={{version}}
+          type=semver,pattern={{major}}.{{minor}}
+          type=semver,pattern={{major}}
+        labels: |
+          org.opencontainers.image.title=Simple SOCKS5 Proxy
+          org.opencontainers.image.description=Multi-architecture SOCKS5 proxy server
+
+    - name: Build and push image
+      uses: docker/build-push-action@v7
+      with:
+        context: .
+        platforms: ${{ env.PLATFORMS }}
+        push: true
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+
+    - name: Docker metadata (logging disabled)
+      id: meta_ld
+      if: startsWith(github.ref, 'refs/tags/')
+      uses: docker/metadata-action@v6
+      with:
+        images: ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}
+        flavor: latest=false
+        tags: |
+          type=semver,pattern={{version}},suffix=-logging-disabled
+          type=raw,value=logging-disabled,enable=${{ steps.guard.outputs.prerelease == 'false' }}
+        labels: |
+          org.opencontainers.image.title=Simple SOCKS5 Proxy (Logging Disabled)
+          org.opencontainers.image.description=Multi-architecture SOCKS5 proxy server without logging
+
+    - name: Build and push image (logging disabled)
+      if: startsWith(github.ref, 'refs/tags/')
+      uses: docker/build-push-action@v7
+      with:
+        context: .
+        platforms: ${{ env.PLATFORMS }}
+        push: true
+        build-args: LOGGING_LEVEL=disabled
+        tags: ${{ steps.meta_ld.outputs.tags }}
+        labels: ${{ steps.meta_ld.outputs.labels }}
