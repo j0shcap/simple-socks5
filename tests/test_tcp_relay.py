@@ -3,9 +3,15 @@ import selectors
 import unittest
 from unittest.mock import MagicMock, patch
 
-from src.constants import AddressTypeCodes
+from src.constants import RELAY_WRITE_TIMEOUT, AddressTypeCodes
 from src.models import DetailedAddress
 from src.relays.tcp_relay import TCPRelay
+
+
+def _event(sock):
+    key = MagicMock()
+    key.fileobj = sock
+    return key
 
 
 class TestTCPRelay(unittest.TestCase):
@@ -132,10 +138,41 @@ class TestTCPRelay(unittest.TestCase):
 
     def test_send_data(self):
         relay, client, proxy, _ = self._create_relay()
-        proxy.send.return_value = 5
         result = relay._send_data(proxy, b"hello")
-        self.assertEqual(result, 5)
-        proxy.send.assert_called_once_with(b"hello")
+        self.assertIsNone(result)
+        proxy.sendall.assert_called_once_with(b"hello")
+        proxy.send.assert_not_called()
+
+    def test_init_leaves_sockets_blocking(self):
+        relay, client, proxy, _ = self._create_relay()
+        client.setblocking.assert_not_called()
+        proxy.setblocking.assert_not_called()
+
+    def test_prepare_sockets_sets_timeout_and_keepalive(self):
+        relay, client, proxy, selector = self._create_relay()
+        selector.select.side_effect = [[(_event(client), selectors.EVENT_READ)]]
+        client.recv.return_value = b""
+
+        relay.listen_and_relay()
+
+        for sock in (client, proxy):
+            sock.settimeout.assert_called_once_with(RELAY_WRITE_TIMEOUT)
+            sock.setsockopt.assert_called_once_with(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+            sock.setblocking.assert_not_called()
+
+    def test_relay_write_timeout_cleans_up(self):
+        relay, client, proxy, selector = self._create_relay()
+        selector.select.side_effect = [[(_event(client), selectors.EVENT_READ)]]
+        client.recv.return_value = b"data"
+        proxy.sendall.side_effect = TimeoutError("timed out")
+
+        with self.assertLogs("src.relays.tcp_relay", level="WARNING") as logs:
+            relay.listen_and_relay()
+
+        self.assertTrue(any("timed out" in line for line in logs.output))
+        proxy.close.assert_called_once()
+        selector.close.assert_called_once()
+        client.close.assert_not_called()
 
     def test_recv_data(self):
         relay, client, proxy, _ = self._create_relay()
@@ -163,11 +200,11 @@ class TestTCPRelay(unittest.TestCase):
             [(mock_key_eof, selectors.EVENT_READ)],
         ]
         client.recv.side_effect = [b"request data", b""]
-        proxy.send.return_value = 12
 
         relay.listen_and_relay()
 
-        proxy.send.assert_called_once_with(b"request data")
+        proxy.sendall.assert_called_once_with(b"request data")
+        proxy.send.assert_not_called()
 
 
 if __name__ == "__main__":

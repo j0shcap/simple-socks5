@@ -2,7 +2,7 @@ import socket
 import selectors
 
 from .base import BaseRelay
-from ..constants import RELAY_BUFFER_SIZE, TCP_SELECTOR_TIMEOUT
+from ..constants import RELAY_BUFFER_SIZE, RELAY_WRITE_TIMEOUT, TCP_SELECTOR_TIMEOUT
 from ..models import DetailedAddress
 from ..logger import get_logger
 from ..utils import (
@@ -47,9 +47,6 @@ class TCPRelay(BaseRelay):
         self.proxy_connection = generate_tcp_socket(self.dst_address.address_type)
         self.proxy_connection.connect((self.dst_address.ip, self.dst_address.port))
         self.set_proxy_address()
-        # Set sockets to non-blocking
-        self.client_connection.setblocking(False)
-        self.proxy_connection.setblocking(False)
         # Register sockets with selector
         self.selector.register(self.client_connection, selectors.EVENT_READ)
         self.selector.register(self.proxy_connection, selectors.EVENT_READ)
@@ -60,6 +57,7 @@ class TCPRelay(BaseRelay):
         """
 
         try:
+            self._prepare_sockets()
             while True:
                 events = self.selector.select(timeout=TCP_SELECTOR_TIMEOUT)
                 if not events:
@@ -92,20 +90,28 @@ class TCPRelay(BaseRelay):
                     if not data:
                         return
 
-                    while data:
-                        # Send data loop to other socket
-                        sent: int = self._send_data(other_sock, data)
-                        self._log_relay(sock_info, other_info, sent)
-                        data = data[sent:]
+                    # Blocks while the receiver is slow: that is the backpressure
+                    self._send_data(other_sock, data)
+                    self._log_relay(sock_info, other_info, len(data))
 
         except BrokenPipeError:
             logger.exception("Broken Pipe")
         except ConnectionResetError:
             logger.exception("Connection Reset")
+        except TimeoutError:
+            logger.warning(f"Relay write timed out after {RELAY_WRITE_TIMEOUT} seconds")
         except OSError:
             logger.exception("Socket error during relay")
         finally:
             self._cleanup()
+
+    def _prepare_sockets(self) -> None:
+        """
+        Makes both sockets blocking with a bounded write time, and enables keepalive to detect dead peers.
+        """
+        for sock in (self.client_connection, self.proxy_connection):
+            sock.settimeout(RELAY_WRITE_TIMEOUT)
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
 
     def _log_relay(
         self, src_addr: DetailedAddress, dst_addr: DetailedAddress, data_len: int
@@ -149,9 +155,9 @@ class TCPRelay(BaseRelay):
             )
         )
 
-    def _send_data(self, sock: socket.socket, data: bytes) -> int:
+    def _send_data(self, sock: socket.socket, data: bytes) -> None:
         try:
-            return sock.send(data)
+            sock.sendall(data)
         except socket.error as e:
             logger.error(f"Error sending data: {e}")
             raise

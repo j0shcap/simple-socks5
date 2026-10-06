@@ -46,3 +46,6 @@ contain breaking changes, and each one is listed under **Breaking changes**.
   connection limits; the authentication example now sets `SOCKS5_AUTH_REQUIRED=true`.
 - The outbound socket leaked when a CONNECT target refused the connection; it is now closed
   before the refusal reply is sent.
+- Downloads were truncated when the client read slower than the origin sent: a full send
+  buffer dropped the connection. The relay now waits for the slow side (up to 5 minutes per
+  write), so the transfer completes.
