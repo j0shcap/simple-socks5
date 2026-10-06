@@ -15,6 +15,7 @@ Fixtures (stable public API; regression tests build on them)
     echo_origin             Origin: echoes bytes until EOF
     echo_origin_v6          Origin on ::1 (skips when IPv6 loopback is unavailable)
     half_close_origin       Origin: reads until EOF, then replies b"GOT <n> BYTES"
+    trickle_origin          Origin: sends 1 KiB every 100 ms until the peer goes away
     http_origin             Origin: GET /bytes/<n> serves origins.deterministic_payload(n)
     udp_echo_origin         Origin: echoes each UDP datagram
 
@@ -47,6 +48,7 @@ from tests.e2e.origins import (
     OriginTCPServer,
     OriginTCPServerV6,
     PayloadHTTPHandler,
+    TrickleHandler,
     UDPEchoHandler,
     serve_in_thread,
 )
@@ -135,6 +137,11 @@ def echo_origin_v6():
 @pytest.fixture
 def half_close_origin():
     yield from _serve_origin(OriginTCPServer(("127.0.0.1", 0), HalfCloseHandler))
+
+
+@pytest.fixture
+def trickle_origin():
+    yield from _serve_origin(OriginTCPServer(("127.0.0.1", 0), TrickleHandler))
 
 
 @pytest.fixture
