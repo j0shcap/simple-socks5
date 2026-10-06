@@ -6,6 +6,7 @@ deterministic_payload(n)    n seeded, non-periodic bytes (the HTTP origin serves
 OriginTCPServer[V6]         threading TCP server whose server_close() joins its handler threads
 EchoHandler                 echoes bytes until EOF
 HalfCloseHandler            reads until EOF, then replies b"GOT <n> BYTES"
+TrickleHandler              sends TRICKLE_CHUNK every TRICKLE_INTERVAL seconds until the peer goes away
 PayloadHTTPHandler          GET /bytes/<n> -> 200 with deterministic_payload(n); anything else -> 404
 UDPEchoHandler              (for socketserver.UDPServer) echoes each datagram to its sender
 Origin(host, port)          where a started origin listens; .address is the (host, port) tuple
@@ -15,11 +16,14 @@ import random
 import socket
 import socketserver
 import threading
+import time
 from contextlib import contextmanager
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler
 
 HANDLER_TIMEOUT = 5
+TRICKLE_CHUNK = b"x" * 1024
+TRICKLE_INTERVAL = 0.1  # seconds
 
 
 @contextmanager
@@ -76,6 +80,17 @@ class HalfCloseHandler(socketserver.BaseRequestHandler):
         while data := self.request.recv(65536):
             received += len(data)
         self.request.sendall(b"GOT %d BYTES" % received)
+
+
+class TrickleHandler(socketserver.BaseRequestHandler):
+    def handle(self):
+        self.request.settimeout(HANDLER_TIMEOUT)
+        try:
+            while True:
+                self.request.sendall(TRICKLE_CHUNK)
+                time.sleep(TRICKLE_INTERVAL)
+        except OSError:
+            pass  # The peer closed the connection
 
 
 class PayloadHTTPHandler(BaseHTTPRequestHandler):
