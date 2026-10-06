@@ -25,6 +25,9 @@ contain breaking changes, and each one is listed under **Breaking changes**.
   `:main` only. An image is published only after the tests and a container smoke test pass.
 - README Quick Start leads with an authenticated example published on `127.0.0.1`; the
   no-auth example is labelled for trusted networks only.
+- `app.py` reads the `LOGGING_LEVEL` environment variable when `-L/--logging-level` isn't
+  given. Precedence is `-L`, then `LOGGING_LEVEL`, then `debug`; an invalid value exits with
+  an error.
 
 ### Fixed
 - README: the default port is `1080`, not `9999`; removed the claim of configurable

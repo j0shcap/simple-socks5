@@ -60,7 +60,7 @@ python3 app.py [--host HOST | -H HOST] [--port PORT | -P PORT] [--logging-level 
 |------|---------|-------------|
 | `-H`, `--host` | `localhost` | Bind address. `0.0.0.0` or `::` expose the proxy to the network; see [Security](#security). |
 | `-P`, `--port` | `1080` | Bind port. |
-| `-L`, `--logging-level` | `debug` | `disabled`, `debug`, `info`, `warning`, `error`, `critical`. Startup warnings are hidden at `error`, `critical` and `disabled`. |
+| `-L`, `--logging-level` | `$LOGGING_LEVEL`, else `debug` | `disabled`, `debug`, `info`, `warning`, `error`, `critical`. Startup warnings are hidden at `error`, `critical` and `disabled`. |
 
 ### Environment variables
 
@@ -69,7 +69,7 @@ python3 app.py [--host HOST | -H HOST] [--port PORT | -P PORT] [--logging-level 
 | `SOCKS5_USERNAME` | `myusername` | Username for RFC 1929 authentication. |
 | `SOCKS5_PASSWORD` | `mypassword` | Password for RFC 1929 authentication. |
 | `SOCKS5_AUTH_REQUIRED` | `false` | Set to `true` to require authentication. |
-| `LOGGING_LEVEL` | `debug` | Docker image only: passed to `--logging-level`. |
+| `LOGGING_LEVEL` | `debug` | Logging level used when `-L` isn't given. Same choices as `-L`. |
 
 ## Docker
 
