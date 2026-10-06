@@ -4,8 +4,21 @@ from enum import Enum
 
 SOCKS_VERSION: int = 5
 
-USERNAME: str = os.environ.get("SOCKS5_USERNAME", "myusername")
-PASSWORD: str = os.environ.get("SOCKS5_PASSWORD", "mypassword")
+DEFAULT_USERNAME: str = "myusername"
+DEFAULT_PASSWORD: str = "mypassword"
+
+USERNAME: str = os.environ.get("SOCKS5_USERNAME", DEFAULT_USERNAME)
+PASSWORD: str = os.environ.get("SOCKS5_PASSWORD", DEFAULT_PASSWORD)
+
+
+def credentials() -> tuple[bytes, bytes]:
+    """The configured RFC 1929 username and password as UTF-8 bytes, read at call time."""
+    return _utf8_env("SOCKS5_USERNAME", DEFAULT_USERNAME), _utf8_env("SOCKS5_PASSWORD", DEFAULT_PASSWORD)
+
+
+def _utf8_env(name: str, default: str) -> bytes:
+    # surrogateescape turns a non-UTF-8 POSIX value back into its original bytes instead of raising
+    return os.environ.get(name, default).encode("utf-8", "surrogateescape")
 
 
 def auth_required() -> bool:
@@ -35,6 +48,27 @@ def handshake_timeout() -> float:
 
 def connect_timeout() -> float:
     return _positive_seconds_env("SOCKS5_CONNECT_TIMEOUT", DEFAULT_CONNECT_TIMEOUT)
+
+
+DEFAULT_MAX_CONNECTIONS: int = 200
+CONNECTION_LIMIT_WARNING_INTERVAL: float = 10.0  # seconds between "connection limit reached" warnings
+
+
+def _positive_int_env(name: str, default: int) -> int:
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        value = 0
+    if value < 1:
+        raise ValueError(f"{name} must be a positive integer, got {raw!r}")
+    return value
+
+
+def max_connections() -> int:
+    return _positive_int_env("SOCKS5_MAX_CONNECTIONS", DEFAULT_MAX_CONNECTIONS)
 
 
 # Buffer and timeout constants
