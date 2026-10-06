@@ -1,4 +1,6 @@
+import selectors
 import socket
+import time
 
 from .base import BaseRelay
 from ..constants import RELAY_BUFFER_SIZE, UDP_RECV_TIMEOUT, UDP_FORWARD_TIMEOUT
@@ -37,20 +39,55 @@ class UDPRelay(BaseRelay):
         self.set_proxy_address()
 
     def listen_and_relay(self):
+        """
+        Relays client datagrams until the control connection closes or no client datagram arrives for
+        UDP_RECV_TIMEOUT seconds (RFC 1928 §7: the association ends with its TCP connection).
+        """
+        selector = selectors.DefaultSelector()
         try:
+            selector.register(self.client_connection, selectors.EVENT_READ)
+            selector.register(self.proxy_connection, selectors.EVENT_READ)
+            idle_deadline = time.monotonic() + UDP_RECV_TIMEOUT
             while True:
-                data, addr = self.proxy_connection.recvfrom(RELAY_BUFFER_SIZE)
-                self._handle_datagram(data, addr)
+                remaining = idle_deadline - time.monotonic()
+                if remaining <= 0:
+                    logger.debug("UDP relay timed out waiting for data")
+                    return
+                ready = {key.fileobj for key, _ in selector.select(timeout=remaining)}
 
-        except socket.timeout:
-            logger.debug("UDP relay timed out waiting for data")
+                # Checked first, so nothing more is relayed once the control connection has closed
+                if self.client_connection in ready and not self._control_connection_open():
+                    logger.debug("UDP association ended: control connection closed")
+                    return
+
+                if self.proxy_connection in ready:
+                    data, addr = self.proxy_connection.recvfrom(RELAY_BUFFER_SIZE)
+                    if self._handle_datagram(data, addr):
+                        idle_deadline = time.monotonic() + UDP_RECV_TIMEOUT
+
         except OSError as e:
             logger.error(f"UDP relay socket error: {e}")
         finally:
+            selector.close()
             try:
                 self.proxy_connection.close()
             except OSError:
                 pass
+
+    def _control_connection_open(self) -> bool:
+        """
+        Reads from the readable control connection. Returns False on EOF or error.
+
+        Nothing is expected on it after the reply, so any data is discarded.
+        """
+        try:
+            data = self.client_connection.recv(RELAY_BUFFER_SIZE)
+        except OSError as e:
+            logger.debug(f"UDP control connection error: {e}")
+            return False
+        if data:
+            logger.debug(f"(UDP) Ignored {len(data)} bytes on the control connection")
+        return bool(data)
 
     def _handle_datagram(self, data: bytes, addr: tuple) -> bool:
         """

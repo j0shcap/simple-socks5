@@ -1,5 +1,7 @@
 import select
 import socket
+import struct
+import time
 from contextlib import contextmanager
 
 import pytest
@@ -36,10 +38,7 @@ def _assert_nothing_received(sock):
     assert not readable, f"unexpected data or EOF on {sock}"
 
 
-def test_udp_associate_echo(monkeypatch, proxy, udp_echo_origin):
-    # The relay ignores control-connection close and only exits on its receive timeout (120 s).
-    monkeypatch.setattr("src.relays.udp_relay.UDP_RECV_TIMEOUT", 0.5)
-
+def test_udp_associate_echo(proxy, udp_echo_origin):
     with _udp_association(proxy) as (control, udp, relay_address):
         _assert_echo(udp, relay_address, udp_echo_origin.port)
 
@@ -69,12 +68,54 @@ MALFORMED = {
                  id="ATYP 9"),
     pytest.param(lambda port: sc.build_udp_header(sc.ATYP_IPV4, "127.0.0.1", port, frag=1) + b"bad", id="FRAG 1"),
 ])
-def test_malformed_datagram_is_dropped_and_association_survives(monkeypatch, proxy, udp_echo_origin, make_datagram):
-    monkeypatch.setattr("src.relays.udp_relay.UDP_RECV_TIMEOUT", 0.5 + 2 * QUIET_PERIOD)
-
+def test_malformed_datagram_is_dropped_and_association_survives(proxy, udp_echo_origin, make_datagram):
     with _udp_association(proxy) as (control, udp, relay_address):
         udp.sendto(make_datagram(udp_echo_origin.port), relay_address)
 
         _assert_echo(udp, relay_address, udp_echo_origin.port)
         _assert_nothing_received(udp)
         _assert_nothing_received(control)
+
+
+def _assert_association_ended(proxy, udp, relay_address, origin_port):
+    """The association ended within ~1 s: no more relaying, and the relay's UDP port is closed."""
+    started = time.monotonic()
+    assert proxy.server.wait_for_connections(1.5)
+    assert time.monotonic() - started < 1.5
+
+    # Sent only once the handler has returned: a datagram racing the FIN could still be relayed
+    udp.sendto(sc.build_udp_header(sc.ATYP_IPV4, "127.0.0.1", origin_port) + b"late", relay_address)
+    _assert_nothing_received(udp)
+    # Bound only after that check, so the test can't receive its own datagram
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as rebind:
+        rebind.bind(("", relay_address[1]))
+
+
+def test_control_close_ends_association(proxy, udp_echo_origin):
+    with _udp_association(proxy) as (control, udp, relay_address):
+        _assert_echo(udp, relay_address, udp_echo_origin.port)
+        control.close()
+        _assert_association_ended(proxy, udp, relay_address, udp_echo_origin.port)
+
+
+def test_control_reset_ends_association(proxy, udp_echo_origin):
+    with _udp_association(proxy) as (control, udp, relay_address):
+        _assert_echo(udp, relay_address, udp_echo_origin.port)
+        control.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))
+        control.close()
+        _assert_association_ended(proxy, udp, relay_address, udp_echo_origin.port)
+
+
+def test_close_connections_ends_udp_association(proxy):
+    with _udp_association(proxy) as (control, _, _):
+        assert proxy.server.close_connections() == 1
+        assert proxy.server.wait_for_connections(sc.TIMEOUT)
+        sc.assert_closed(control)
+
+
+def test_idle_timeout_ends_association(monkeypatch, proxy):
+    monkeypatch.setattr("src.relays.udp_relay.UDP_RECV_TIMEOUT", 0.3)
+
+    with _udp_association(proxy) as (control, _, _):
+        assert proxy.server.wait_for_connections(2)
+        assert sc.recv_until_eof(control) == b""

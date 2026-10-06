@@ -80,6 +80,9 @@ contain breaking changes, and each one is listed under **Breaking changes**.
 - A request now gets exactly one SOCKS reply. An error after the success reply (for example
   during a CONNECT tunnel) used to send a second, failure reply, injecting 10 bytes into the
   stream; it is now only logged.
+- A UDP association now ends as soon as its TCP control connection closes, as RFC 1928
+  requires. Before, its relay port kept relaying datagrams for up to 2 minutes after the client
+  disconnected. The 2-minute idle timeout stays, but only datagrams from the client reset it.
 
 ### Security
 - Usernames and passwords are compared in constant time, and both are always checked, so

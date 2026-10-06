@@ -1,5 +1,7 @@
+import select
 import socket
 import struct
+import threading
 import unittest
 from unittest.mock import MagicMock, patch
 
@@ -125,25 +127,82 @@ class TestUDPRelay(unittest.TestCase):
         self.assertEqual(relay.get_proxy_address().ip, "0.0.0.0")
         self.assertEqual(relay.get_proxy_address().port, 5000)
 
-    @patch("src.relays.udp_relay.generate_udp_socket")
-    def test_listen_and_relay_handles_socket_error(self, mock_gen_socket):
-        mock_proxy_sock = MagicMock()
-        mock_proxy_sock.getsockname.return_value = ("0.0.0.0", 5000)
-        mock_gen_socket.return_value = mock_proxy_sock
 
-        client_conn = MagicMock()
-        client_conn.getpeername.return_value = ("127.0.0.1", 1234)
-        dst = DetailedAddress(
-            name="test", ip="1.2.3.4", port=80,
-            address_type=AddressTypeCodes.IPv4,
-        )
-        relay = UDPRelay(client_conn, dst)
+JOIN_TIMEOUT = 2.0  # seconds
 
-        # recvfrom raises a socket error
-        mock_proxy_sock.recvfrom.side_effect = OSError("network down")
 
-        # Should not raise — error should be handled gracefully
-        relay.listen_and_relay()
+class TestListenAndRelay(unittest.TestCase):
+    """The association loop, on a real loopback control connection and UDP socket."""
+
+    def setUp(self):
+        with socket.create_server(("127.0.0.1", 0)) as listener:
+            self.control = socket.create_connection(listener.getsockname())
+            self.addCleanup(self.control.close)
+            accepted, _ = listener.accept()
+        self.addCleanup(accepted.close)
+        dst = DetailedAddress(name="test", ip="0.0.0.0", port=0, address_type=AddressTypeCodes.IPv4)
+        self.relay = UDPRelay(accepted, dst)
+        self.addCleanup(self.relay.proxy_connection.close)
+        self.relay_address = ("127.0.0.1", self.relay.get_proxy_port())
+
+    def start_relay(self) -> threading.Thread:
+        thread = threading.Thread(target=self.relay.listen_and_relay)
+        thread.start()
+        self.addCleanup(thread.join, JOIN_TIMEOUT)
+        return thread
+
+    def assert_relay_ends(self, thread: threading.Thread) -> None:
+        thread.join(JOIN_TIMEOUT)
+        self.assertFalse(thread.is_alive(), "association did not end")
+        self.assertEqual(self.relay.proxy_connection.fileno(), -1)
+
+    def send_datagrams(self, *datagrams: bytes) -> None:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as udp:
+            for datagram in datagrams:
+                udp.sendto(datagram, self.relay_address)
+
+    def test_control_close_ends_association(self):
+        thread = self.start_relay()
+        self.control.close()
+        self.assert_relay_ends(thread)
+
+    def test_control_reset_ends_association(self):
+        thread = self.start_relay()
+        self.control.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))
+        self.control.close()
+        self.assert_relay_ends(thread)
+
+    def test_control_data_ignored_then_close_ends(self):
+        thread = self.start_relay()
+        self.control.sendall(b"unexpected")
+        readable, _, _ = select.select([self.control], [], [], 0.2)
+        self.assertEqual(readable, [], "relay wrote to or closed the control connection")
+        self.assertTrue(thread.is_alive())
+        self.control.close()
+        self.assert_relay_ends(thread)
+
+    def test_idle_timeout_ends_association(self):
+        with patch("src.relays.udp_relay.UDP_RECV_TIMEOUT", 0.2):
+            thread = self.start_relay()
+            self.assert_relay_ends(thread)
+
+    def test_malformed_then_valid_forwards_valid(self):
+        forwarded = threading.Event()
+        with patch.object(self.relay, "_forward_packet", side_effect=lambda *_: forwarded.set()) as forward:
+            thread = self.start_relay()
+            self.send_datagrams(b"\x00\x00", build_udp_datagram("10.0.0.1", 53, b"hello"))
+            self.assertTrue(forwarded.wait(JOIN_TIMEOUT))
+            self.control.close()
+            self.assert_relay_ends(thread)
+        forward.assert_called_once()
+        self.assertEqual(forward.call_args[0][0].data, b"hello")
+
+    def test_relay_socket_error_ends_association(self):
+        self.relay.proxy_connection = MagicMock(wraps=self.relay.proxy_connection)
+        self.relay.proxy_connection.recvfrom.side_effect = OSError("network down")
+        thread = self.start_relay()
+        self.send_datagrams(b"readable")
+        self.assert_relay_ends(thread)
 
 
 if __name__ == "__main__":
