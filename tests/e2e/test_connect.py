@@ -75,3 +75,28 @@ def test_unsupported_command_replies_not_supported(proxy, echo_origin, cmd):
 
         assert sc.read_reply(sock).rep == sc.REP_COMMAND_NOT_SUPPORTED
         sc.assert_closed(sock)
+
+
+def _request_reply_code(proxy, request: bytes) -> int:
+    with proxy.connect() as sock:
+        assert sc.greet(sock, [sc.METHOD_NO_AUTH]) == sc.METHOD_NO_AUTH
+        sock.sendall(request)
+
+        rep = sc.read_reply(sock).rep
+        sc.assert_closed(sock)
+        return rep
+
+
+def test_unknown_atyp_replies_atyp_not_supported(proxy):
+    request = sc.build_request(sc.CMD_CONNECT, 0x05, b"\x7f\x00\x00\x01", 80)
+    assert _request_reply_code(proxy, request) == sc.REP_ATYP_NOT_SUPPORTED
+
+
+def test_nxdomain_replies_host_unreachable(proxy):
+    request = sc.build_request(sc.CMD_CONNECT, sc.ATYP_DOMAIN, "does-not-exist.invalid", 80)
+    assert _request_reply_code(proxy, request) == sc.REP_HOST_UNREACHABLE
+
+
+def test_non_utf8_domain_replies_host_unreachable(proxy):
+    request = sc.build_request(sc.CMD_CONNECT, sc.ATYP_DOMAIN, b"\x02\xff\xfe", 80)
+    assert _request_reply_code(proxy, request) == sc.REP_HOST_UNREACHABLE
