@@ -99,6 +99,10 @@ class TestStartupAdvisories(unittest.TestCase):
         self.assertIn("#security", text)
         self.assertIsNone(re.search(r"deprecat|future|will become", text, re.IGNORECASE))
 
+    def test_empty_host_named_as_all_interfaces(self):
+        text = "\n".join(message for _, message in startup_advisories("", False, False, False))
+        self.assertIn("listens on all interfaces.", text)
+
     def test_info_message_text(self):
         self.assertEqual(AUTH_EXPLICITLY_DISABLED_MESSAGE, "Authentication disabled by SOCKS5_AUTH_REQUIRED=false.")
 

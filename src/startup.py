@@ -59,7 +59,9 @@ def startup_advisories(
         if auth_explicitly_disabled:
             advisories.append((logging.INFO, AUTH_EXPLICITLY_DISABLED_MESSAGE))
         else:
-            advisories.extend((logging.WARNING, line.format(host=host)) for line in OPEN_PROXY_BANNER)
+            # An empty bind host means every interface; printing it verbatim would read "listens on ."
+            shown_host = host or "all interfaces"
+            advisories.extend((logging.WARNING, line.format(host=shown_host)) for line in OPEN_PROXY_BANNER)
     if default_credentials:
         advisories.append((logging.WARNING, DEFAULT_CREDENTIALS_MESSAGE))
     return advisories
