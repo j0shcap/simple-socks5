@@ -188,7 +188,7 @@ class TCPProxyServer(StreamRequestHandler):
 
         except Exception as e:
             if self._reply_sent:
-                logger.error(f"Relay failed for {dst_request.address}: {e}")
+                logger.error(f"Error after replying to the {dst_request.address} request: {e}")
                 return
             reply_code = reply_code_for(e)
             logger.error(f"{reply_code.name} for {dst_request.address}: {e}")
