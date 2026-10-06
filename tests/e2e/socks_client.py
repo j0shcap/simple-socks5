@@ -4,7 +4,7 @@ Raw SOCKS5 client for end-to-end tests (RFC 1928 + RFC 1929), stdlib only.
 Deliberately independent of ``src``: the constants are re-declared from the RFCs so a
 wrong constant in the code under test cannot hide behind a shared import.
 
-Public API (stable; later slices build on it):
+Public API (stable; regression tests build on it):
 
 Constants
     CMD_CONNECT, CMD_BIND, CMD_UDP_ASSOCIATE

@@ -24,7 +24,7 @@ def test_connect_domain_ipv4_literal_echo(proxy, echo_origin):
         _assert_echo(tunnel)
 
 
-@pytest.mark.xfail(strict=False, reason="F13: only the first getaddrinfo result is tried; localhost may be ::1")
+@pytest.mark.xfail(strict=False, reason="only the first getaddrinfo result is tried; localhost may be ::1")
 def test_connect_domain_localhost_echo(proxy, echo_origin):
     with sc.open_tunnel(proxy.address, "localhost", echo_origin.port) as tunnel:
         _assert_echo(tunnel)

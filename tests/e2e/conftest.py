@@ -4,7 +4,7 @@ End-to-end fixtures: the real proxy (src.server) and local origins, all in-proce
 Every e2e test gets a fresh proxy and fresh origins on port 0; nothing is shared between tests.
 Use tests/e2e/socks_client.py to talk to the proxy.
 
-Fixtures (stable; later slices build on them)
+Fixtures (stable public API; regression tests build on them)
     make_proxy(*, auth_required=False) -> ProxyHandle
         Sets SOCKS5_AUTH_REQUIRED / SOCKS5_USERNAME / SOCKS5_PASSWORD with monkeypatch, patches
         the import-time credentials in src.handlers.tcp, then starts the server. Env is set

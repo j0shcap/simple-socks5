@@ -4,7 +4,7 @@ from tests.e2e import socks_client as sc
 
 
 def test_udp_associate_echo(monkeypatch, proxy, udp_echo_origin):
-    # F8 workaround; remove in slice 8. The relay otherwise outlives the control connection by 120 s.
+    # The relay ignores control-connection close and only exits on its receive timeout (120 s).
     monkeypatch.setattr("src.relays.udp_relay.UDP_RECV_TIMEOUT", 0.5)
 
     with proxy.connect() as control, socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as udp:
