@@ -60,6 +60,9 @@ contain breaking changes, and each one is listed under **Breaking changes**.
   greeting, authentication and request must now arrive within `SOCKS5_HANDSHAKE_TIMEOUT`
   seconds in total; a client that is still sending is disconnected without a reply. The
   separate 45-second authentication timeout is gone.
+- Connection bursts: the listen backlog was 5, so on Linux clients connecting during a burst
+  waited 1 to 3 seconds for TCP retransmits before the proxy accepted them. It is now the
+  system maximum (`SOMAXCONN`).
 - Outbound connect timeout: CONNECT to an unreachable host waited for the OS default (75 s on
   macOS, about 2 minutes on Linux) and replied `0x01`. It now gives up after
   `SOCKS5_CONNECT_TIMEOUT` seconds and replies `0x04` (host unreachable).

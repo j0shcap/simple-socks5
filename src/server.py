@@ -31,6 +31,9 @@ class ThreadingTCPServer(ThreadingMixIn, TCPServer):
     """
 
     daemon_threads = True
+    # socketserver's default backlog of 5 overflows when many clients connect at once, and Linux then
+    # retransmits the dropped handshakes after 1 s, 3 s, ..., delaying both their accept and their rejection
+    request_queue_size = socket.SOMAXCONN
     _connection_semaphore = threading.BoundedSemaphore(MAX_CONNECTIONS)
 
     def process_request(self, request, client_address):

@@ -184,6 +184,15 @@ class TestSendErrorReply(unittest.TestCase):
         handler._send_error_reply(b"\x05\x01\x00\x01\x00\x00\x00\x00\x00\x00")
 
 
+class TestListenBacklog(unittest.TestCase):
+    def test_listens_with_somaxconn_backlog(self):
+        server = ThreadingTCPServer(("127.0.0.1", 0), TCPProxyServer, bind_and_activate=False)
+        self.addCleanup(server.server_close)
+        server.socket = MagicMock(spec=socket.socket)
+        server.server_activate()
+        server.socket.listen.assert_called_once_with(socket.SOMAXCONN)
+
+
 class TestConnectionTracking(unittest.TestCase):
     """Verify ThreadingTCPServer tracks in-flight requests so shutdown can drain or close them."""
 
