@@ -34,9 +34,13 @@ class ThreadingTCPServer(ThreadingMixIn, TCPServer):
 
     def process_request(self, request, client_address):
         if self._connection_semaphore.acquire(blocking=False):
+            # Tracked on the serving thread, not the handler thread, so a drain that starts once serve_forever()
+            # returns can't miss a request whose handler thread hasn't run yet.
+            self._track_request(request)
             try:
                 super().process_request(request, client_address)
             except Exception:
+                self._untrack_request(request)
                 self._connection_semaphore.release()
                 raise
         else:
@@ -50,15 +54,20 @@ class ThreadingTCPServer(ThreadingMixIn, TCPServer):
         self._active_cond = threading.Condition()
 
     def process_request_thread(self, request, client_address):
-        with self._active_cond:
-            self._active_requests.add(request)
         try:
             super().process_request_thread(request, client_address)
         finally:
-            with self._active_cond:
-                self._active_requests.discard(request)
-                self._active_cond.notify_all()
+            self._untrack_request(request)
             self._connection_semaphore.release()
+
+    def _track_request(self, request: socket.socket) -> None:
+        with self._active_cond:
+            self._active_requests.add(request)
+
+    def _untrack_request(self, request: socket.socket) -> None:
+        with self._active_cond:
+            self._active_requests.discard(request)
+            self._active_cond.notify_all()
 
     def wait_for_connections(self, timeout: float) -> bool:
         """

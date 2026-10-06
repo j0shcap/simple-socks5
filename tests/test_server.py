@@ -106,11 +106,30 @@ class TestConnectionTracking(unittest.TestCase):
         self.server._connection_semaphore = MagicMock()
 
     def _process(self, request, during=lambda: None):
+        """Accepts request and runs its handler synchronously instead of on a new thread."""
+        def start_handler(server, request, client_address):
+            server.process_request_thread(request, client_address)
+
         def handle(server, request, client_address):
             during()
 
-        with patch("socketserver.ThreadingMixIn.process_request_thread", handle):
-            self.server.process_request_thread(request, ("127.0.0.1", 9999))
+        with patch("socketserver.ThreadingMixIn.process_request", start_handler), \
+                patch("socketserver.ThreadingMixIn.process_request_thread", handle):
+            self.server.process_request(request, ("127.0.0.1", 9999))
+
+    def test_request_tracked_before_handler_thread_runs(self):
+        # A shutdown that drains right after serve_forever() returns must see a request whose handler
+        # thread has started but not yet run.
+        with patch("socketserver.ThreadingMixIn.process_request"):
+            self.server.process_request(MagicMock(spec=socket.socket), ("127.0.0.1", 9999))
+        self.assertFalse(self.server.wait_for_connections(0))
+
+    def test_request_untracked_when_handler_thread_fails_to_start(self):
+        with patch("socketserver.ThreadingMixIn.process_request", side_effect=RuntimeError("can't start thread")):
+            with self.assertRaises(RuntimeError):
+                self.server.process_request(MagicMock(spec=socket.socket), ("127.0.0.1", 9999))
+        self.assertTrue(self.server.wait_for_connections(0))
+        self.server._connection_semaphore.release.assert_called_once()
 
     def test_request_tracked_during_handling_and_removed_after(self):
         request = MagicMock(spec=socket.socket)
@@ -124,11 +143,12 @@ class TestConnectionTracking(unittest.TestCase):
         self.server._connection_semaphore.release.assert_called_once()
 
     def test_request_removed_when_handling_raises(self):
-        def fail():
-            raise RuntimeError("handler failed")
-
-        with self.assertRaises(RuntimeError):
-            self._process(MagicMock(spec=socket.socket), during=fail)
+        request = MagicMock(spec=socket.socket)
+        with patch("socketserver.ThreadingMixIn.process_request"):
+            self.server.process_request(request, ("127.0.0.1", 9999))
+        with patch("socketserver.ThreadingMixIn.process_request_thread", side_effect=RuntimeError("handler failed")):
+            with self.assertRaises(RuntimeError):
+                self.server.process_request_thread(request, ("127.0.0.1", 9999))
         self.assertTrue(self.server.wait_for_connections(0))
         self.server._connection_semaphore.release.assert_called_once()
 
