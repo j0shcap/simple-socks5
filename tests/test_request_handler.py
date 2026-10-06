@@ -1,3 +1,4 @@
+import logging
 import threading
 import unittest
 from unittest.mock import MagicMock, patch
@@ -431,6 +432,45 @@ class TestParseAddress(unittest.TestCase):
                 address = self.handler._parse_address(address_type.value)
                 self.assertEqual(address.port, 80)
                 self.assertEqual(self.events, ["recv"] * len(chunks) + ["lookup"])
+
+
+class TestHandshakeTimeout(unittest.TestCase):
+    """A handshake timeout closes quietly: no STATUS byte, and a warning without a traceback."""
+
+    def setUp(self):
+        self.connection = MagicMock()
+        self.handler = TCPHandler(self.connection)
+
+    def assert_quiet_warning(self, logs):
+        self.assertTrue(any(r.levelname == "WARNING" for r in logs.records))
+        self.assertFalse([r for r in logs.records if r.exc_info or r.levelno >= 40])
+
+    def test_auth_does_not_reset_socket_timeout(self):
+        self.connection.recv.side_effect = [b"\x01", b"\x01", b"u", b"\x01", b"p"]
+        self.handler._handle_username_password_auth()
+        self.connection.settimeout.assert_not_called()
+
+    def test_auth_timeout_returns_false_without_status(self):
+        self.connection.recv.side_effect = [b"\x01", HandshakeTimeoutError("expired")]
+        with self.assertLogs("src.handlers", level="DEBUG") as logs:
+            self.assertFalse(self.handler._handle_username_password_auth())
+        self.connection.sendall.assert_not_called()
+        self.assert_quiet_warning(logs)
+
+    def test_greeting_timeout_logs_warning_without_traceback(self):
+        self.connection.recv.side_effect = HandshakeTimeoutError("expired")
+        with self.assertLogs("src.handlers", level="DEBUG") as logs:
+            self.assertFalse(self.handler.handle_request())
+        self.connection.sendall.assert_not_called()
+        self.assert_quiet_warning(logs)
+
+    def test_request_timeout_propagates_without_traceback(self):
+        self.connection.recv.side_effect = [struct.pack("!BBBB", 5, 1, 0, 1), HandshakeTimeoutError("expired")]
+        with self.assertLogs("src.handlers", level="DEBUG") as logs, self.assertRaises(HandshakeTimeoutError):
+            # assertLogs needs at least one record; the handler itself must add none above DEBUG
+            logging.getLogger("src.handlers").debug("start")
+            self.handler.parse_request()
+        self.assertFalse([r for r in logs.records if r.exc_info or r.levelno >= 30])
 
 
 class TestAuthEnforcement(unittest.TestCase):

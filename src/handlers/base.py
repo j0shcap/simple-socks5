@@ -105,6 +105,8 @@ class BaseHandler:
 
             return Request(version=version, command=cmd, address=address)
 
+        except HandshakeTimeoutError:
+            raise  # Expected for stalled clients; the server logs it without a traceback
         except socket.error as e:
             logger.exception(f"Socket error during request parsing: {e}")
             raise
@@ -142,6 +144,8 @@ class BaseHandler:
                 address_type=map_address_int_to_enum(address_type),
             )
 
+        except HandshakeTimeoutError:
+            raise
         except socket.error as e:
             logger.exception(f"Socket error during address and port parsing: {e}")
             raise
