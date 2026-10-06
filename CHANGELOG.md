@@ -49,3 +49,5 @@ contain breaking changes, and each one is listed under **Breaking changes**.
 - Downloads were truncated when the client read slower than the origin sent: a full send
   buffer dropped the connection. The relay now waits for the slow side (up to 5 minutes per
   write), so the transfer completes.
+- TCP half-close: a client or server that closes its sending side still receives the reply.
+  Before, the first end-of-stream from either side closed the whole connection.

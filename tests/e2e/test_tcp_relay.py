@@ -1,5 +1,6 @@
 import hashlib
 import socket
+import threading
 import time
 
 from tests.e2e import socks_client as sc
@@ -9,6 +10,9 @@ SLOW_READER_SIZE = 20 * 1024 * 1024
 SLOW_READER_RATE = 10 * 1024 * 1024  # bytes/s; far below loopback, well inside the origin's 5 s sendall
 SLOW_READER_RCVBUF = 4096
 SLOW_READER_CHUNK = 16384
+BULK_SIZE = 10 * 1024 * 1024
+UPLOAD_SIZE = 1024 * 1024
+DISCONNECT_AFTER_BYTES = 256 * 1024
 
 
 def _sha256(data: bytes) -> str:
@@ -66,3 +70,74 @@ def test_large_single_send(proxy, http_origin):
         body = _http_body(sc.recv_until_eof(tunnel))
 
     assert _sha256(body) == _sha256(deterministic_payload(size))
+
+
+def test_half_close_from_client(proxy, half_close_origin):
+    with sc.open_tunnel(proxy.address, "127.0.0.1", half_close_origin.port) as tunnel:
+        tunnel.sendall(b"hello world")
+        tunnel.shutdown(socket.SHUT_WR)
+        assert sc.recv_until_eof(tunnel) == b"GOT 11 BYTES"
+
+
+def test_half_close_from_origin(proxy, reply_then_read_origin):
+    upload = deterministic_payload(UPLOAD_SIZE)
+    with sc.open_tunnel(proxy.address, "127.0.0.1", reply_then_read_origin.port) as tunnel:
+        assert sc.recv_until_eof(tunnel) == b"BANNER"
+        tunnel.sendall(upload)
+        tunnel.shutdown(socket.SHUT_WR)
+        assert reply_then_read_origin.results.get(timeout=sc.TIMEOUT) == _sha256(upload)
+
+
+def test_bidirectional_bulk(proxy, echo_origin):
+    upload = deterministic_payload(BULK_SIZE)
+    with sc.open_tunnel(proxy.address, "127.0.0.1", echo_origin.port) as tunnel:
+        def write():
+            tunnel.sendall(upload)
+            tunnel.shutdown(socket.SHUT_WR)
+
+        writer = threading.Thread(target=write, name="bulk-writer")
+        writer.start()
+        try:
+            echoed = sc.recv_until_eof(tunnel)
+        finally:
+            writer.join(sc.TIMEOUT)
+
+    assert not writer.is_alive()
+    assert len(echoed) == BULK_SIZE
+    assert _sha256(echoed) == _sha256(upload)
+
+
+def test_immediate_close_echo_returns_empty(proxy, echo_origin):
+    with sc.open_tunnel(proxy.address, "127.0.0.1", echo_origin.port) as tunnel:
+        tunnel.shutdown(socket.SHUT_WR)
+        assert sc.recv_until_eof(tunnel) == b""
+
+
+def test_immediate_close_half_close_origin_reports_zero(proxy, half_close_origin):
+    with sc.open_tunnel(proxy.address, "127.0.0.1", half_close_origin.port) as tunnel:
+        tunnel.shutdown(socket.SHUT_WR)
+        assert sc.recv_until_eof(tunnel) == b"GOT 0 BYTES"
+
+
+def test_tunnel_closed_immediately_leaks_nothing(proxy, echo_origin):
+    # The autouse leak guard fails the test if the relay thread or a socket is left behind
+    sc.open_tunnel(proxy.address, "127.0.0.1", echo_origin.port).close()
+
+
+def test_client_disconnect_closes_origin(proxy, streaming_origin):
+    with sc.open_tunnel(proxy.address, "127.0.0.1", streaming_origin.port) as tunnel:
+        sc.recv_exact(tunnel, DISCONNECT_AFTER_BYTES)
+        disconnected_at = time.monotonic()
+
+    assert streaming_origin.results.get(timeout=sc.TIMEOUT) - disconnected_at < 2.0
+
+
+def test_origin_reset_closes_client_promptly(proxy, reset_origin):
+    with sc.open_tunnel(proxy.address, "127.0.0.1", reset_origin.port) as tunnel:
+        try:
+            sc.recv_until_eof(tunnel)
+        except ConnectionResetError:
+            pass
+        closed_at = time.monotonic()
+
+    assert closed_at - reset_origin.results.get(timeout=sc.TIMEOUT) < 1.0

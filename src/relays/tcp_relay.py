@@ -54,11 +54,14 @@ class TCPRelay(BaseRelay):
     def listen_and_relay(self) -> None:
         """
         Relays data between the client socket and the remote socket.
-        """
 
+        EOF from one side is passed on as a half-close; relaying continues in the other direction
+        until it reaches EOF too.
+        """
+        open_readers = {self.client_connection, self.proxy_connection}
         try:
             self._prepare_sockets()
-            while True:
+            while open_readers:
                 events = self.selector.select(timeout=TCP_SELECTOR_TIMEOUT)
                 if not events:
                     if self.client_connection.fileno() == -1 or self.proxy_connection.fileno() == -1:
@@ -88,7 +91,9 @@ class TCPRelay(BaseRelay):
                     # Handle incoming data
                     data: bytes = self._recv_data(sock)
                     if not data:
-                        return
+                        self._half_close(sock, other_sock)
+                        open_readers.discard(sock)
+                        continue
 
                     # Blocks while the receiver is slow: that is the backpressure
                     self._send_data(other_sock, data)
@@ -112,6 +117,13 @@ class TCPRelay(BaseRelay):
         for sock in (self.client_connection, self.proxy_connection):
             sock.settimeout(RELAY_WRITE_TIMEOUT)
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+
+    def _half_close(self, eof_sock: socket.socket, other_sock: socket.socket) -> None:
+        """
+        Stops reading from the side that sent EOF and passes the EOF on to the other side.
+        """
+        self.selector.unregister(eof_sock)
+        other_sock.shutdown(socket.SHUT_WR)
 
     def _log_relay(
         self, src_addr: DetailedAddress, dst_addr: DetailedAddress, data_len: int
@@ -175,7 +187,7 @@ class TCPRelay(BaseRelay):
         for sock in [self.client_connection, self.proxy_connection]:
             try:
                 self.selector.unregister(sock)
-            except (OSError, ValueError):
+            except (OSError, ValueError, KeyError):
                 pass
         # Only close proxy_connection — client_connection is owned by the server
         try:
