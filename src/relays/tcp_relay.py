@@ -32,6 +32,10 @@ class TCPRelay(BaseRelay):
         try:
             self.generate_proxy_connection()
         except Exception:
+            # proxy_connection is unset if generate_tcp_socket itself raised
+            proxy_connection = getattr(self, "proxy_connection", None)
+            if proxy_connection is not None:
+                proxy_connection.close()
             self.selector.close()
             raise
 
