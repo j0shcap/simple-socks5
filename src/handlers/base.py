@@ -5,7 +5,13 @@ import time
 from typing import Optional
 
 from ..constants import SOCKS_VERSION, AddressTypeCodes, DNS_LOOKUP_TIMEOUT
-from ..exceptions import HandshakeTimeoutError, InvalidRequestError, InvalidVersionError
+from ..exceptions import (
+    AddressTypeNotSupportedError,
+    HandshakeTimeoutError,
+    InvalidDomainNameError,
+    InvalidRequestError,
+    InvalidVersionError,
+)
 from ..logger import get_logger
 from ..models import DetailedAddress, Request
 from ..utils import map_address_int_to_enum
@@ -104,23 +110,31 @@ class BaseHandler:
             raise
 
     def _parse_address(self, address_type: int) -> DetailedAddress:
+        # Every request byte, port included, is read before any DNS lookup, so a slow lookup never
+        # counts against the handshake deadline.
         try:
             if address_type == AddressTypeCodes.IPv4.value:
                 address: str = socket.inet_ntoa(self._recv_exact(4))
+                port = self._recv_port()
                 domain_name: str = self._gethostbyaddr(address)
             elif address_type == AddressTypeCodes.DOMAIN_NAME.value:
                 domain_length = self._recv_exact(1)[0]
-                domain_name = self._recv_exact(domain_length).decode()
+                raw_domain_name = self._recv_exact(domain_length)
+                port = self._recv_port()
+                try:
+                    domain_name = raw_domain_name.decode()
+                except UnicodeDecodeError as e:
+                    raise InvalidDomainNameError(raw_domain_name) from e
                 address, address_type = self._resolve_hostname(domain_name)
             elif address_type == AddressTypeCodes.IPv6.value:
                 address: str = socket.inet_ntop(
                     socket.AF_INET6, self._recv_exact(16)
                 )
+                port = self._recv_port()
                 domain_name: str = self._gethostbyaddr(address)
             else:
-                raise InvalidRequestError(address_type)
+                raise AddressTypeNotSupportedError(address_type)
 
-            port: int = struct.unpack("!H", self._recv_exact(2))[0]
             return DetailedAddress(
                 name=str(domain_name),
                 ip=address,
@@ -131,6 +145,9 @@ class BaseHandler:
         except socket.error as e:
             logger.exception(f"Socket error during address and port parsing: {e}")
             raise
+
+    def _recv_port(self) -> int:
+        return struct.unpack("!H", self._recv_exact(2))[0]
 
     def _dns_lookup_with_timeout(self, fn, label: str):
         """Run a DNS function on a daemon thread with timeout. Returns result or None."""

@@ -5,7 +5,13 @@ import struct
 import socket
 from src.handlers.base import BaseHandler
 from src.handlers.tcp import TCPHandler
-from src.exceptions import HandshakeTimeoutError, InvalidVersionError, InvalidRequestError
+from src.exceptions import (
+    AddressTypeNotSupportedError,
+    HandshakeTimeoutError,
+    InvalidDomainNameError,
+    InvalidRequestError,
+    InvalidVersionError,
+)
 from src.constants import AddressTypeCodes, MethodCodes
 from src.models import Request
 
@@ -379,6 +385,52 @@ class TestRecvExactDeadline(unittest.TestCase):
 
         self.assertEqual(handler._recv_exact(2), b"ab")
         self.connection.settimeout.assert_not_called()
+
+
+class TestParseAddress(unittest.TestCase):
+    """Typed errors for bad addresses, and every request byte read before any DNS lookup."""
+
+    def setUp(self):
+        self.events = []
+        self.connection = MagicMock()
+        self.handler = BaseHandler(self.connection)
+        self.handler._gethostbyaddr = lambda ip: self.events.append("lookup") or ip
+        self.handler._resolve_hostname = (
+            lambda name: self.events.append("lookup") or ("1.2.3.4", AddressTypeCodes.IPv4.value)
+        )
+
+    def feed(self, *chunks: bytes) -> None:
+        remaining = list(chunks)
+
+        def recv(n):
+            self.events.append("recv")
+            return remaining.pop(0)
+
+        self.connection.recv.side_effect = recv
+
+    def test_unknown_atyp_raises_address_type_not_supported(self):
+        with self.assertRaises(AddressTypeNotSupportedError) as caught:
+            self.handler._parse_address(0x05)
+        self.assertIsInstance(caught.exception, InvalidRequestError)
+
+    def test_non_utf8_domain_raises_invalid_domain_name(self):
+        self.feed(b"\x02", b"\xff\xfe", struct.pack("!H", 80))
+        with self.assertRaises(InvalidDomainNameError):
+            self.handler._parse_address(AddressTypeCodes.DOMAIN_NAME.value)
+
+    def test_port_read_before_lookup(self):
+        cases = {
+            AddressTypeCodes.IPv4: (socket.inet_aton("1.2.3.4"), struct.pack("!H", 80)),
+            AddressTypeCodes.IPv6: (socket.inet_pton(socket.AF_INET6, "::1"), struct.pack("!H", 80)),
+            AddressTypeCodes.DOMAIN_NAME: (b"\x07", b"example", struct.pack("!H", 80)),
+        }
+        for address_type, chunks in cases.items():
+            with self.subTest(address_type=address_type.name):
+                self.events.clear()
+                self.feed(*chunks)
+                address = self.handler._parse_address(address_type.value)
+                self.assertEqual(address.port, 80)
+                self.assertEqual(self.events, ["recv"] * len(chunks) + ["lookup"])
 
 
 class TestAuthEnforcement(unittest.TestCase):
