@@ -59,6 +59,25 @@ class TestTCPRelay(unittest.TestCase):
 
         mock_selector.close.assert_called_once()
 
+    @patch("src.relays.tcp_relay.selectors.DefaultSelector")
+    @patch("src.relays.tcp_relay.generate_tcp_socket")
+    def test_init_closes_proxy_socket_when_connect_fails(self, mock_gen_socket, mock_sel_cls):
+        mock_proxy_sock = MagicMock()
+        mock_proxy_sock.connect.side_effect = ConnectionRefusedError
+        mock_gen_socket.return_value = mock_proxy_sock
+
+        client_conn = MagicMock()
+        client_conn.getpeername.return_value = ("127.0.0.1", 1234)
+        dst = DetailedAddress(
+            name="test", ip="1.2.3.4", port=80,
+            address_type=AddressTypeCodes.IPv4,
+        )
+
+        with self.assertRaises(ConnectionRefusedError):
+            TCPRelay(client_conn, dst)
+
+        mock_proxy_sock.close.assert_called_once()
+
     def test_relay_data_eof_triggers_cleanup(self):
         relay, client, proxy, selector = self._create_relay()
 

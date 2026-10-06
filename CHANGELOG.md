@@ -29,3 +29,5 @@ contain breaking changes, and each one is listed under **Breaking changes**.
 ### Fixed
 - README: the default port is `1080`, not `9999`; removed the claim of configurable
   connection limits; the authentication example now sets `SOCKS5_AUTH_REQUIRED=true`.
+- The outbound socket leaked when a CONNECT target refused the connection; it is now closed
+  before the refusal reply is sent.
