@@ -6,6 +6,7 @@ from .server import (
 )
 from .logger import get_logger, update_loggers
 from .config import ProxyConfiguration
+from .startup import collect_startup_advisories
 
 logger = get_logger(__name__)
 
@@ -19,6 +20,9 @@ def main(args: Namespace):
     ProxyConfiguration.initialize(args.host, args.port, args.logging_level)
 
     update_loggers()
+
+    for level, message in collect_startup_advisories(ProxyConfiguration.get_host()):
+        logger.log(level, message)
 
     try:
         with ThreadingTCPServer(
