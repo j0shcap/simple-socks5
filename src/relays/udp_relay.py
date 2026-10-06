@@ -2,6 +2,7 @@ import socket
 
 from .base import BaseRelay
 from ..constants import RELAY_BUFFER_SIZE, UDP_RECV_TIMEOUT, UDP_FORWARD_TIMEOUT
+from ..exceptions import MalformedDatagramError
 from ..models import DetailedAddress, BaseAddress
 from ..logger import get_logger
 from ..handlers import UDPHandler
@@ -39,28 +40,7 @@ class UDPRelay(BaseRelay):
         try:
             while True:
                 data, addr = self.proxy_connection.recvfrom(RELAY_BUFFER_SIZE)
-
-                if addr[0] != self.expected_client_ip:
-                    logger.debug(
-                        f"(UDP) Dropped datagram from unauthorized source: {addr[0]}"
-                    )
-                    continue
-
-                datagram = UDPHandler.parse_udp_datagram(data)
-
-                if datagram.frag != 0:
-                    logger.debug(
-                        f"(UDP) Dropped fragmented datagram: {addr} -> "
-                        f"{datagram.dst_addr}:{datagram.dst_port}, "
-                        f"Size: {len(datagram.data)} bytes"
-                    )
-                    continue
-
-                try:
-                    self._forward_packet(datagram, addr)
-                except (ValueError, KeyError) as e:
-                    logger.debug(f"(UDP) Dropped unsupported datagram from {addr}: {e}")
-                    continue
+                self._handle_datagram(data, addr)
 
         except socket.timeout:
             logger.debug("UDP relay timed out waiting for data")
@@ -71,6 +51,38 @@ class UDPRelay(BaseRelay):
                 self.proxy_connection.close()
             except OSError:
                 pass
+
+    def _handle_datagram(self, data: bytes, addr: tuple) -> bool:
+        """
+        Forwards one datagram received on the relay socket, or drops it.
+
+        Returns whether it came from the client, which is what keeps the association alive.
+        """
+        if addr[0] != self.expected_client_ip:
+            logger.debug(
+                f"(UDP) Dropped datagram from unauthorized source: {addr[0]}"
+            )
+            return False
+
+        try:
+            datagram = UDPHandler.parse_udp_datagram(data)
+        except MalformedDatagramError as e:
+            logger.debug(f"(UDP) Dropped datagram from {addr}: {e}")
+            return True
+
+        if datagram.frag != 0:
+            logger.debug(
+                f"(UDP) Dropped fragmented datagram: {addr} -> "
+                f"{datagram.dst_addr}:{datagram.dst_port}, "
+                f"Size: {len(datagram.data)} bytes"
+            )
+            return True
+
+        try:
+            self._forward_packet(datagram, addr)
+        except (ValueError, KeyError, OSError) as e:
+            logger.debug(f"(UDP) Dropped unsupported datagram from {addr}: {e}")
+        return True
 
     def _forward_packet(self, datagram, client_addr: tuple) -> None:
         with socket.socket(

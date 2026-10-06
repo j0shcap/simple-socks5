@@ -46,6 +46,66 @@ class TestBuildUDPResponseHeader(unittest.TestCase):
             UDPHandler.build_udp_response_header("not-an-ip", 80)
 
 
+CLIENT_ADDR = ("127.0.0.1", 1234)
+
+
+@patch("src.relays.udp_relay.generate_udp_socket")
+def make_relay(mock_gen_socket) -> UDPRelay:
+    """A relay on a mock UDP socket whose client is 127.0.0.1."""
+    mock_gen_socket.return_value.getsockname.return_value = ("0.0.0.0", 5000)
+    client_conn = MagicMock()
+    client_conn.getpeername.return_value = CLIENT_ADDR
+    dst = DetailedAddress(name="test", ip="1.2.3.4", port=80, address_type=AddressTypeCodes.IPv4)
+    return UDPRelay(client_conn, dst)
+
+
+def mock_forward_socket(response: bytes = b"response", remote_addr: tuple = ("10.0.0.1", 53)) -> MagicMock:
+    forward_socket = MagicMock()
+    forward_socket.recvfrom.return_value = (response, remote_addr)
+    forward_socket.__enter__.return_value = forward_socket
+    return forward_socket
+
+
+class TestHandleDatagram(unittest.TestCase):
+    def setUp(self):
+        self.relay = make_relay()
+
+    def test_valid_datagram_forwarded_and_encapsulated(self):
+        forward_socket = mock_forward_socket()
+        with patch("src.relays.udp_relay.socket.socket", return_value=forward_socket):
+            self.assertTrue(self.relay._handle_datagram(build_udp_datagram("10.0.0.1", 53, b"hello"), CLIENT_ADDR))
+
+        forward_socket.sendto.assert_called_once_with(b"hello", ("10.0.0.1", 53))
+        # RSV(2) + FRAG(1) + ATYP(1)=IPv4 + ADDR(4) + PORT(2) + DATA
+        expected = b"\x00\x00\x00\x01" + socket.inet_aton("10.0.0.1") + struct.pack("!H", 53) + b"response"
+        self.relay.proxy_connection.sendto.assert_called_once_with(expected, CLIENT_ADDR)
+
+    def test_foreign_source_dropped_returns_false(self):
+        """RFC 1928 Section 7: drop datagrams from IPs other than the client."""
+        with patch("src.relays.udp_relay.socket.socket") as socket_class:
+            self.assertFalse(self.relay._handle_datagram(build_udp_datagram("10.0.0.1", 53, b"x"), ("192.168.1.99", 5)))
+        socket_class.assert_not_called()
+
+    def test_fragmented_dropped(self):
+        with patch("src.relays.udp_relay.socket.socket") as socket_class:
+            self.assertTrue(self.relay._handle_datagram(build_udp_datagram("10.0.0.1", 53, b"x", frag=1), CLIENT_ADDR))
+        socket_class.assert_not_called()
+
+    def test_malformed_dropped_with_debug_log(self):
+        for data in (b"\x00\x05", b"\x00\x01" + build_udp_datagram("10.0.0.1", 53, b"x")[2:], b"\x00\x00\x00\x09"):
+            with self.subTest(data=data), patch("src.relays.udp_relay.socket.socket") as socket_class, \
+                    self.assertLogs("src.relays", level="DEBUG") as logs:
+                self.assertTrue(self.relay._handle_datagram(data, CLIENT_ADDR))
+            socket_class.assert_not_called()
+            self.assertIn("malformed UDP datagram", logs.output[0])
+
+    def test_forward_oserror_dropped(self):
+        forward_socket = mock_forward_socket()
+        forward_socket.sendto.side_effect = PermissionError(13, "Permission denied")
+        with patch("src.relays.udp_relay.socket.socket", return_value=forward_socket):
+            self.assertTrue(self.relay._handle_datagram(build_udp_datagram("255.255.255.255", 53, b"x"), CLIENT_ADDR))
+
+
 class TestUDPRelay(unittest.TestCase):
     @patch("src.relays.udp_relay.generate_udp_socket")
     def test_init_creates_and_binds_socket(self, mock_gen_socket):
@@ -66,80 +126,6 @@ class TestUDPRelay(unittest.TestCase):
         self.assertEqual(relay.get_proxy_address().port, 5000)
 
     @patch("src.relays.udp_relay.generate_udp_socket")
-    def test_listen_and_relay_forwards_packet(self, mock_gen_socket):
-        mock_proxy_sock = MagicMock()
-        mock_proxy_sock.getsockname.return_value = ("0.0.0.0", 5000)
-        mock_gen_socket.return_value = mock_proxy_sock
-
-        client_conn = MagicMock()
-        client_conn.getpeername.return_value = ("127.0.0.1", 1234)
-        dst = DetailedAddress(
-            name="test", ip="1.2.3.4", port=80,
-            address_type=AddressTypeCodes.IPv4,
-        )
-        relay = UDPRelay(client_conn, dst)
-
-        # Build a valid UDP datagram
-        datagram = build_udp_datagram("10.0.0.1", 53, b"hello")
-        client_addr = ("127.0.0.1", 1234)
-
-        # First recvfrom returns the datagram, second raises timeout to exit loop
-        mock_proxy_sock.recvfrom.side_effect = [
-            (datagram, client_addr),
-            socket.timeout("done"),
-        ]
-
-        # Mock the forward socket created inside listen_and_relay
-        mock_fwd_sock = MagicMock()
-        mock_fwd_sock.recvfrom.return_value = (b"response", ("10.0.0.1", 53))
-        mock_fwd_sock.__enter__ = MagicMock(return_value=mock_fwd_sock)
-        mock_fwd_sock.__exit__ = MagicMock(return_value=False)
-
-        with patch("src.relays.udp_relay.socket.socket", return_value=mock_fwd_sock):
-            relay.listen_and_relay()
-
-        # Verify data was sent to correct destination
-        mock_fwd_sock.sendto.assert_called_once_with(b"hello", ("10.0.0.1", 53))
-        # Verify response was SOCKS5-encapsulated before sending back to client
-        sent_data = mock_proxy_sock.sendto.call_args[0][0]
-        # RSV(2) + FRAG(1) + ATYP(1)=IPv4 + ADDR(4) + PORT(2) + DATA
-        expected_header = (
-            b"\x00\x00\x00\x01"
-            + socket.inet_aton("10.0.0.1")
-            + struct.pack("!H", 53)
-        )
-        self.assertTrue(sent_data.startswith(expected_header))
-        self.assertTrue(sent_data.endswith(b"response"))
-
-    @patch("src.relays.udp_relay.generate_udp_socket")
-    def test_listen_and_relay_drops_fragmented_datagrams(self, mock_gen_socket):
-        mock_proxy_sock = MagicMock()
-        mock_proxy_sock.getsockname.return_value = ("0.0.0.0", 5000)
-        mock_gen_socket.return_value = mock_proxy_sock
-
-        client_conn = MagicMock()
-        client_conn.getpeername.return_value = ("127.0.0.1", 1234)
-        dst = DetailedAddress(
-            name="test", ip="1.2.3.4", port=80,
-            address_type=AddressTypeCodes.IPv4,
-        )
-        relay = UDPRelay(client_conn, dst)
-
-        # Build a fragmented datagram (frag != 0)
-        frag_datagram = build_udp_datagram("10.0.0.1", 53, b"data", frag=1)
-        client_addr = ("127.0.0.1", 1234)
-
-        mock_proxy_sock.recvfrom.side_effect = [
-            (frag_datagram, client_addr),
-            socket.timeout("done"),
-        ]
-
-        with patch("src.relays.udp_relay.socket.socket") as mock_socket_cls:
-            relay.listen_and_relay()
-            # Should NOT have created any forward socket for fragmented datagram
-            mock_socket_cls.assert_not_called()
-
-    @patch("src.relays.udp_relay.generate_udp_socket")
     def test_listen_and_relay_handles_socket_error(self, mock_gen_socket):
         mock_proxy_sock = MagicMock()
         mock_proxy_sock.getsockname.return_value = ("0.0.0.0", 5000)
@@ -158,35 +144,6 @@ class TestUDPRelay(unittest.TestCase):
 
         # Should not raise — error should be handled gracefully
         relay.listen_and_relay()
-
-    @patch("src.relays.udp_relay.generate_udp_socket")
-    def test_listen_and_relay_drops_wrong_source_ip(self, mock_gen_socket):
-        """RFC 1928 Section 7: drop datagrams from IPs other than the client."""
-        mock_proxy_sock = MagicMock()
-        mock_proxy_sock.getsockname.return_value = ("0.0.0.0", 5000)
-        mock_gen_socket.return_value = mock_proxy_sock
-
-        client_conn = MagicMock()
-        client_conn.getpeername.return_value = ("127.0.0.1", 1234)
-        dst = DetailedAddress(
-            name="test", ip="1.2.3.4", port=80,
-            address_type=AddressTypeCodes.IPv4,
-        )
-        relay = UDPRelay(client_conn, dst)
-
-        # Build a valid datagram but from wrong source IP
-        datagram = build_udp_datagram("10.0.0.1", 53, b"injected")
-        wrong_addr = ("192.168.1.99", 5555)
-
-        mock_proxy_sock.recvfrom.side_effect = [
-            (datagram, wrong_addr),
-            socket.timeout("done"),
-        ]
-
-        with patch("src.relays.udp_relay.socket.socket") as mock_socket_cls:
-            relay.listen_and_relay()
-            # Should NOT have forwarded the packet from wrong source
-            mock_socket_cls.assert_not_called()
 
 
 if __name__ == "__main__":

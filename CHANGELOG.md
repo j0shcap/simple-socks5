@@ -73,6 +73,10 @@ contain breaking changes, and each one is listed under **Breaking changes**.
 - Accurate SOCKS reply codes (RFC 1928): network unreachable replies `0x03`, host unreachable
   and connect timeouts `0x04`, an unknown address type `0x08`, and a domain name that isn't
   valid UTF-8 `0x04`. These all replied `0x01` before.
+- A malformed UDP datagram (too short, a non-zero reserved field, an unknown address type or a
+  truncated address) ended the UDP association and sent a stray failure reply on its control
+  connection; a single spoofed datagram was enough. It is now dropped and the association keeps
+  working. A datagram to a destination that can't be sent to (such as port 0) is dropped too.
 
 ### Security
 - Usernames and passwords are compared in constant time, and both are always checked, so
