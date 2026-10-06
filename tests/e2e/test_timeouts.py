@@ -10,7 +10,7 @@ from contextlib import ExitStack, contextmanager
 
 import pytest
 
-from src.server import MAX_CONNECTIONS
+from src.constants import DEFAULT_MAX_CONNECTIONS
 from tests.e2e import socks_client as sc
 from tests.e2e.conftest import E2E_PASSWORD, E2E_USERNAME
 
@@ -49,9 +49,9 @@ def test_idle_connection_closed(monkeypatch, proxy):
 def test_flood_slots_freed(monkeypatch, proxy, echo_origin):
     monkeypatch.setenv("SOCKS5_HANDSHAKE_TIMEOUT", "1.0")
     # Client and server ends of every idle connection share this process's fd table
-    with _fd_limit_at_least(4 * MAX_CONNECTIONS + 256), ExitStack() as stack:
+    with _fd_limit_at_least(4 * DEFAULT_MAX_CONNECTIONS + 256), ExitStack() as stack:
         started = time.monotonic()
-        idle = [stack.enter_context(proxy.connect()) for _ in range(MAX_CONNECTIONS)]
+        idle = [stack.enter_context(proxy.connect()) for _ in range(DEFAULT_MAX_CONNECTIONS)]
         with proxy.connect() as rejected:
             sc.assert_closed(rejected)
 

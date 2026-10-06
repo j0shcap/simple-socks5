@@ -3,7 +3,13 @@ import threading
 import time
 from socketserver import StreamRequestHandler, ThreadingMixIn, TCPServer
 
-from .constants import AddressTypeCodes, CommandCodes, handshake_timeout
+from .constants import (
+    CONNECTION_LIMIT_WARNING_INTERVAL,
+    AddressTypeCodes,
+    CommandCodes,
+    handshake_timeout,
+    max_connections,
+)
 from .errors import reply_code_for
 from .exceptions import HandshakeTimeoutError
 from .handlers import TCPHandler
@@ -20,9 +26,6 @@ from .models import Request, DetailedAddress
 logger = get_logger(__name__)
 
 
-MAX_CONNECTIONS = 200
-
-
 class ThreadingTCPServer(ThreadingMixIn, TCPServer):
     """
     A threading version of a TCP server with a connection limit.
@@ -34,7 +37,6 @@ class ThreadingTCPServer(ThreadingMixIn, TCPServer):
     # socketserver's default backlog of 5 overflows when many clients connect at once, and Linux then
     # retransmits the dropped handshakes after 1 s, 3 s, ..., delaying both their accept and their rejection
     request_queue_size = socket.SOMAXCONN
-    _connection_semaphore = threading.BoundedSemaphore(MAX_CONNECTIONS)
 
     def process_request(self, request, client_address):
         if self._connection_semaphore.acquire(blocking=False):
@@ -48,14 +50,34 @@ class ThreadingTCPServer(ThreadingMixIn, TCPServer):
                 self._connection_semaphore.release()
                 raise
         else:
-            logger.warning("Connection limit reached, rejecting connection")
-            self.shutdown_request(request)
+            self._reject_request(request)
 
     def __init__(self, *args, **kwargs):
+        # Read before binding, so an invalid value can't leave a listening socket behind
+        self.max_connections = max_connections()
+        self._connection_semaphore = threading.BoundedSemaphore(self.max_connections)
+        # Only touched by process_request(), which socketserver calls from the serving thread alone
+        self._rejected_since_warning = 0
+        self._next_limit_warning = 0.0
         super().__init__(*args, **kwargs)
         # Daemon request threads aren't tracked by ThreadingMixIn, so track their sockets for shutdown.
         self._active_requests: set[socket.socket] = set()
         self._active_cond = threading.Condition()
+
+    def _reject_request(self, request) -> None:
+        """
+        Closes a connection over the limit, warning at most once per CONNECTION_LIMIT_WARNING_INTERVAL.
+        """
+        self._rejected_since_warning += 1
+        now = time.monotonic()
+        if now >= self._next_limit_warning:
+            logger.warning(
+                f"Connection limit of {self.max_connections} reached: rejected "
+                f"{self._rejected_since_warning} connection(s) since the last warning"
+            )
+            self._rejected_since_warning = 0
+            self._next_limit_warning = now + CONNECTION_LIMIT_WARNING_INTERVAL
+        self.shutdown_request(request)
 
     def process_request_thread(self, request, client_address):
         try:

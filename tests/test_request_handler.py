@@ -1,4 +1,6 @@
+import hmac
 import logging
+import os
 import threading
 import unittest
 from unittest.mock import MagicMock, patch
@@ -33,8 +35,17 @@ RESP_LOGIN_SUCCESS = b"\x01\x00"
 RESP_LOGIN_FAILURE = b"\x01\x01"
 
 
+def strip_socks5_env(test: unittest.TestCase, **environ) -> None:
+    """Runs the test with no SOCKS5_* variables from the outer environment, plus the given ones."""
+    clean = {k: v for k, v in os.environ.items() if not k.startswith("SOCKS5_")}
+    patcher = patch.dict(os.environ, {**clean, **environ}, clear=True)
+    patcher.start()
+    test.addCleanup(patcher.stop)
+
+
 class TestTCPRequestHandlerIPv4(unittest.TestCase):
     def setUp(self):
+        strip_socks5_env(self)
         self.connection = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.handler = TCPHandler(self.connection)
 
@@ -471,6 +482,103 @@ class TestHandshakeTimeout(unittest.TestCase):
             logging.getLogger("src.handlers").debug("start")
             self.handler.parse_request()
         self.assertFalse([r for r in logs.records if r.exc_info or r.levelno >= 30])
+
+
+def userpass_frame(username: bytes, password: bytes) -> list[bytes]:
+    """The RFC 1929 request as the separate reads the handler makes; empty fields are never read."""
+    chunks = [b"\x01", bytes([len(username)]), username, bytes([len(password)]), password]
+    return [chunk for chunk in chunks if chunk]
+
+
+class TestUsernamePasswordAuth(unittest.TestCase):
+    CLIENT_IP = "203.0.113.7"
+
+    def setUp(self):
+        strip_socks5_env(self, SOCKS5_USERNAME="alice", SOCKS5_PASSWORD="s3cret")
+        self.connection = MagicMock()
+        self.connection.getpeername.return_value = (self.CLIENT_IP, 5555)
+        self.handler = TCPHandler(self.connection)
+
+    def authenticate(self, username: bytes, password: bytes) -> bool:
+        self.connection.recv.side_effect = userpass_frame(username, password)
+        return self.handler._handle_username_password_auth()
+
+    def assert_rejected(self, username: bytes, password: bytes):
+        with self.assertLogs("src.handlers", level="DEBUG") as logs:
+            self.assertFalse(self.authenticate(username, password))
+        self.connection.sendall.assert_called_once_with(RESP_LOGIN_FAILURE)
+        # The whole frame was read, so closing sends FIN rather than RST
+        self.assertEqual(self.connection.recv.call_count, len(userpass_frame(username, password)))
+        self.assertFalse([r for r in logs.records if r.exc_info])
+        return logs
+
+    def test_correct_credentials_succeed(self):
+        self.assertTrue(self.authenticate(b"alice", b"s3cret"))
+        self.connection.sendall.assert_called_once_with(RESP_LOGIN_SUCCESS)
+
+    def test_wrong_username_fails(self):
+        self.assert_rejected(b"mallory", b"s3cret")
+
+    def test_wrong_password_fails(self):
+        self.assert_rejected(b"alice", b"guess")
+
+    def test_both_wrong_fails(self):
+        self.assert_rejected(b"mallory", b"guess")
+
+    def test_empty_username_fails_and_consumes_frame(self):
+        self.assert_rejected(b"", b"s3cret")
+
+    def test_empty_password_fails_and_consumes_frame(self):
+        self.assert_rejected(b"alice", b"")
+
+    def test_empty_credentials_rejected_even_when_configured_empty(self):
+        strip_socks5_env(self, SOCKS5_USERNAME="", SOCKS5_PASSWORD="")
+        self.assert_rejected(b"", b"")
+
+    def test_non_utf8_username_fails_without_exception(self):
+        # The audit repro: VER=1, ULEN=2, UNAME=ff fe, PLEN=1, PASSWD="a"
+        self.connection.recv.side_effect = [b"\x01", b"\x02", b"\xff\xfe", b"\x01", b"a"]
+        self.assertFalse(self.handler._handle_username_password_auth())
+        self.connection.sendall.assert_called_once_with(RESP_LOGIN_FAILURE)
+
+    def test_non_utf8_password_fails_without_exception(self):
+        self.assert_rejected(b"alice", b"\xff\xfe")
+
+    def test_compare_digest_called_for_both_fields_even_on_wrong_username(self):
+        with patch("src.handlers.tcp.hmac.compare_digest", wraps=hmac.compare_digest) as spy:
+            self.assertFalse(self.authenticate(b"mallory", b"s3cret"))
+        self.assertEqual(spy.call_count, 2)
+
+    def test_password_change_after_import_honoured(self):
+        with patch.dict(os.environ, {"SOCKS5_PASSWORD": "rotated"}):
+            self.assertFalse(self.authenticate(b"alice", b"s3cret"))
+            self.connection.reset_mock()
+            self.connection.getpeername.return_value = (self.CLIENT_IP, 5555)
+            self.assertTrue(self.authenticate(b"alice", b"rotated"))
+
+    def test_failure_log_has_ip_not_username_or_password(self):
+        logs = self.assert_rejected(b"mallory", b"guess")
+        messages = "\n".join(r.getMessage() for r in logs.records)
+        self.assertIn(self.CLIENT_IP, messages)
+        for secret in ("mallory", "guess", "s3cret"):
+            self.assertNotIn(secret, messages)
+
+    def test_failure_log_survives_disconnected_peer(self):
+        self.connection.getpeername.side_effect = OSError("not connected")
+        logs = self.assert_rejected(b"mallory", b"guess")
+        self.assertIn("unknown", "\n".join(r.getMessage() for r in logs.records))
+
+    def test_success_logs_configured_username_never_password(self):
+        with self.assertLogs("src.handlers", level="DEBUG") as logs:
+            self.assertTrue(self.authenticate(b"alice", b"s3cret"))
+        messages = "\n".join(r.getMessage() for r in logs.records)
+        self.assertIn("alice", messages)
+        self.assertNotIn("s3cret", messages)
+
+    def test_utf8_password_succeeds(self):
+        strip_socks5_env(self, SOCKS5_USERNAME="alice", SOCKS5_PASSWORD="pässwörd")
+        self.assertTrue(self.authenticate(b"alice", "pässwörd".encode()))
+        self.connection.sendall.assert_called_once_with(RESP_LOGIN_SUCCESS)
 
 
 class TestAuthEnforcement(unittest.TestCase):

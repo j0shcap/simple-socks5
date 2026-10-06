@@ -5,10 +5,7 @@ import itertools
 import logging
 import os
 import re
-import subprocess
-import sys
 import unittest
-from pathlib import Path
 from unittest.mock import patch
 
 from src.startup import (
@@ -22,8 +19,6 @@ from src.startup import (
     uses_default_credentials,
     validate_environment,
 )
-
-REPO_ROOT = Path(__file__).resolve().parent.parent
 
 LOOPBACK_HOSTS = ("localhost", "LOCALHOST", "127.0.0.1", "127.1.2.3", "::1", "::ffff:127.0.0.1")
 EXPOSED_HOSTS = (
@@ -134,10 +129,10 @@ class TestAuthExplicitlyDisabled(unittest.TestCase):
 
 class TestUsesDefaultCredentials(unittest.TestCase):
     def test_both_default(self):
-        self.assertTrue(uses_default_credentials("myusername", "mypassword"))
+        self.assertTrue(uses_default_credentials(b"myusername", b"mypassword"))
 
     def test_any_custom(self):
-        for username, password in (("admin", "mypassword"), ("myusername", "s3cret"), ("admin", "s3cret")):
+        for username, password in ((b"admin", b"mypassword"), (b"myusername", b"s3cret"), (b"admin", b"s3cret")):
             with self.subTest(username=username, password=password):
                 self.assertFalse(uses_default_credentials(username, password))
 
@@ -145,9 +140,8 @@ class TestUsesDefaultCredentials(unittest.TestCase):
 class TestCollectStartupAdvisories(unittest.TestCase):
     def collect(self, host, environ, username="myusername", password="mypassword"):
         clean = {k: v for k, v in os.environ.items() if not k.startswith("SOCKS5_")}
-        with patch.dict(os.environ, {**clean, **environ}, clear=True), \
-                patch("src.constants.USERNAME", username), \
-                patch("src.constants.PASSWORD", password):
+        credentials = {"SOCKS5_USERNAME": username, "SOCKS5_PASSWORD": password}
+        with patch.dict(os.environ, {**clean, **credentials, **environ}, clear=True):
             return collect_startup_advisories(host)
 
     def test_no_env_on_all_interfaces_warns_banner_and_default_credentials(self):
@@ -169,18 +163,6 @@ class TestCollectStartupAdvisories(unittest.TestCase):
         )
 
 
-class TestDefaultsMatchConstants(unittest.TestCase):
-    def test_defaults_match_constants(self):
-        """startup.py mirrors the credential fallbacks in constants.py; checked in a fresh interpreter."""
-        environ = {k: v for k, v in os.environ.items() if not k.startswith("SOCKS5_")}
-        code = (
-            "from src import constants, startup; "
-            "assert (constants.USERNAME, constants.PASSWORD) == (startup.DEFAULT_USERNAME, startup.DEFAULT_PASSWORD)"
-        )
-        result = subprocess.run([sys.executable, "-c", code], cwd=REPO_ROOT, env=environ, capture_output=True)
-        self.assertEqual(result.returncode, 0, result.stderr.decode())
-
-
 class TestValidateEnvironment(unittest.TestCase):
     def test_validate_environment_ok_with_defaults(self):
         environ = {k: v for k, v in os.environ.items() if not k.startswith("SOCKS5_")}
@@ -191,6 +173,12 @@ class TestValidateEnvironment(unittest.TestCase):
         for name in ("SOCKS5_HANDSHAKE_TIMEOUT", "SOCKS5_CONNECT_TIMEOUT"):
             with self.subTest(name=name), patch.dict(os.environ, {name: "abc"}):
                 with self.assertRaisesRegex(ValueError, name):
+                    validate_environment()
+
+    def test_rejects_invalid_max_connections(self):
+        for raw in ("0", "abc"):
+            with self.subTest(raw=raw), patch.dict(os.environ, {"SOCKS5_MAX_CONNECTIONS": raw}):
+                with self.assertRaisesRegex(ValueError, "SOCKS5_MAX_CONNECTIONS must be a positive integer"):
                     validate_environment()
 
 

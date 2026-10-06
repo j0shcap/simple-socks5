@@ -13,7 +13,9 @@ from src.constants import (
     CommandCodes,
     RELAY_BUFFER_SIZE,
     connect_timeout,
+    credentials,
     handshake_timeout,
+    max_connections,
 )
 
 TIMEOUT_GETTERS = (
@@ -130,6 +132,62 @@ class TestTimeoutEnv(unittest.TestCase):
                     self.assertEqual(getter(), 1.0)
                 with patch.dict(os.environ, {name: "3"}):
                     self.assertEqual(getter(), 3.0)
+
+
+def _without_socks5_env():
+    environ = {k: v for k, v in os.environ.items() if not k.startswith("SOCKS5_")}
+    return patch.dict(os.environ, environ, clear=True)
+
+
+class TestMaxConnectionsEnv(unittest.TestCase):
+    def setUp(self):
+        patcher = _without_socks5_env()
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_max_connections_default_is_200(self):
+        self.assertEqual(max_connections(), 200)
+
+    def test_max_connections_reads_env(self):
+        with patch.dict(os.environ, {"SOCKS5_MAX_CONNECTIONS": "5"}):
+            self.assertEqual(max_connections(), 5)
+
+    def test_max_connections_blank_uses_default(self):
+        for raw in ("", "  "):
+            with self.subTest(raw=raw), patch.dict(os.environ, {"SOCKS5_MAX_CONNECTIONS": raw}):
+                self.assertEqual(max_connections(), 200)
+
+    def test_max_connections_rejects_invalid(self):
+        for raw in ("0", "-3", "abc", "1.5"):
+            with self.subTest(raw=raw), patch.dict(os.environ, {"SOCKS5_MAX_CONNECTIONS": raw}):
+                with self.assertRaisesRegex(
+                    ValueError, f"SOCKS5_MAX_CONNECTIONS must be a positive integer, got '{raw}'"
+                ):
+                    max_connections()
+
+
+class TestCredentialsEnv(unittest.TestCase):
+    def setUp(self):
+        patcher = _without_socks5_env()
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_credentials_defaults(self):
+        self.assertEqual(credentials(), (b"myusername", b"mypassword"))
+
+    def test_credentials_utf8(self):
+        with patch.dict(os.environ, {"SOCKS5_USERNAME": "üser", "SOCKS5_PASSWORD": "pässwörd"}):
+            self.assertEqual(credentials(), ("üser".encode(), "pässwörd".encode()))
+
+    def test_credentials_read_at_call_time(self):
+        with patch.dict(os.environ, {"SOCKS5_PASSWORD": "first"}):
+            self.assertEqual(credentials()[1], b"first")
+        with patch.dict(os.environ, {"SOCKS5_PASSWORD": "second"}):
+            self.assertEqual(credentials()[1], b"second")
+
+    def test_credentials_empty_env_stays_empty(self):
+        with patch.dict(os.environ, {"SOCKS5_USERNAME": "", "SOCKS5_PASSWORD": ""}):
+            self.assertEqual(credentials(), (b"", b""))
 
 
 if __name__ == '__main__':

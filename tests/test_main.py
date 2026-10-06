@@ -80,9 +80,8 @@ class TestMainStartupAdvisories(unittest.TestCase):
         credentials = (("myusername", "mypassword"), ("admin", "p@ss:w0rd/%s\"'{}\\ü"))
         for (username, password), auth_required in [(c, a) for c in credentials for a in ("true", "false")]:
             with self.subTest(username=username, auth_required=auth_required), \
-                    patch.dict(os.environ, {"SOCKS5_AUTH_REQUIRED": auth_required}), \
-                    patch("src.constants.USERNAME", username), \
-                    patch("src.constants.PASSWORD", password):
+                    patch.dict(os.environ, {"SOCKS5_AUTH_REQUIRED": auth_required,
+                                            "SOCKS5_USERNAME": username, "SOCKS5_PASSWORD": password}):
                 output = self.run_main(logging_level="debug")
                 self.assertIn("Server started", output)
                 self.assertNotIn(password, output)
@@ -120,6 +119,17 @@ class TestMainStartupAdvisories(unittest.TestCase):
         self.assertNotIn(caught.exception.code, (0, None))
         self.assertIn("SOCKS5_HANDSHAKE_TIMEOUT", str(caught.exception.code))
         self.server_class.assert_not_called()
+
+    def test_invalid_max_connections_exits_with_message(self):
+        for raw in ("0", "abc"):
+            with self.subTest(raw=raw), patch.dict(os.environ, {"SOCKS5_MAX_CONNECTIONS": raw}), \
+                    self.assertRaises(SystemExit) as caught:
+                self.run_main(logging_level="disabled")
+            self.assertEqual(
+                caught.exception.code,
+                f"Invalid configuration: SOCKS5_MAX_CONNECTIONS must be a positive integer, got '{raw}'",
+            )
+            self.server_class.assert_not_called()
 
 
 class FakeClock:

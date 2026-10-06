@@ -8,10 +8,7 @@ import os
 from typing import Mapping
 
 from . import constants
-
-# Mirrors the credential fallbacks in constants.py; tests guard against drift.
-DEFAULT_USERNAME: str = "myusername"
-DEFAULT_PASSWORD: str = "mypassword"
+from .constants import DEFAULT_PASSWORD, DEFAULT_USERNAME
 
 Advisory = tuple[int, str]  # (logging level, message)
 
@@ -48,8 +45,8 @@ def auth_explicitly_disabled(environ: Mapping[str, str] = os.environ) -> bool:
     return environ.get("SOCKS5_AUTH_REQUIRED", "").lower() == "false"
 
 
-def uses_default_credentials(username: str, password: str) -> bool:
-    return username == DEFAULT_USERNAME and password == DEFAULT_PASSWORD
+def uses_default_credentials(username: bytes, password: bytes) -> bool:
+    return username == DEFAULT_USERNAME.encode() and password == DEFAULT_PASSWORD.encode()
 
 
 def startup_advisories(
@@ -74,7 +71,7 @@ def collect_startup_advisories(host: str) -> list[Advisory]:
         host,
         constants.auth_required(),
         auth_explicitly_disabled(),
-        uses_default_credentials(constants.USERNAME, constants.PASSWORD),
+        uses_default_credentials(*constants.credentials()),
     )
 
 
@@ -82,3 +79,4 @@ def validate_environment() -> None:
     """Raises ValueError naming the first invalid environment variable, so a bad value fails at startup."""
     constants.handshake_timeout()
     constants.connect_timeout()
+    constants.max_connections()

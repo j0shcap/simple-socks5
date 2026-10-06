@@ -193,6 +193,67 @@ class TestListenBacklog(unittest.TestCase):
         server.socket.listen.assert_called_once_with(socket.SOMAXCONN)
 
 
+def _without_socks5_env(**environ):
+    clean = {k: v for k, v in os.environ.items() if not k.startswith("SOCKS5_")}
+    return patch.dict(os.environ, {**clean, **environ}, clear=True)
+
+
+class TestConnectionLimit(unittest.TestCase):
+    def make_server(self, **environ) -> ThreadingTCPServer:
+        with _without_socks5_env(**environ):
+            server = ThreadingTCPServer(("127.0.0.1", 0), TCPProxyServer, bind_and_activate=False)
+        self.addCleanup(server.server_close)
+        return server
+
+    def test_default_limit_is_200(self):
+        self.assertEqual(self.make_server().max_connections, 200)
+
+    def test_limit_read_from_env(self):
+        server = self.make_server(SOCKS5_MAX_CONNECTIONS="3")
+        self.assertEqual(server.max_connections, 3)
+        for _ in range(3):
+            self.assertTrue(server._connection_semaphore.acquire(blocking=False))
+        self.assertFalse(server._connection_semaphore.acquire(blocking=False))
+
+    def test_instances_have_distinct_semaphores(self):
+        first, second = self.make_server(SOCKS5_MAX_CONNECTIONS="1"), self.make_server(SOCKS5_MAX_CONNECTIONS="1")
+        self.assertTrue(first._connection_semaphore.acquire(blocking=False))
+        self.assertTrue(second._connection_semaphore.acquire(blocking=False))
+
+    def test_invalid_limit_raises_before_binding(self):
+        with _without_socks5_env(SOCKS5_MAX_CONNECTIONS="0"), patch("socketserver.socket.socket") as socket_class:
+            with self.assertRaisesRegex(ValueError, "SOCKS5_MAX_CONNECTIONS"):
+                ThreadingTCPServer(("127.0.0.1", 0), TCPProxyServer)
+        socket_class.assert_not_called()
+
+    def test_rejection_warning_rate_limited(self):
+        server = self.make_server(SOCKS5_MAX_CONNECTIONS="1")
+        self.assertTrue(server._connection_semaphore.acquire(blocking=False))
+        now = [0.0]
+
+        def reject(count):
+            for _ in range(count):
+                server.process_request(MagicMock(spec=socket.socket), ("127.0.0.1", 9999))
+
+        with patch("src.server.time.monotonic", lambda: now[0]), \
+                patch.object(server, "shutdown_request") as shutdown_request, \
+                self.assertLogs("src.server", level="WARNING") as logs:
+            reject(50)
+            self.assertEqual(len(logs.records), 1)
+            self.assertIn("Connection limit of 1 reached: rejected 1 connection(s)", logs.records[0].getMessage())
+
+            now[0] = 5.0
+            reject(4)
+            self.assertEqual(len(logs.records), 1)
+
+            now[0] = 10.0
+            reject(1)
+            self.assertEqual(len(logs.records), 2)
+            self.assertIn("rejected 54 connection(s)", logs.records[1].getMessage())
+
+        self.assertEqual(shutdown_request.call_count, 55)
+
+
 class TestConnectionTracking(unittest.TestCase):
     """Verify ThreadingTCPServer tracks in-flight requests so shutdown can drain or close them."""
 

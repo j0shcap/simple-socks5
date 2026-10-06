@@ -9,7 +9,7 @@ A SOCKS Protocol Version 5 proxy server written in Python. Implements [RFC 1928]
 - **TCP & UDP**: Supports CONNECT and UDP ASSOCIATE commands
 - **Authentication**: Optional username/password authentication (RFC 1929)
 - **IPv4 & IPv6**: Full support for both address families
-- **Concurrent**: Thread-per-connection
+- **Concurrent**: Thread-per-connection with a configurable connection limit
 - **Docker**: Multi-architecture images on [Docker Hub](https://hub.docker.com/r/jcaponigro20/simple-socks5)
 
 ## Requirements
@@ -67,13 +67,14 @@ python3 app.py [--host HOST | -H HOST] [--port PORT | -P PORT] [--logging-level 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `SOCKS5_USERNAME` | `myusername` | Username for RFC 1929 authentication. |
-| `SOCKS5_PASSWORD` | `mypassword` | Password for RFC 1929 authentication. |
+| `SOCKS5_PASSWORD` | `mypassword` | Password for RFC 1929 authentication. An empty username or password never authenticates. |
 | `SOCKS5_AUTH_REQUIRED` | `false` | Set to `true` to require authentication. |
 | `SOCKS5_HANDSHAKE_TIMEOUT` | `10` | Seconds a client has to finish the greeting, authentication and request. A client that is still sending when it runs out is disconnected without a reply. |
 | `SOCKS5_CONNECT_TIMEOUT` | `10` | Seconds to connect to the destination. A timeout replies `0x04` (host unreachable). |
+| `SOCKS5_MAX_CONNECTIONS` | `200` | Maximum concurrent client connections. Further connections are closed without a reply; a WARNING with the number rejected is logged at most every 10 seconds. |
 | `LOGGING_LEVEL` | `debug` (Docker image: `info`) | Logging level used when `-L` isn't given. Same choices as `-L`. |
 
-Timeouts accept any positive number of seconds, such as `2.5`. An invalid value stops the proxy at startup with an error.
+Timeouts accept any positive number of seconds, such as `2.5`. `SOCKS5_MAX_CONNECTIONS` must be a positive integer. An invalid value stops the proxy at startup with an error.
 
 ## Docker
 
