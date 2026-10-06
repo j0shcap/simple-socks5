@@ -3,7 +3,7 @@ Ensures that the constants are correct and that hex values are correctly mapped 
 """
 
 import unittest
-from src.constants import ReplyCodes, MethodCodes, AddressTypeCodes, CommandCodes
+from src.constants import ReplyCodes, MethodCodes, AddressTypeCodes, CommandCodes, RELAY_BUFFER_SIZE
 
 
 class TestReplyCodes(unittest.TestCase):
@@ -72,6 +72,11 @@ class TestCommandCodes(unittest.TestCase):
 
     def test_udp_associate(self):
         self.assertEqual(CommandCodes.UDP_ASSOCIATE.value, 3)
+
+
+class TestRelayConstants(unittest.TestCase):
+    def test_relay_buffer_size(self):
+        self.assertEqual(RELAY_BUFFER_SIZE, 65536)
 
 
 if __name__ == '__main__':

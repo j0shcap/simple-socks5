@@ -12,8 +12,10 @@ def auth_required() -> bool:
 
 
 # Buffer and timeout constants
-RELAY_BUFFER_SIZE: int = 4096
+RELAY_BUFFER_SIZE: int = 65536
 TCP_SELECTOR_TIMEOUT: int = 3  # seconds
+# Bounds a whole sendall() call, so a reader slower than RELAY_BUFFER_SIZE per this many seconds is dropped
+RELAY_WRITE_TIMEOUT: float = 300.0  # seconds
 AUTH_TIMEOUT: float = 45.0  # seconds
 LOG_FILE_MAX_BYTES: int = 1048576  # 1 MB
 DNS_LOOKUP_TIMEOUT: float = 2.0  # seconds

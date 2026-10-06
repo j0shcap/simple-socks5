@@ -3,9 +3,15 @@ import selectors
 import unittest
 from unittest.mock import MagicMock, patch
 
-from src.constants import AddressTypeCodes
+from src.constants import RELAY_BUFFER_SIZE, RELAY_WRITE_TIMEOUT, AddressTypeCodes
 from src.models import DetailedAddress
 from src.relays.tcp_relay import TCPRelay
+
+
+def _event(sock):
+    key = MagicMock()
+    key.fileobj = sock
+    return key
 
 
 class TestTCPRelay(unittest.TestCase):
@@ -81,15 +87,47 @@ class TestTCPRelay(unittest.TestCase):
     def test_relay_data_eof_triggers_cleanup(self):
         relay, client, proxy, selector = self._create_relay()
 
-        mock_key = MagicMock()
-        mock_key.fileobj = client
-
-        selector.select.return_value = [(mock_key, selectors.EVENT_READ)]
-        client.recv.return_value = b""  # EOF
+        selector.select.side_effect = [
+            [(_event(client), selectors.EVENT_READ)],
+            [(_event(proxy), selectors.EVENT_READ)],
+        ]
+        client.recv.return_value = b""
+        proxy.recv.return_value = b""
 
         relay.listen_and_relay()
-        # Cleanup should close selector
-        selector.close.assert_called()
+
+        proxy.shutdown.assert_any_call(socket.SHUT_WR)
+        client.shutdown.assert_called_once_with(socket.SHUT_WR)
+        client.close.assert_not_called()
+        selector.close.assert_called_once()
+
+    def test_half_close_keeps_relaying_other_direction(self):
+        relay, client, proxy, selector = self._create_relay()
+        selector.select.side_effect = [
+            [(_event(client), selectors.EVENT_READ)],
+            [(_event(proxy), selectors.EVENT_READ)],
+            [(_event(proxy), selectors.EVENT_READ)],
+        ]
+        client.recv.return_value = b""
+        proxy.recv.side_effect = [b"response", b""]
+
+        relay.listen_and_relay()
+
+        selector.unregister.assert_any_call(client)
+        proxy.shutdown.assert_any_call(socket.SHUT_WR)
+        client.sendall.assert_called_once_with(b"response")
+        self.assertEqual(selector.select.call_count, 3)
+
+    def test_half_close_shutdown_error_cleans_up(self):
+        relay, client, proxy, selector = self._create_relay()
+        selector.select.side_effect = [[(_event(client), selectors.EVENT_READ)]]
+        client.recv.return_value = b""
+        proxy.shutdown.side_effect = [OSError("not connected"), None]
+
+        relay.listen_and_relay()
+
+        proxy.close.assert_called_once()
+        selector.close.assert_called_once()
 
     def test_relay_handles_broken_pipe(self):
         relay, client, proxy, selector = self._create_relay()
@@ -130,18 +168,63 @@ class TestTCPRelay(unittest.TestCase):
         # Selector closed
         selector.close.assert_called_once()
 
+    def test_cleanup_tolerates_already_unregistered_socket(self):
+        relay, client, proxy, selector = self._create_relay()
+        selector.unregister.side_effect = KeyError("not registered")
+
+        relay._cleanup()
+
+        proxy.close.assert_called_once()
+        selector.close.assert_called_once()
+
     def test_send_data(self):
         relay, client, proxy, _ = self._create_relay()
-        proxy.send.return_value = 5
         result = relay._send_data(proxy, b"hello")
-        self.assertEqual(result, 5)
-        proxy.send.assert_called_once_with(b"hello")
+        self.assertIsNone(result)
+        proxy.sendall.assert_called_once_with(b"hello")
+        proxy.send.assert_not_called()
+
+    def test_init_leaves_sockets_blocking(self):
+        relay, client, proxy, _ = self._create_relay()
+        client.setblocking.assert_not_called()
+        proxy.setblocking.assert_not_called()
+
+    def test_prepare_sockets_sets_timeout_and_keepalive(self):
+        relay, client, proxy, selector = self._create_relay()
+        selector.select.side_effect = [
+            [(_event(client), selectors.EVENT_READ)],
+            [(_event(proxy), selectors.EVENT_READ)],
+        ]
+        client.recv.return_value = b""
+        proxy.recv.return_value = b""
+
+        relay.listen_and_relay()
+
+        for sock in (client, proxy):
+            sock.settimeout.assert_called_once_with(RELAY_WRITE_TIMEOUT)
+            sock.setsockopt.assert_called_once_with(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+            sock.setblocking.assert_not_called()
+
+    def test_relay_write_timeout_cleans_up(self):
+        relay, client, proxy, selector = self._create_relay()
+        selector.select.side_effect = [[(_event(client), selectors.EVENT_READ)]]
+        client.recv.return_value = b"data"
+        proxy.sendall.side_effect = TimeoutError("timed out")
+
+        with self.assertLogs("src.relays.tcp_relay", level="WARNING") as logs:
+            relay.listen_and_relay()
+
+        self.assertTrue(any("timed out" in line for line in logs.output))
+        proxy.close.assert_called_once()
+        selector.close.assert_called_once()
+        client.close.assert_not_called()
 
     def test_recv_data(self):
         relay, client, proxy, _ = self._create_relay()
         client.recv.return_value = b"data"
         result = relay._recv_data(client)
         self.assertEqual(result, b"data")
+        client.recv.assert_called_once_with(RELAY_BUFFER_SIZE)
 
     def test_recv_data_raises_on_error(self):
         relay, client, proxy, _ = self._create_relay()
@@ -152,22 +235,19 @@ class TestTCPRelay(unittest.TestCase):
     def test_relay_forwards_data_between_sockets(self):
         relay, client, proxy, selector = self._create_relay()
 
-        mock_key_client = MagicMock()
-        mock_key_client.fileobj = client
-        mock_key_eof = MagicMock()
-        mock_key_eof.fileobj = client
-
-        # First select: client has data, second select: client EOF
+        # Client data, then client EOF, then proxy EOF
         selector.select.side_effect = [
-            [(mock_key_client, selectors.EVENT_READ)],
-            [(mock_key_eof, selectors.EVENT_READ)],
+            [(_event(client), selectors.EVENT_READ)],
+            [(_event(client), selectors.EVENT_READ)],
+            [(_event(proxy), selectors.EVENT_READ)],
         ]
         client.recv.side_effect = [b"request data", b""]
-        proxy.send.return_value = 12
+        proxy.recv.return_value = b""
 
         relay.listen_and_relay()
 
-        proxy.send.assert_called_once_with(b"request data")
+        proxy.sendall.assert_called_once_with(b"request data")
+        proxy.send.assert_not_called()
 
 
 if __name__ == "__main__":

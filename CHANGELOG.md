@@ -35,6 +35,8 @@ contain breaking changes, and each one is listed under **Breaking changes**.
 - `app.py` reads the `LOGGING_LEVEL` environment variable when `-L/--logging-level` isn't
   given. Precedence is `-L`, then `LOGGING_LEVEL`, then `debug`; an invalid value exits with
   an error.
+- TCP relay buffer raised from 4 KiB to 64 KiB, about 7× the throughput. The UDP relay's
+  receive buffer, which shares the setting, grows to match.
 
 ### Fixed
 - SIGTERM and SIGINT now shut the server down gracefully: it stops accepting connections, gives
@@ -46,3 +48,8 @@ contain breaking changes, and each one is listed under **Breaking changes**.
   connection limits; the authentication example now sets `SOCKS5_AUTH_REQUIRED=true`.
 - The outbound socket leaked when a CONNECT target refused the connection; it is now closed
   before the refusal reply is sent.
+- Downloads were truncated when the client read slower than the origin sent: a full send
+  buffer dropped the connection. The relay now waits for the slow side (up to 5 minutes per
+  write), so the transfer completes.
+- TCP half-close: a client or server that closes its sending side still receives the reply.
+  Before, the first end-of-stream from either side closed the whole connection.

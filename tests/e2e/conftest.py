@@ -16,8 +16,14 @@ Fixtures (stable public API; regression tests build on them)
     echo_origin_v6          Origin on ::1 (skips when IPv6 loopback is unavailable)
     half_close_origin       Origin: reads until EOF, then replies b"GOT <n> BYTES"
     trickle_origin          Origin: sends 1 KiB every 100 ms until the peer goes away
+    reply_then_read_origin  RecordingOrigin: sends b"BANNER" + FIN, then reports the sha256 of what it reads
+    streaming_origin        RecordingOrigin: streams until a send fails, then reports time.monotonic()
+    reset_origin            RecordingOrigin: sends 1 MiB, sends RST, then reports time.monotonic()
     http_origin             Origin: GET /bytes/<n> serves origins.deterministic_payload(n)
     udp_echo_origin         Origin: echoes each UDP datagram
+
+RecordingOrigin(host, port, results)
+    .results                queue.Queue the origin's handlers report into; use .get(timeout=...)
 
 ProxyHandle(server, address)
     .connect() -> socket    raw TCP connection to the proxy; no SOCKS bytes sent
@@ -30,6 +36,7 @@ still reach caplog) instead of writing errors.log into the working directory.
 """
 
 import gc
+import queue
 import socket
 import socketserver
 import threading
@@ -49,6 +56,10 @@ from tests.e2e.origins import (
     OriginTCPServerV6,
     PayloadHTTPHandler,
     TrickleHandler,
+    RecordingOriginTCPServer,
+    ReplyThenReadHandler,
+    ResetMidTransferHandler,
+    StreamUntilClosedHandler,
     UDPEchoHandler,
     serve_in_thread,
 )
@@ -57,6 +68,11 @@ from tests.e2e.socks_client import TIMEOUT
 E2E_USERNAME = "e2e-user"
 E2E_PASSWORD = "e2e-pass"
 THREAD_EXIT_GRACE = 3.0
+
+
+@dataclass(frozen=True)
+class RecordingOrigin(Origin):
+    results: queue.Queue
 
 
 @dataclass(frozen=True)
@@ -137,6 +153,27 @@ def echo_origin_v6():
 @pytest.fixture
 def half_close_origin():
     yield from _serve_origin(OriginTCPServer(("127.0.0.1", 0), HalfCloseHandler))
+
+
+def _serve_recording_origin(handler):
+    server = RecordingOriginTCPServer(("127.0.0.1", 0), handler)
+    for origin in _serve_origin(server):
+        yield RecordingOrigin(origin.host, origin.port, server.results)
+
+
+@pytest.fixture
+def reply_then_read_origin():
+    yield from _serve_recording_origin(ReplyThenReadHandler)
+
+
+@pytest.fixture
+def streaming_origin():
+    yield from _serve_recording_origin(StreamUntilClosedHandler)
+
+
+@pytest.fixture
+def reset_origin():
+    yield from _serve_recording_origin(ResetMidTransferHandler)
 
 
 @pytest.fixture
