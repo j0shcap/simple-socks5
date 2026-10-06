@@ -1,6 +1,7 @@
 import errno
 import os
 import socket
+import struct
 import threading
 import unittest
 from unittest.mock import MagicMock, patch
@@ -13,7 +14,7 @@ from src.exceptions import (
     InvalidRequestError,
     InvalidVersionError,
 )
-from src.models import DetailedAddress, Request
+from src.models import BindAddress, DetailedAddress, Request
 from src.server import TCPProxyServer, ThreadingTCPServer
 
 
@@ -158,6 +159,54 @@ class TestReplyCodes(unittest.TestCase):
                     reply = self.run_handle(mock_tcp_handler_cls, make_proxy_handler(), connect_request(address_type))
                     zero_address = b"\x00" * (16 if address_type == AddressTypeCodes.IPv6 else 4)
                     self.assertEqual(reply, bytes([5, code, 0, address_type.value]) + zero_address + b"\x00\x00")
+
+
+@patch("src.server.TCPHandler")
+class TestOneReply(unittest.TestCase):
+    """Once a reply has been sent, a later failure writes nothing more to the client."""
+
+    SUCCESS_REPLY = b"\x05\x00\x00\x01\x7f\x00\x00\x01\x13\x88"  # 127.0.0.1:5000
+
+    def run_handle(self, mock_tcp_handler_cls, command: CommandCodes, relay_class: str, relay_error: Exception):
+        mock_instance = mock_tcp_handler_cls.return_value
+        mock_instance.handle_request.return_value = True
+        mock_instance.parse_request.return_value = Request(5, command.value, connect_request().address)
+        handler = make_proxy_handler()
+        with patch(relay_class) as relay_cls:
+            relay_cls.return_value.get_proxy_address.return_value = BindAddress("127.0.0.1", 5000)
+            relay_cls.return_value.listen_and_relay.side_effect = relay_error
+            handler.handle()
+        return handler
+
+    def test_connect_relay_error_after_success_sends_nothing_more(self, mock_tcp_handler_cls):
+        handler = self.run_handle(
+            mock_tcp_handler_cls, CommandCodes.CONNECT, "src.server.TCPRelay", RuntimeError("boom")
+        )
+        handler.connection.sendall.assert_called_once_with(self.SUCCESS_REPLY)
+
+    def test_udp_relay_error_after_success_sends_nothing_more(self, mock_tcp_handler_cls):
+        handler = self.run_handle(
+            mock_tcp_handler_cls, CommandCodes.UDP_ASSOCIATE, "src.server.UDPRelay", struct.error("bad datagram")
+        )
+        handler.connection.sendall.assert_called_once_with(self.SUCCESS_REPLY)
+
+    def test_success_reply_send_failure_sends_no_failure_reply(self, mock_tcp_handler_cls):
+        mock_instance = mock_tcp_handler_cls.return_value
+        mock_instance.handle_request.return_value = True
+        mock_instance.parse_request.return_value = connect_request()
+        handler = make_proxy_handler()
+        handler.connection.sendall.side_effect = BrokenPipeError
+        with patch("src.server.TCPRelay") as relay_cls:
+            relay_cls.return_value.get_proxy_address.return_value = BindAddress("127.0.0.1", 5000)
+            handler.handle()
+        handler.connection.sendall.assert_called_once_with(self.SUCCESS_REPLY)
+        relay_cls.return_value.listen_and_relay.assert_not_called()
+
+    def test_send_error_reply_twice_sends_once(self, _mock_tcp_handler_cls):
+        handler = make_proxy_handler()
+        handler._send_error_reply(b"\x05\x01\x00\x01\x00\x00\x00\x00\x00\x00")
+        handler._send_error_reply(b"\x05\x07\x00\x01\x00\x00\x00\x00\x00\x00")
+        handler.connection.sendall.assert_called_once_with(b"\x05\x01\x00\x01\x00\x00\x00\x00\x00\x00")
 
 
 class TestSendErrorReply(unittest.TestCase):

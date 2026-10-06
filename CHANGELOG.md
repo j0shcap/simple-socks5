@@ -77,6 +77,9 @@ contain breaking changes, and each one is listed under **Breaking changes**.
   truncated address) ended the UDP association and sent a stray failure reply on its control
   connection; a single spoofed datagram was enough. It is now dropped and the association keeps
   working. A datagram to a destination that can't be sent to (such as port 0) is dropped too.
+- A request now gets exactly one SOCKS reply. An error after the success reply (for example
+  during a CONNECT tunnel) used to send a second, failure reply, injecting 10 bytes into the
+  stream; it is now only logged.
 
 ### Security
 - Usernames and passwords are compared in constant time, and both are always checked, so
