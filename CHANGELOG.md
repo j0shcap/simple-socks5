@@ -21,6 +21,8 @@ contain breaking changes, and each one is listed under **Breaking changes**.
   trusted interfaces, cleartext credentials, and pinning `:2.0.0` for the pre-2.1 behaviour.
 - `SOCKS5_HANDSHAKE_TIMEOUT` and `SOCKS5_CONNECT_TIMEOUT` (seconds, default `10`). An invalid
   value exits at startup with an error.
+- `SOCKS5_MAX_CONNECTIONS` (default `200`): the maximum number of concurrent client
+  connections. It must be a positive integer; an invalid value exits at startup with an error.
 
 ### Changed
 - `latest` and `logging-disabled` now move only on stable releases; pushes to `main` publish
@@ -39,6 +41,8 @@ contain breaking changes, and each one is listed under **Breaking changes**.
   an error.
 - TCP relay buffer raised from 4 KiB to 64 KiB, about 7× the throughput. The UDP relay's
   receive buffer, which shares the setting, grows to match.
+- The "connection limit reached" warning is logged at most once every 10 seconds, with the
+  number of connections rejected since the previous one, instead of once per rejection.
 
 ### Fixed
 - SIGTERM and SIGINT now shut the server down gracefully: it stops accepting connections, gives
