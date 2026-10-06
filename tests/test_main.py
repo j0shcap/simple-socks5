@@ -113,6 +113,14 @@ class TestMainStartupAdvisories(unittest.TestCase):
             self.run_main()
         self.assertEqual(caught.exception.code, 1)
 
+    def test_main_exits_on_invalid_handshake_timeout(self):
+        with patch.dict(os.environ, {"SOCKS5_HANDSHAKE_TIMEOUT": "abc"}), \
+                self.assertRaises(SystemExit) as caught:
+            self.run_main()
+        self.assertNotIn(caught.exception.code, (0, None))
+        self.assertIn("SOCKS5_HANDSHAKE_TIMEOUT", str(caught.exception.code))
+        self.server_class.assert_not_called()
+
 
 class FakeClock:
     def __init__(self, now=100.0):

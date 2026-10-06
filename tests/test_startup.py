@@ -20,6 +20,7 @@ from src.startup import (
     is_loopback_host,
     startup_advisories,
     uses_default_credentials,
+    validate_environment,
 )
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -178,6 +179,19 @@ class TestDefaultsMatchConstants(unittest.TestCase):
         )
         result = subprocess.run([sys.executable, "-c", code], cwd=REPO_ROOT, env=environ, capture_output=True)
         self.assertEqual(result.returncode, 0, result.stderr.decode())
+
+
+class TestValidateEnvironment(unittest.TestCase):
+    def test_validate_environment_ok_with_defaults(self):
+        environ = {k: v for k, v in os.environ.items() if not k.startswith("SOCKS5_")}
+        with patch.dict(os.environ, environ, clear=True):
+            validate_environment()
+
+    def test_validate_environment_rejects_invalid_timeout(self):
+        for name in ("SOCKS5_HANDSHAKE_TIMEOUT", "SOCKS5_CONNECT_TIMEOUT"):
+            with self.subTest(name=name), patch.dict(os.environ, {name: "abc"}):
+                with self.assertRaisesRegex(ValueError, name):
+                    validate_environment()
 
 
 if __name__ == "__main__":

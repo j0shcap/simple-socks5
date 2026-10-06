@@ -1,3 +1,4 @@
+import math
 import os
 from enum import Enum
 
@@ -9,6 +10,31 @@ PASSWORD: str = os.environ.get("SOCKS5_PASSWORD", "mypassword")
 
 def auth_required() -> bool:
     return os.environ.get("SOCKS5_AUTH_REQUIRED", "false").lower() == "true"
+
+
+DEFAULT_HANDSHAKE_TIMEOUT: float = 10.0  # seconds a client has to finish greeting, auth and request
+DEFAULT_CONNECT_TIMEOUT: float = 10.0  # seconds to connect to the destination
+
+
+def _positive_seconds_env(name: str, default: float) -> float:
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return default
+    try:
+        value = float(raw)
+    except ValueError:
+        value = math.nan
+    if not math.isfinite(value) or value <= 0:
+        raise ValueError(f"{name} must be a positive number of seconds, got {raw!r}")
+    return value
+
+
+def handshake_timeout() -> float:
+    return _positive_seconds_env("SOCKS5_HANDSHAKE_TIMEOUT", DEFAULT_HANDSHAKE_TIMEOUT)
+
+
+def connect_timeout() -> float:
+    return _positive_seconds_env("SOCKS5_CONNECT_TIMEOUT", DEFAULT_CONNECT_TIMEOUT)
 
 
 # Buffer and timeout constants

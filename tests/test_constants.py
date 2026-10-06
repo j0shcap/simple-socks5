@@ -2,8 +2,24 @@
 Ensures that the constants are correct and that hex values are correctly mapped to integers.
 """
 
+import os
 import unittest
-from src.constants import ReplyCodes, MethodCodes, AddressTypeCodes, CommandCodes, RELAY_BUFFER_SIZE
+from unittest.mock import patch
+
+from src.constants import (
+    ReplyCodes,
+    MethodCodes,
+    AddressTypeCodes,
+    CommandCodes,
+    RELAY_BUFFER_SIZE,
+    connect_timeout,
+    handshake_timeout,
+)
+
+TIMEOUT_GETTERS = (
+    ("SOCKS5_HANDSHAKE_TIMEOUT", handshake_timeout),
+    ("SOCKS5_CONNECT_TIMEOUT", connect_timeout),
+)
 
 
 class TestReplyCodes(unittest.TestCase):
@@ -77,6 +93,43 @@ class TestCommandCodes(unittest.TestCase):
 class TestRelayConstants(unittest.TestCase):
     def test_relay_buffer_size(self):
         self.assertEqual(RELAY_BUFFER_SIZE, 65536)
+
+
+class TestTimeoutEnv(unittest.TestCase):
+    def setUp(self):
+        environ = {k: v for k, v in os.environ.items() if k not in dict(TIMEOUT_GETTERS)}
+        patcher = patch.dict(os.environ, environ, clear=True)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_timeouts_default_to_10(self):
+        for name, getter in TIMEOUT_GETTERS:
+            with self.subTest(name=name):
+                self.assertEqual(getter(), 10.0)
+
+    def test_timeout_parses_float(self):
+        for name, getter in TIMEOUT_GETTERS:
+            with self.subTest(name=name), patch.dict(os.environ, {name: "2.5"}):
+                self.assertEqual(getter(), 2.5)
+
+    def test_blank_timeout_uses_default(self):
+        for (name, getter), raw in [(g, r) for g in TIMEOUT_GETTERS for r in ("", "  ")]:
+            with self.subTest(name=name, raw=raw), patch.dict(os.environ, {name: raw}):
+                self.assertEqual(getter(), 10.0)
+
+    def test_invalid_timeout_raises_naming_var(self):
+        for (name, getter), raw in [(g, r) for g in TIMEOUT_GETTERS for r in ("abc", "0", "-1", "nan", "inf")]:
+            with self.subTest(name=name, raw=raw), patch.dict(os.environ, {name: raw}):
+                with self.assertRaisesRegex(ValueError, name):
+                    getter()
+
+    def test_timeout_read_at_call_time(self):
+        for name, getter in TIMEOUT_GETTERS:
+            with self.subTest(name=name):
+                with patch.dict(os.environ, {name: "1"}):
+                    self.assertEqual(getter(), 1.0)
+                with patch.dict(os.environ, {name: "3"}):
+                    self.assertEqual(getter(), 3.0)
 
 
 if __name__ == '__main__':

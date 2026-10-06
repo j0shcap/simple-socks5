@@ -1,4 +1,5 @@
 import signal
+import sys
 import threading
 import time
 from argparse import Namespace
@@ -11,7 +12,7 @@ from .server import (
 from .logger import get_logger, update_loggers
 from .config import ProxyConfiguration
 from .constants import SHUTDOWN_FORCE_CLOSE_TIMEOUT, SHUTDOWN_GRACE_PERIOD
-from .startup import collect_startup_advisories
+from .startup import collect_startup_advisories, validate_environment
 
 logger = get_logger(__name__)
 
@@ -72,6 +73,11 @@ def main(args: Namespace):
     Entry point of the program.
     Sets program configuration, starts the server, and handles server shutdown.
     """
+    # Before loggers are configured, so -L disabled can't hide the error
+    try:
+        validate_environment()
+    except ValueError as e:
+        sys.exit(f"Invalid configuration: {e}")
 
     ProxyConfiguration.initialize(args.host, args.port, args.logging_level)
 
