@@ -1,9 +1,11 @@
 import struct
 import socket
 import threading
+import time
+from typing import Optional
 
 from ..constants import SOCKS_VERSION, AddressTypeCodes, DNS_LOOKUP_TIMEOUT
-from ..exceptions import InvalidRequestError, InvalidVersionError
+from ..exceptions import HandshakeTimeoutError, InvalidRequestError, InvalidVersionError
 from ..logger import get_logger
 from ..models import DetailedAddress, Request
 from ..utils import map_address_int_to_enum
@@ -13,27 +15,47 @@ logger = get_logger(__name__)
 
 class BaseHandler:
     connection: socket.socket
+    deadline: Optional[float] = None
 
-    def __init__(self, connection: socket.socket):
+    def __init__(self, connection: socket.socket, deadline: Optional[float] = None):
         """
         Initializes a new instance of the BaseRequestHandler class.
 
         Args:
             connection (socket.socket): The client socket.
+            deadline (Optional[float]): time.monotonic() timestamp by which every read must finish, or None.
         """
         self.connection = connection
+        self.deadline = deadline
 
     def _recv_exact(self, n: int) -> bytes:
-        """Receive exactly n bytes from the connection, handling partial reads."""
+        """
+        Receive exactly n bytes from the connection, handling partial reads.
+
+        With a deadline, each recv waits only for the time remaining, so a client drip-feeding bytes
+        can't extend it. Raises HandshakeTimeoutError once it passes.
+        """
         buf = bytearray(n)
         pos = 0
         while pos < n:
-            chunk = self.connection.recv(n - pos)
+            chunk = self._recv_before_deadline(n - pos)
             if not chunk:
                 raise ConnectionError("Connection closed during recv")
             buf[pos:pos + len(chunk)] = chunk
             pos += len(chunk)
         return bytes(buf)
+
+    def _recv_before_deadline(self, n: int) -> bytes:
+        if self.deadline is None:
+            return self.connection.recv(n)
+        remaining = self.deadline - time.monotonic()
+        if remaining <= 0:
+            raise HandshakeTimeoutError("Handshake deadline expired")
+        self.connection.settimeout(remaining)
+        try:
+            return self.connection.recv(n)
+        except TimeoutError as e:
+            raise HandshakeTimeoutError("Handshake deadline expired") from e
 
     def handle_request(self) -> bool:
         """

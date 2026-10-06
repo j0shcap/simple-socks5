@@ -1,5 +1,6 @@
 import struct
 import socket
+from typing import Optional
 
 from .base import BaseHandler
 from ..constants import SOCKS_VERSION, MethodCodes, USERNAME, PASSWORD, AUTH_TIMEOUT, auth_required
@@ -13,14 +14,15 @@ logger = get_logger(__name__)
 class TCPHandler(BaseHandler):
     connection: socket.socket
 
-    def __init__(self, connection: socket.socket):
+    def __init__(self, connection: socket.socket, deadline: Optional[float] = None):
         """
         Initializes a new instance of the TCPRequestHandler class.
 
         Args:
             connection (socket.socket): The client socket.
+            deadline (Optional[float]): time.monotonic() timestamp by which the handshake must finish, or None.
         """
-        self.connection = connection
+        super().__init__(connection, deadline)
 
     def handle_request(self) -> bool:
         """
