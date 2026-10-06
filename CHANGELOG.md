@@ -73,3 +73,13 @@ contain breaking changes, and each one is listed under **Breaking changes**.
 - Accurate SOCKS reply codes (RFC 1928): network unreachable replies `0x03`, host unreachable
   and connect timeouts `0x04`, an unknown address type `0x08`, and a domain name that isn't
   valid UTF-8 `0x04`. These all replied `0x01` before.
+
+### Security
+- Usernames and passwords are compared in constant time, and both are always checked, so
+  response timing no longer reveals which one was wrong.
+- Stricter RFC 1929 parsing: credentials that aren't valid UTF-8 now get a failure reply
+  instead of an uncaught error and a traceback on stderr, and an empty username or password
+  is always rejected. **Behaviour change:** an empty `SOCKS5_USERNAME` or `SOCKS5_PASSWORD`
+  can no longer be used to log in.
+- A failed login logs the client's IP address instead of the username it submitted.
+- `SOCKS5_USERNAME` and `SOCKS5_PASSWORD` are read for each login rather than once at import.

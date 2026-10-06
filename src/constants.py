@@ -7,9 +7,6 @@ SOCKS_VERSION: int = 5
 DEFAULT_USERNAME: str = "myusername"
 DEFAULT_PASSWORD: str = "mypassword"
 
-USERNAME: str = os.environ.get("SOCKS5_USERNAME", DEFAULT_USERNAME)
-PASSWORD: str = os.environ.get("SOCKS5_PASSWORD", DEFAULT_PASSWORD)
-
 
 def credentials() -> tuple[bytes, bytes]:
     """The configured RFC 1929 username and password as UTF-8 bytes, read at call time."""

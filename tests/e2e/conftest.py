@@ -6,10 +6,10 @@ Use tests/e2e/socks_client.py to talk to the proxy.
 
 Fixtures (stable public API; regression tests build on them)
     make_proxy(*, auth_required=False) -> ProxyHandle
-        Sets SOCKS5_AUTH_REQUIRED / SOCKS5_USERNAME / SOCKS5_PASSWORD with monkeypatch, patches
-        the import-time credentials in src.handlers.tcp, then starts the server. Env is set
-        before start, so a test may monkeypatch.setenv(...) its own variables and then call it.
-        Credentials are E2E_USERNAME / E2E_PASSWORD.
+        Sets SOCKS5_AUTH_REQUIRED / SOCKS5_USERNAME / SOCKS5_PASSWORD with monkeypatch, then
+        starts the server. Credentials are E2E_USERNAME / E2E_PASSWORD; they are read per
+        connection, so a test may change them with monkeypatch.setenv(...) at any time.
+        SOCKS5_MAX_CONNECTIONS is read when the server is constructed, so set it before calling.
     proxy                   make_proxy()
     auth_proxy              make_proxy(auth_required=True)
     echo_origin             Origin: echoes bytes until EOF
@@ -109,9 +109,6 @@ def make_proxy(monkeypatch):
             monkeypatch.setenv("SOCKS5_AUTH_REQUIRED", "true" if auth_required else "false")
             monkeypatch.setenv("SOCKS5_USERNAME", E2E_USERNAME)
             monkeypatch.setenv("SOCKS5_PASSWORD", E2E_PASSWORD)
-            # Credentials are read at import time today; raising=False survives their removal.
-            monkeypatch.setattr("src.handlers.tcp.USERNAME", E2E_USERNAME, raising=False)
-            monkeypatch.setattr("src.handlers.tcp.PASSWORD", E2E_PASSWORD, raising=False)
             server = stack.enter_context(serve_in_thread(ThreadingTCPServer(("127.0.0.1", 0), TCPProxyServer)))
             return ProxyHandle(server, server.server_address)
 

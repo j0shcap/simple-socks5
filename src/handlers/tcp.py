@@ -1,8 +1,9 @@
+import hmac
 import struct
 import socket
 
 from .base import BaseHandler
-from ..constants import SOCKS_VERSION, MethodCodes, USERNAME, PASSWORD, auth_required
+from ..constants import SOCKS_VERSION, MethodCodes, auth_required, credentials
 from ..exceptions import InvalidVersionError
 from ..logger import get_logger
 from ..utils import generate_connection_method_response
@@ -136,6 +137,8 @@ class TCPHandler(BaseHandler):
             o PASSWD - password
             o STATUS - status code (1 byte): X'00' for success, X'01' for failure
                 - Connection must be closed if status is not X'00'
+
+        UNAME and PASSWD are compared as raw octets against the UTF-8 encoded configured credentials.
         """
         try:
             # Receive and verify the version
@@ -145,27 +148,17 @@ class TCPHandler(BaseHandler):
                 self.connection.sendall(b"\x01\x01")
                 return False
 
-            # Receive username length and username
-            username_len = self._recv_exact(1)[0]
-            username = (
-                self._recv_exact(username_len).decode() if username_len else ""
-            )
+            # The whole frame is read even when a length is 0: closing with unread bytes would send an RST
+            username = self._recv_exact(self._recv_exact(1)[0])
+            password = self._recv_exact(self._recv_exact(1)[0])
 
-            # Receive password length and password
-            password_len = self._recv_exact(1)[0]
-            password = (
-                self._recv_exact(password_len).decode() if password_len else ""
-            )
-
-            # Validate credentials
-            if username == USERNAME and password == PASSWORD:
-                # Success
-                logger.info(f"Authenticated user: {username}")
+            expected = credentials()
+            if self._credentials_match(username, password, expected):
+                logger.info(f"Authenticated user: {expected[0].decode('utf-8', 'backslashreplace')}")
                 self.connection.sendall(b"\x01\x00")  # version 1, status 0 (success)
                 return True
             else:
-                # Failure
-                logger.warning(f"Invalid authentication request: {username}")
+                logger.warning(f"Authentication failed for client {self._peer_ip()}")
                 self.connection.sendall(b"\x01\x01")  # version 1, status 1 (failure)
                 return False
         except TimeoutError:
@@ -176,6 +169,23 @@ class TCPHandler(BaseHandler):
                 f"Socket error during username/password authentication: {e}"
             )
             return False
+
+    @staticmethod
+    def _credentials_match(username: bytes, password: bytes, expected: tuple[bytes, bytes]) -> bool:
+        """
+        Compares in constant time and never short-circuits, so the timing reveals neither which field
+        was wrong nor how much of it matched. RFC 1929 fields are 1 to 255 octets, so empty never matches.
+        """
+        expected_username, expected_password = expected
+        username_ok = hmac.compare_digest(username, expected_username)
+        password_ok = hmac.compare_digest(password, expected_password)
+        return bool(username) & bool(password) & username_ok & password_ok
+
+    def _peer_ip(self) -> str:
+        try:
+            return self.connection.getpeername()[0]
+        except OSError:
+            return "unknown"  # The client has already disconnected
 
     def _handle_gssapi_auth(self) -> bool:
         """
