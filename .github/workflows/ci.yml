@@ -46,7 +46,7 @@ jobs:
 
     - name: Test with pytest
       run: |
-        pytest --cov=src --cov-fail-under=60
+        pytest --cov=src --cov-fail-under=85
 
   smoke:
     name: smoke (${{ matrix.variant.name }})

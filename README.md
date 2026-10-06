@@ -108,7 +108,7 @@ The default credentials (`myusername`/`mypassword`) are public; always set your 
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
 pip install pytest pytest-cov flake8
-pytest --cov=src --cov-fail-under=60
+pytest --cov=src --cov-fail-under=85
 flake8 src/ tests/
 ```
 
