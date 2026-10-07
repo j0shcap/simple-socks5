@@ -7,6 +7,7 @@ from ..constants import RELAY_BUFFER_SIZE, RELAY_WRITE_TIMEOUT, TCP_SELECTOR_TIM
 from ..errors import is_routine_disconnect
 from ..models import DetailedAddress
 from ..logger import get_logger
+from ..policy import check_destination
 from ..utils import format_connection_closed, generate_tcp_socket
 
 logger = get_logger(__name__)
@@ -44,6 +45,7 @@ class TCPRelay(BaseRelay):
         """
         Generates a new proxy connection.
         """
+        check_destination(self.dst_address.ip, self.dst_address.port)
         # Generate proxy connection
         self.proxy_connection = generate_tcp_socket(self.dst_address.address_type)
         # Replaced by the relay's write timeout in _prepare_sockets()
