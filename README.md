@@ -50,6 +50,10 @@ docker run -p 127.0.0.1:1080:1080 -e SOCKS5_AUTH_REQUIRED=false jcaponigro20/sim
 
 Setting `SOCKS5_AUTH_REQUIRED=false` explicitly acknowledges the choice: the open-proxy warning banner is replaced by a single INFO line. The default-credentials warning still appears unless you set your own `SOCKS5_USERNAME`/`SOCKS5_PASSWORD`. See [Security](#security).
 
+### Upgrading to 2.1
+
+2.1 changes some defaults: the image logs at `info`, proxying to loopback and link-local addresses is refused unless `SOCKS5_ALLOW_LOOPBACK=true`, nothing is written to `/app/errors.log` unless `SOCKS5_LOG_FILE` is set, and `latest` moves only on releases. Each change has an opt-out; see [Upgrading from 2.0](CHANGELOG.md#upgrading-from-20-behaviour-changes). To keep the 2.0 behaviour, pin `jcaponigro20/simple-socks5:2.0.0`.
+
 ## Usage
 
 ```bash
@@ -110,6 +114,23 @@ docker build --build-arg LOGGING_LEVEL=debug -t my-socks5 .
 ```
 
 The container always listens on `0.0.0.0` inside Docker; the `-p` flag decides which host interfaces the port is published on.
+
+### Version tags and pinning
+
+```bash
+docker pull jcaponigro20/simple-socks5:2.1.0   # exact release, recommended for production
+docker pull jcaponigro20/simple-socks5:2.1     # 2.1.x patch releases
+docker pull jcaponigro20/simple-socks5:2       # 2.x minor and patch releases
+```
+
+| Tag | Follows |
+|-----|---------|
+| `X.Y.Z` (e.g. `2.1.0`) | One release; never moves. |
+| `X.Y`, `X` | The newest release in that line. |
+| `latest` | The newest stable release. |
+| `main` | The `main` branch; unreleased, for testing only. |
+| `X.Y.Z-logging-disabled`, `logging-disabled` | The same, with logging disabled. |
+| `2.0.0`, `2.0.0-logging-disabled` | The pre-2.1 behaviour. |
 
 The image's `HEALTHCHECK` runs `python -m src.healthcheck` every 30 seconds. It sends a SOCKS5 greeting to `127.0.0.1` on `SOCKS5_HEALTHCHECK_PORT` (default `1080`) and passes on any SOCKS5 reply, so it works with and without authentication, and the proxy logs it at `debug` only. If you override the command with a different `--port`, set `SOCKS5_HEALTHCHECK_PORT` to match. If you bind a specific non-loopback address instead of `0.0.0.0` or `::`, the healthcheck can't reach it.
 
@@ -198,7 +219,3 @@ With the Docker image on its default bridge network nothing changes for you: the
 ### Cleartext
 
 Data is transmitted in cleartext, including authentication credentials. Use additional encryption (e.g., SSH tunnel, VPN) in environments where interception is a risk.
-
-### Pinning the previous release
-
-To keep the exact pre-2.1 behaviour, pin `jcaponigro20/simple-socks5:2.0.0` (or `jcaponigro20/simple-socks5:2.0.0-logging-disabled`).

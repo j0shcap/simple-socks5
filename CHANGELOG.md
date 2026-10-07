@@ -2,10 +2,33 @@
 
 All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
-[Semantic Versioning](https://semver.org/spec/v2.0.0.html); before 1.0, a minor version may
-contain breaking changes, and each one is listed under **Breaking changes**.
+[Semantic Versioning](https://semver.org/spec/v2.0.0.html). A minor release may change a default
+to make the proxy safer; each such change is marked **Behaviour change**, has a way to restore
+the old behaviour, and is listed under "Upgrading" for that release.
 
 ## [Unreleased]
+
+## [2.1.0] - 2026-10-06
+
+### Upgrading from 2.0 (behaviour changes)
+
+Authentication stays optional and off by default; 2.1 only warns when the proxy is open. These
+defaults changed:
+
+1. **Image tags.** `latest` and `logging-disabled` now move only on releases, and pushes to
+   `main` publish `:main`. Pin `:2`, `:2.1` or `:2.1.0` to choose how far you follow.
+2. **Log level.** The Docker image logs at `info` instead of `debug`, and connection log lines
+   have a new format. Set `-e LOGGING_LEVEL=debug` to restore the old level.
+3. **Loopback and link-local destinations.** Proxying to loopback, link-local (including the
+   cloud metadata service at `169.254.169.254`) and unspecified addresses is refused with reply
+   `0x02`. Set `-e SOCKS5_ALLOW_LOOPBACK=true` to restore it. Containers on Docker's default
+   bridge network are unaffected.
+4. **Error log file.** The image no longer writes `/app/errors.log`. Set
+   `-e SOCKS5_LOG_FILE=/app/errors.log` to restore it.
+5. **Empty credentials.** An empty `SOCKS5_USERNAME` or `SOCKS5_PASSWORD` can no longer be used
+   to log in. There is no opt-out.
+6. **Keep 2.0 entirely.** Pin `jcaponigro20/simple-socks5:2.0.0` (or
+   `:2.0.0-logging-disabled`).
 
 ### Added
 - Versioned Docker image tags: a `vX.Y.Z` release publishes `X.Y.Z`, `X.Y` and `X` (and
@@ -130,3 +153,40 @@ contain breaking changes, and each one is listed under **Breaking changes**.
   10 seconds; a refused UDP datagram is dropped. Private ranges stay allowed. Docker users on
   the default bridge network are unaffected; if you proxy to `localhost` on the host or with
   `--network host`, set `SOCKS5_ALLOW_LOOPBACK=true` to restore the old behaviour.
+
+## [2.0.0] - 2026-02-26
+
+### Removed
+- **Breaking:** Python 3.7, 3.8 and 3.9 are no longer supported; the minimum is Python 3.10.
+
+### Added
+- `SOCKS5_USERNAME` and `SOCKS5_PASSWORD` environment variables for the credentials.
+- A limit of 200 concurrent connections.
+- Timeouts on DNS lookups.
+- Docker `HEALTHCHECK`, a single Dockerfile with a `LOGGING_LEVEL` build argument, and
+  `.dockerignore`.
+- `pyproject.toml`, flake8 and a coverage threshold in CI. Python 3.13 in the CI matrix.
+
+### Fixed
+- IPv6: replies crashed with `struct.error`, and socket address unpacking failed.
+- UDP relay: it blocked indefinitely and leaked sockets, and crashed on domain-name datagrams.
+- TCP relay: partial reads, a selector leak when setup failed, lost tracebacks, and a client
+  socket closed twice.
+- Error replies always used the IPv4 address type.
+- The socket timeout wasn't restored after authentication.
+- Server shutdown order, duplicate log handlers, a thread-unsafe logger cache and DNS thread
+  leaks.
+- The reserved (RSV) field is validated, as RFC 1928 requires.
+
+## [1.0.0] - 2024-09-28
+
+### Added
+- First release: a SOCKS5 server (RFC 1928) with CONNECT and UDP ASSOCIATE, username/password
+  authentication (RFC 1929), and IPv4, IPv6 and domain-name addresses.
+- Host, port and logging level set on the command line.
+- Docker image running as a non-root user, with a variant that has logging disabled.
+
+[Unreleased]: https://github.com/j0shcap/simple-socks5/compare/v2.1.0...HEAD
+[2.1.0]: https://github.com/j0shcap/simple-socks5/compare/v2.0.0...v2.1.0
+[2.0.0]: https://github.com/j0shcap/simple-socks5/compare/v1.0.0...v2.0.0
+[1.0.0]: https://github.com/j0shcap/simple-socks5/releases/tag/v1.0.0
