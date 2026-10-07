@@ -1,5 +1,7 @@
 from typing import Union
 
+from .models import format_host_port
+
 
 class InvalidVersionError(Exception):
     """Exception raised when an invalid SOCKS version is encountered."""
@@ -24,7 +26,7 @@ class AddressTypeNotSupportedError(InvalidRequestError):
 
 
 class InvalidDomainNameError(InvalidRequestError):
-    """Exception raised when a requested domain name is not valid UTF-8."""
+    """Exception raised when a requested domain name is empty or not valid UTF-8."""
 
 
 class MalformedDatagramError(InvalidRequestError):
@@ -39,3 +41,17 @@ class MalformedDatagramError(InvalidRequestError):
 
 class HandshakeTimeoutError(TimeoutError):
     """Exception raised when a client doesn't finish the handshake before its deadline."""
+
+
+class PolicyDenied(Exception):
+    """Exception raised when the destination policy blocks a destination address.
+
+    Attributes:
+        host (str): The blocked IP address.
+        port (int): The requested port.
+    """
+
+    def __init__(self, host: str, port: int) -> None:
+        super().__init__(f"destination {format_host_port(host, port)} is blocked by the destination policy")
+        self.host = host
+        self.port = port

@@ -13,6 +13,7 @@ from src.exceptions import (
     InvalidDomainNameError,
     InvalidRequestError,
     InvalidVersionError,
+    PolicyDenied,
 )
 
 CASES = (
@@ -25,6 +26,7 @@ CASES = (
     (socket.gaierror(socket.EAI_NONAME, "not known"), ReplyCodes.HOST_UNREACHABLE),
     # EAI_* codes aren't errno values; a numeric collision must not reach the errno table
     (socket.gaierror(errno.ENETUNREACH, "collides"), ReplyCodes.HOST_UNREACHABLE),
+    (PolicyDenied("127.0.0.1", 80), ReplyCodes.CONNECTION_NOT_ALLOWED_BY_RULESET),
     (AddressTypeNotSupportedError(5), ReplyCodes.ADDRESS_TYPE_NOT_SUPPORTED),
     (InvalidDomainNameError(b"\xff"), ReplyCodes.HOST_UNREACHABLE),
     (InvalidRequestError(1), ReplyCodes.GENERAL_SOCKS_SERVER_FAILURE),
@@ -46,6 +48,16 @@ class TestReplyCodeFor(unittest.TestCase):
         self.assertIsInstance(InvalidDomainNameError(b"\xff"), InvalidRequestError)
 
 
+class TestPolicyDenied(unittest.TestCase):
+    def test_policy_denied_keeps_host_and_port(self):
+        e = PolicyDenied("169.254.169.254", 80)
+        self.assertEqual((e.host, e.port), ("169.254.169.254", 80))
+        self.assertEqual(str(e), "destination 169.254.169.254:80 is blocked by the destination policy")
+
+    def test_policy_denied_message_brackets_ipv6(self):
+        self.assertIn("[::1]:443", str(PolicyDenied("::1", 443)))
+
+
 ROUTINE_DISCONNECT_CASES = (
     (ConnectionError("Connection closed during recv"), True),
     (ConnectionResetError(), True),
@@ -58,6 +70,7 @@ ROUTINE_DISCONNECT_CASES = (
     (OSError(errno.EBADF, "bad file descriptor"), False),
     (OSError(), False),
     (InvalidVersionError(4), False),
+    (PolicyDenied("127.0.0.1", 80), False),
     (RuntimeError("bug"), False),
 )
 
