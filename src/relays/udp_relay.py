@@ -4,10 +4,11 @@ import time
 
 from .base import BaseRelay
 from ..constants import RELAY_BUFFER_SIZE, UDP_RECV_TIMEOUT, UDP_FORWARD_TIMEOUT
-from ..exceptions import MalformedDatagramError
+from ..exceptions import MalformedDatagramError, PolicyDenied
 from ..models import DetailedAddress, BaseAddress
 from ..logger import get_logger
 from ..handlers import UDPHandler
+from ..policy import check_destination
 from ..utils import (
     generate_udp_socket,
     map_address_enum_to_socket_family,
@@ -121,11 +122,14 @@ class UDPRelay(BaseRelay):
 
         try:
             self._forward_packet(datagram, addr)
+        except PolicyDenied as e:
+            logger.debug(f"(UDP) Dropped datagram from {addr}: {e}")
         except (ValueError, KeyError, OSError) as e:
             logger.debug(f"(UDP) Dropped unsupported datagram from {addr}: {e}")
         return True
 
     def _forward_packet(self, datagram, client_addr: tuple) -> None:
+        check_destination(datagram.dst_addr, datagram.dst_port)
         with socket.socket(
             map_address_enum_to_socket_family(datagram.address_type),
             socket.SOCK_DGRAM,
