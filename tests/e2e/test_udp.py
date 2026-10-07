@@ -1,3 +1,4 @@
+import logging
 import select
 import socket
 import struct
@@ -41,6 +42,16 @@ def _assert_nothing_received(sock):
 def test_udp_associate_echo(proxy, udp_echo_origin):
     with _udp_association(proxy) as (control, udp, relay_address):
         _assert_echo(udp, relay_address, udp_echo_origin.port)
+
+
+def test_udp_relay_lines_logged_at_debug_only(proxy, udp_echo_origin, caplog):
+    caplog.set_level(logging.DEBUG, logger="src")
+    with _udp_association(proxy) as (control, udp, relay_address):
+        _assert_echo(udp, relay_address, udp_echo_origin.port)
+
+    relay_records = [r for r in caplog.records if r.getMessage().startswith("RELAY | UDP")]
+    assert len(relay_records) >= 2  # One per direction
+    assert {r.levelno for r in relay_records} == {logging.DEBUG}
 
 
 IPV4_HEADER = sc.build_udp_header(sc.ATYP_IPV4, "127.0.0.1", 9)
