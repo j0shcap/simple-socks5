@@ -24,10 +24,9 @@ from .sockets import (
     generate_udp_socket,
 )
 from .logs import (
-    connection_established_template,
-    connection_closed_template,
     base_relay_template,
-    detailed_relay_template,
+    format_connection_closed,
+    format_connection_established,
 )
 
 __all__ = [
@@ -50,8 +49,7 @@ __all__ = [
     "generate_connection_method_response",
     "generate_tcp_socket",
     "generate_udp_socket",
-    "connection_established_template",
-    "connection_closed_template",
     "base_relay_template",
-    "detailed_relay_template",
+    "format_connection_closed",
+    "format_connection_established",
 ]

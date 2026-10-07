@@ -252,6 +252,47 @@ class TestTCPRelay(unittest.TestCase):
         with self.assertRaises(socket.error):
             relay._recv_data(client)
 
+    def _relay_one_exchange(self):
+        """Client sends 12 bytes, the destination answers with 8, then both sides close."""
+        relay, client, proxy, selector = self._create_relay()
+        selector.select.side_effect = [
+            [(_event(client), selectors.EVENT_READ)],
+            [(_event(proxy), selectors.EVENT_READ)],
+            [(_event(client), selectors.EVENT_READ)],
+            [(_event(proxy), selectors.EVENT_READ)],
+        ]
+        client.recv.side_effect = [b"request data", b""]
+        proxy.recv.side_effect = [b"response", b""]
+        return relay
+
+    def test_counts_bytes_each_direction(self):
+        relay = self._relay_one_exchange()
+
+        relay.listen_and_relay()
+
+        self.assertEqual((relay.bytes_up, relay.bytes_down), (12, 8))
+
+    def test_cleanup_logs_one_closed_line(self):
+        with patch("src.relays.tcp_relay.time.monotonic", side_effect=[100.0, 102.5]):
+            relay = self._relay_one_exchange()
+            with self.assertLogs("src.relays.tcp_relay", level="DEBUG") as logs:
+                relay.listen_and_relay()
+
+        self.assertEqual(
+            [(r.levelname, r.getMessage()) for r in logs.records],
+            [("INFO", "CLOSED | 127.0.0.1:1234 -> example.com:80 (93.184.216.34) | up=12 B down=8 B | 2.50 s")],
+        )
+
+    def test_send_and_recv_errors_reraise_without_logging(self):
+        relay, client, proxy, _ = self._create_relay()
+        client.recv.side_effect = ConnectionResetError("reset")
+        proxy.sendall.side_effect = BrokenPipeError("broken pipe")
+        with self.assertNoLogs("src.relays.tcp_relay"):
+            with self.assertRaises(ConnectionResetError):
+                relay._recv_data(client)
+            with self.assertRaises(BrokenPipeError):
+                relay._send_data(proxy, b"data")
+
     def test_relay_forwards_data_between_sockets(self):
         relay, client, proxy, selector = self._create_relay()
 

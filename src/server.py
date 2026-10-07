@@ -18,7 +18,7 @@ from .utils import (
     generate_command_not_supported_reply,
     generate_failed_reply,
     generate_succeeded_reply,
-    connection_established_template,
+    format_connection_established,
 )
 from .logger import get_logger
 from .models import BindAddress, Request, DetailedAddress
@@ -262,16 +262,4 @@ class TCPProxyServer(StreamRequestHandler):
             self.connection.close()
 
     def _log_connection(self, dst_address: DetailedAddress) -> None:
-        """
-        Logs connection.
-        """
-        logger.info(
-            connection_established_template.substitute(
-                src_domain_name=self.client_address.name,
-                src_ip=self.client_address.ip,
-                src_port=self.client_address.port,
-                dst_domain_name=dst_address.name,
-                dst_ip=dst_address.ip,
-                dst_port=dst_address.port,
-            )
-        )
+        logger.info(format_connection_established(self.client_address.ip, self.client_address.port, dst_address))

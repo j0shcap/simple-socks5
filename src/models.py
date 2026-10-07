@@ -4,6 +4,11 @@ from collections import namedtuple
 from .constants import AddressTypeCodes
 
 
+def format_host_port(host: str, port: int) -> str:
+    """host:port, with an IPv6 host in brackets."""
+    return f"[{host}]:{port}" if ":" in host else f"{host}:{port}"
+
+
 @dataclass
 class BaseAddress:
     ip: str
@@ -19,10 +24,9 @@ class DetailedAddress(BaseAddress):
     address_type: AddressTypeCodes  # IPv4, IPv6, or domain name, see AddressTypeCodes
 
     def __str__(self):
-        host = f"[{self.name}]" if ":" in self.name else self.name
         if self.name == self.ip:
-            return f"{host}:{self.port}"
-        return f"{host}:{self.port} ({self.ip})"
+            return format_host_port(self.ip, self.port)
+        return f"{format_host_port(self.name, self.port)} ({self.ip})"
 
 
 @dataclass

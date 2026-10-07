@@ -16,6 +16,8 @@ from src.utils import (
     map_address_enum_to_socket_family,
     generate_succeeded_reply,
     generate_tcp_socket,
+    format_connection_closed,
+    format_connection_established,
 )
 from src.constants import AddressTypeCodes, MethodCodes
 
@@ -315,6 +317,26 @@ class TestGenerateSocketUtils(unittest.TestCase):
         )
         with self.assertRaises(ValueError):
             generate_tcp_socket(address.address_type)
+
+
+class TestConnectionLogLines(unittest.TestCase):
+    dst = DetailedAddress(ip="93.184.216.34", port=443, name="example.com", address_type=AddressTypeCodes.IPv4)
+
+    def test_connection_established(self):
+        self.assertEqual(
+            format_connection_established("172.17.0.1", 51234, self.dst),
+            "CONNECTION | 172.17.0.1:51234 -> example.com:443 (93.184.216.34)",
+        )
+
+    def test_connection_established_ipv6_in_brackets(self):
+        dst = DetailedAddress(ip="::1", port=80, name="::1", address_type=AddressTypeCodes.IPv6)
+        self.assertEqual(format_connection_established("::1", 5000, dst), "CONNECTION | [::1]:5000 -> [::1]:80")
+
+    def test_connection_closed(self):
+        self.assertEqual(
+            format_connection_closed("172.17.0.1", 51234, self.dst, bytes_up=517, bytes_down=10485943, duration=2.314),
+            "CLOSED | 172.17.0.1:51234 -> example.com:443 (93.184.216.34) | up=517 B down=10485943 B | 2.31 s",
+        )
 
 
 if __name__ == "__main__":
