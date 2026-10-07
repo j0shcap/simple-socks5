@@ -186,12 +186,12 @@ Bind or publish the port only where you need it, e.g. `-p 127.0.0.1:1080:1080` o
 
 By default the proxy refuses to connect or send to:
 
-- loopback: `127.0.0.0/8` and `::1`, which includes the proxy itself;
+- loopback: `127.0.0.0/8` and `::1`;
 - unspecified: `0.0.0.0/8` and `::`;
 - link-local: `169.254.0.0/16` and `fe80::/10`, which includes the cloud instance metadata service at `169.254.169.254`;
 - the IPv4-mapped (`::ffff:127.0.0.1`), IPv4-compatible (`::127.0.0.1`) and NAT64 (`64:ff9b::7f00:1`) forms of these.
 
-The check is made on the resolved IP address just before connecting, so `localhost` and names that resolve or rebind to these addresses are refused too. A refused CONNECT gets reply `0x02` (connection not allowed by ruleset), and a WARNING naming the client, the destination and `SOCKS5_ALLOW_LOOPBACK` is logged at most every 10 seconds. A refused UDP datagram is dropped and logged at DEBUG; the association stays open. Private ranges (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `fc00::/7`) and public addresses are allowed. A request with an empty domain name gets `0x04` (host unreachable).
+The check is made on the resolved IP address just before connecting, so `localhost` and names that resolve or rebind to these addresses are refused too. A refused CONNECT gets reply `0x02` (connection not allowed by ruleset), and a WARNING naming the client, the destination and `SOCKS5_ALLOW_LOOPBACK` is logged at most every 10 seconds. A refused UDP datagram is dropped and logged at DEBUG; the association stays open. Private ranges (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `fc00::/7`) and public addresses are allowed, so the proxy and other services stay reachable on the host's or container's own non-loopback addresses. A request with an empty domain name gets `0x04` (host unreachable).
 
 With the Docker image on its default bridge network nothing changes for you: the container's loopback is the container itself, and services on the host are reached through a private address such as `host.docker.internal`. If you run the proxy directly on a host, or with `--network host`, and proxy to services on `localhost`, set `SOCKS5_ALLOW_LOOPBACK=true`. It lifts the whole policy above.
 
