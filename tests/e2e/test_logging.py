@@ -1,8 +1,10 @@
 """
-What the proxy logs for a whole connection: one CONNECTION and one CLOSED line, never a line per chunk.
+What the proxy logs: one CONNECTION and one CLOSED line per connection, nothing above DEBUG for a client that
+hangs up mid-handshake (the healthcheck included), and at process level no colour off a TTY and no errors.log.
 """
 import logging
 import re
+import signal
 import socket
 import struct
 import threading
@@ -11,8 +13,10 @@ from types import SimpleNamespace
 
 import pytest
 
+from src import healthcheck
 from src.server import TCPProxyServer
 from tests.e2e import socks_client as sc
+from tests.e2e.app_process import run_app
 
 DOWNLOAD_SIZE = 10 * 1024 * 1024
 REQUEST = b"GET /bytes/%d HTTP/1.0\r\n\r\n" % DOWNLOAD_SIZE
@@ -115,3 +119,60 @@ def test_client_closing_mid_handshake_logs_nothing_above_debug(make_proxy, handl
 
     problems = [r for r in caplog.records if r.levelno > logging.DEBUG or r.exc_info]
     assert problems == []
+
+
+def _stop(proc) -> tuple[str, str]:
+    proc.send_signal(signal.SIGTERM)
+    stdout, stderr = proc.communicate(timeout=10)
+    assert proc.returncode == 0, stderr
+    return stdout, stderr
+
+
+def _probe_healthcheck(monkeypatch, address, times: int) -> None:
+    monkeypatch.setenv("SOCKS5_HEALTHCHECK_PORT", str(address[1]))
+    assert [healthcheck.main() for _ in range(times)] == [0] * times
+
+
+def test_info_process_healthchecks_silent_no_ansi_no_errors_log(tmp_path, monkeypatch):
+    env = {"SOCKS5_USERNAME": "process-user", "SOCKS5_PASSWORD": "process-password"}
+    with run_app(tmp_path, logging_level="info", env=env) as (proc, address):
+        _probe_healthcheck(monkeypatch, address, 10)
+        stdout, stderr = _stop(proc)
+
+    assert stdout == ""
+    messages = [line.split(" - ", 2)[2] for line in stderr.splitlines()]
+    assert messages == [
+        f"Server started on {address[0]}:{address[1]}",
+        "Server shutting down...",
+        "Server terminated.",
+    ]
+    assert "\x1b[" not in stderr
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_disabled_process_prints_nothing(tmp_path, monkeypatch, echo_origin):
+    with run_app(tmp_path, logging_level="disabled") as (proc, address):
+        _probe_healthcheck(monkeypatch, address, 3)
+        with sc.open_tunnel(address, "127.0.0.1", echo_origin.port) as tunnel:
+            tunnel.sendall(b"ping")
+            assert sc.recv_exact(tunnel, 4) == b"ping"
+        stdout, stderr = _stop(proc)
+
+    assert (stdout, stderr) == ("", "")
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_log_file_receives_errors(tmp_path):
+    log_path = tmp_path / "logs" / "proxy.log"
+    log_path.parent.mkdir()
+    with run_app(tmp_path, env={"SOCKS5_LOG_FILE": str(log_path)}) as (proc, address):
+        with socket.create_connection(address, timeout=sc.TIMEOUT) as sock:
+            assert sc.greet(sock, [sc.METHOD_NO_AUTH]) == sc.METHOD_NO_AUTH
+            sc.send_request(sock, sc.CMD_CONNECT, sc.ATYP_IPV4, "127.0.0.1", 80, ver=4)
+            assert sc.read_reply(sock).rep == sc.REP_GENERAL_FAILURE
+        _, stderr = _stop(proc)
+
+    assert "[ERROR] - Failed to parse SOCKS5 request: Version not supported: 4" in stderr
+    contents = log_path.read_text()
+    assert "[src.server] - [ERROR] - [Failed to parse SOCKS5 request: Version not supported: 4]" in contents
+    assert "Server started" not in contents
