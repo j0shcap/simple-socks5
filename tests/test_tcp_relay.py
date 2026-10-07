@@ -297,7 +297,7 @@ class TestTCPRelay(unittest.TestCase):
         self.assertEqual((relay.bytes_up, relay.bytes_down), (12, 8))
 
     def test_cleanup_logs_one_closed_line(self):
-        with patch("src.relays.tcp_relay.time.monotonic", side_effect=[100.0, 102.5]):
+        with patch("src.relays.base.time.monotonic", side_effect=[100.0, 102.5]):
             relay = self._relay_one_exchange()
             with self.assertLogs("src.relays.tcp_relay", level="DEBUG") as logs:
                 relay.listen_and_relay()

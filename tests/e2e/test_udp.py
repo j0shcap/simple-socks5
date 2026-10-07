@@ -54,6 +54,19 @@ def test_udp_relay_lines_logged_at_debug_only(proxy, udp_echo_origin, caplog):
     assert {r.levelno for r in relay_records} == {logging.DEBUG}
 
 
+def test_association_logs_one_connection_and_one_closed_line(proxy, udp_echo_origin, caplog):
+    caplog.set_level(logging.INFO, logger="src")
+    with _udp_association(proxy) as (control, udp, relay_address):
+        _assert_echo(udp, relay_address, udp_echo_origin.port, payload=b"ping")
+        _assert_echo(udp, relay_address, udp_echo_origin.port, payload=b"hello")
+        control.close()
+        assert proxy.server.wait_for_connections(sc.TIMEOUT)
+
+    messages = [r.getMessage() for r in caplog.records if r.name.startswith("src")]
+    assert [m.split(" |")[0] for m in messages] == ["CONNECTION", "CLOSED"]
+    assert "| up=9 B down=9 B |" in messages[1]
+
+
 IPV4_HEADER = sc.build_udp_header(sc.ATYP_IPV4, "127.0.0.1", 9)
 IPV6_HEADER = sc.build_udp_header(sc.ATYP_IPV6, "::1", 9)
 DOMAIN_HEADER = sc.build_udp_header(sc.ATYP_DOMAIN, "localhost", 9)

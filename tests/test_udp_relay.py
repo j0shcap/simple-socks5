@@ -83,6 +83,20 @@ class TestHandleDatagram(unittest.TestCase):
         expected = b"\x00\x00\x00\x01" + socket.inet_aton("10.0.0.1") + struct.pack("!H", 53) + b"response"
         self.relay.proxy_connection.sendto.assert_called_once_with(expected, CLIENT_ADDR)
 
+    def test_counts_payload_bytes_each_direction(self):
+        with patch("src.relays.udp_relay.socket.socket", return_value=mock_forward_socket(b"response")):
+            self.relay._handle_datagram(build_udp_datagram("10.0.0.1", 53, b"hello"), CLIENT_ADDR)
+            self.relay._handle_datagram(build_udp_datagram("10.0.0.1", 53, b"hi"), CLIENT_ADDR)
+
+        self.assertEqual((self.relay.bytes_up, self.relay.bytes_down), (7, 16))
+
+    def test_dropped_datagram_not_counted(self):
+        with patch("src.relays.udp_relay.socket.socket"):
+            self.relay._handle_datagram(b"\x00\x00", CLIENT_ADDR)
+            self.relay._handle_datagram(build_udp_datagram("10.0.0.1", 53, b"x"), ("192.168.1.99", 5))
+
+        self.assertEqual((self.relay.bytes_up, self.relay.bytes_down), (0, 0))
+
     def test_foreign_source_dropped_returns_false(self):
         """RFC 1928 Section 7: drop datagrams from IPs other than the client."""
         with patch("src.relays.udp_relay.socket.socket") as socket_class:
@@ -193,6 +207,20 @@ class TestListenAndRelay(unittest.TestCase):
         thread = self.start_relay()
         self.control.close()
         self.assert_relay_ends(thread)
+
+    def test_end_logs_one_closed_line(self):
+        self.relay.bytes_up, self.relay.bytes_down = 12, 8
+        with self.assertLogs("src.relays.udp_relay", level="INFO") as logs:
+            thread = self.start_relay()
+            self.control.close()
+            self.assert_relay_ends(thread)
+
+        self.assertEqual(len(logs.records), 1, logs.output)
+        self.assertEqual(logs.records[0].levelname, "INFO")
+        self.assertRegex(
+            logs.records[0].getMessage(),
+            r"^CLOSED \| 127\.0\.0\.1:\d+ -> test:0 \(0\.0\.0\.0\) \| up=12 B down=8 B \| \d+\.\d\d s$",
+        )
 
     def test_control_reset_ends_association(self):
         thread = self.start_relay()
