@@ -3,10 +3,15 @@ What the proxy logs for a whole connection: one CONNECTION and one CLOSED line, 
 """
 import logging
 import re
+import socket
+import struct
+import threading
 import time
+from types import SimpleNamespace
 
 import pytest
 
+from src.server import TCPProxyServer
 from tests.e2e import socks_client as sc
 
 DOWNLOAD_SIZE = 10 * 1024 * 1024
@@ -52,3 +57,61 @@ def test_no_per_chunk_lines_at_any_level(proxy, http_origin, caplog, level):
     assert not [r for r in records if "RELAY" in r.getMessage()]
     # A 10 MiB download is 160+ relay buffers; a handful of lines means none of them was logged
     assert len(records) < 10
+
+
+@pytest.fixture
+def handled(monkeypatch):
+    """wait(): blocks until the proxy has finished with one connection and logged everything for it."""
+    finished = threading.Semaphore(0)
+    original_finish = TCPProxyServer.finish
+
+    def finish(self):
+        try:
+            original_finish(self)
+        finally:
+            finished.release()
+
+    monkeypatch.setattr(TCPProxyServer, "finish", finish)
+
+    def wait(proxy) -> None:
+        assert finished.acquire(timeout=5), "the proxy never finished the connection"
+        # handle_error() and untracking run after finish()
+        assert proxy.server.wait_for_connections(5)
+
+    return SimpleNamespace(wait=wait)
+
+
+def _reset_on_close(sock: socket.socket) -> None:
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))
+
+
+MID_HANDSHAKE_CASES = {
+    "after connect": (False, lambda sock: None),
+    "partial greeting": (False, lambda sock: sock.sendall(b"\x05")),
+    "after method reply": (False, lambda sock: sc.greet(sock, [sc.METHOD_NO_AUTH])),
+    "after method reply, RST": (False, lambda sock: (sc.greet(sock, [sc.METHOD_NO_AUTH]), _reset_on_close(sock))),
+    "no acceptable method, auth required": (True, lambda sock: sc.greet(sock, [sc.METHOD_NO_AUTH])),
+    "mid auth": (True, lambda sock: (sc.greet(sock, [sc.METHOD_USERPASS]), sock.sendall(b"\x01\x05us"))),
+    "mid request, RST": (
+        False,
+        lambda sock: (
+            sc.greet(sock, [sc.METHOD_NO_AUTH]),
+            sock.sendall(b"\x05\x01\x00\x01\x7f"),
+            _reset_on_close(sock),
+        ),
+    ),
+}
+
+
+@pytest.mark.parametrize("case", MID_HANDSHAKE_CASES)
+def test_client_closing_mid_handshake_logs_nothing_above_debug(make_proxy, handled, caplog, case):
+    auth_required, client_steps = MID_HANDSHAKE_CASES[case]
+    proxy = make_proxy(auth_required=auth_required)
+    caplog.set_level(logging.DEBUG, logger="src")
+
+    with proxy.connect() as sock:
+        client_steps(sock)
+    handled.wait(proxy)
+
+    problems = [r for r in caplog.records if r.levelno > logging.DEBUG or r.exc_info]
+    assert problems == []

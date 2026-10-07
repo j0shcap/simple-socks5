@@ -5,6 +5,7 @@ import time
 from typing import Optional
 
 from ..constants import SOCKS_VERSION, AddressTypeCodes, DNS_LOOKUP_TIMEOUT
+from ..errors import is_routine_disconnect
 from ..exceptions import (
     AddressTypeNotSupportedError,
     HandshakeTimeoutError,
@@ -108,7 +109,8 @@ class BaseHandler:
         except HandshakeTimeoutError:
             raise  # Expected for stalled clients; the server logs it without a traceback
         except socket.error as e:
-            logger.exception(f"Socket error during request parsing: {e}")
+            if not is_routine_disconnect(e):  # The server logs a disconnect once, at DEBUG
+                logger.exception(f"Socket error during request parsing: {e}")
             raise
 
     def _parse_address(self, address_type: int) -> DetailedAddress:
@@ -147,7 +149,8 @@ class BaseHandler:
         except HandshakeTimeoutError:
             raise
         except socket.error as e:
-            logger.exception(f"Socket error during address and port parsing: {e}")
+            if not is_routine_disconnect(e):
+                logger.exception(f"Socket error during address and port parsing: {e}")
             raise
 
     def _recv_port(self) -> int:

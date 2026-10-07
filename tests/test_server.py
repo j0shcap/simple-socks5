@@ -1,9 +1,12 @@
 import errno
+import io
+import logging
 import os
 import socket
 import struct
 import threading
 import unittest
+from contextlib import redirect_stderr
 from unittest.mock import MagicMock, patch
 
 from src.constants import AddressTypeCodes, CommandCodes
@@ -231,6 +234,117 @@ class TestSendErrorReply(unittest.TestCase):
         handler = self._make_handler()
         handler.connection.sendall.side_effect = OSError("transport endpoint closed")
         handler._send_error_reply(b"\x05\x01\x00\x01\x00\x00\x00\x00\x00\x00")
+
+
+@patch("src.server.TCPHandler")
+class TestDisconnectLogging(unittest.TestCase):
+    """A client hanging up is DEBUG without a traceback; an unexpected exception is ERROR with one."""
+
+    def run_handle(self, mock_tcp_handler_cls, parse_result=None, handshake_ok=True) -> TCPProxyServer:
+        mock_instance = mock_tcp_handler_cls.return_value
+        mock_instance.handle_request.return_value = handshake_ok
+        if isinstance(parse_result, Exception):
+            mock_instance.parse_request.side_effect = parse_result
+        else:
+            mock_instance.parse_request.return_value = parse_result
+        handler = make_proxy_handler()
+        handler.handle()
+        return handler
+
+    def assert_debug_only(self, logs):
+        self.assertFalse([r for r in logs.records if r.exc_info or r.levelno > logging.DEBUG])
+
+    def test_failed_handshake_logs_debug(self, mock_tcp_handler_cls):
+        with self.assertLogs("src.server", level="DEBUG") as logs:
+            self.run_handle(mock_tcp_handler_cls, handshake_ok=False)
+        self.assert_debug_only(logs)
+
+    def test_parse_disconnect_logs_debug(self, mock_tcp_handler_cls):
+        for error in (ConnectionError("Connection closed during recv"), ConnectionResetError("reset")):
+            with self.subTest(error=repr(error)), self.assertLogs("src.server", level="DEBUG") as logs:
+                self.run_handle(mock_tcp_handler_cls, error)
+            self.assert_debug_only(logs)
+
+    def test_parse_protocol_error_logs_error_without_traceback(self, mock_tcp_handler_cls):
+        with self.assertLogs("src.server", level="ERROR") as logs:
+            self.run_handle(mock_tcp_handler_cls, InvalidVersionError(4))
+        self.assertFalse(logs.records[0].exc_info)
+
+    def test_parse_unexpected_error_logs_traceback_and_replies(self, mock_tcp_handler_cls):
+        with self.assertLogs("src.server", level="ERROR") as logs:
+            handler = self.run_handle(mock_tcp_handler_cls, RuntimeError("bug"))
+        self.assertTrue(logs.records[0].exc_info)
+        handler.connection.sendall.assert_called_once_with(b"\x05\x01\x00\x01\x00\x00\x00\x00\x00\x00")
+
+    def test_connect_unexpected_error_logs_traceback(self, mock_tcp_handler_cls):
+        with patch("src.server.TCPRelay", side_effect=RuntimeError("bug")), \
+                self.assertLogs("src.server", level="ERROR") as logs:
+            self.run_handle(mock_tcp_handler_cls, connect_request())
+        self.assertTrue(logs.records[0].exc_info)
+
+    def test_connect_refused_logs_error_without_traceback(self, mock_tcp_handler_cls):
+        with patch("src.server.TCPRelay", side_effect=ConnectionRefusedError("refused")), \
+                self.assertLogs("src.server", level="ERROR") as logs:
+            self.run_handle(mock_tcp_handler_cls, connect_request())
+        self.assertFalse(logs.records[0].exc_info)
+
+    def test_client_gone_before_success_reply_logs_debug(self, mock_tcp_handler_cls):
+        mock_instance = mock_tcp_handler_cls.return_value
+        mock_instance.handle_request.return_value = True
+        mock_instance.parse_request.return_value = connect_request()
+        handler = make_proxy_handler()
+        handler.connection.sendall.side_effect = BrokenPipeError("broken pipe")
+        with patch("src.server.TCPRelay") as relay_cls, self.assertLogs("src.server", level="DEBUG") as logs:
+            relay_cls.return_value.get_proxy_address.return_value = BindAddress("127.0.0.1", 5000)
+            handler.handle()
+        # Only the CONNECTION line, which is logged before the reply
+        self.assertFalse([r for r in logs.records if r.exc_info or r.levelno > logging.INFO])
+
+    def test_error_reply_to_departed_client_logs_debug(self, _mock_tcp_handler_cls):
+        handler = make_proxy_handler()
+        handler.connection.sendall.side_effect = BrokenPipeError("broken pipe")
+        with self.assertLogs("src.server", level="DEBUG") as logs:
+            handler._send_error_reply(b"\x05\x01\x00\x01\x00\x00\x00\x00\x00\x00")
+        self.assert_debug_only(logs)
+
+    def test_error_reply_unexpected_oserror_logs_error(self, _mock_tcp_handler_cls):
+        handler = make_proxy_handler()
+        handler.connection.sendall.side_effect = OSError(errno.EBADF, "bad file descriptor")
+        with self.assertLogs("src.server", level="ERROR"):
+            handler._send_error_reply(b"\x05\x01\x00\x01\x00\x00\x00\x00\x00\x00")
+
+
+class TestHandleError(unittest.TestCase):
+    """Exceptions escaping a handler go through logging (and so respect -L), never straight to stderr."""
+
+    def setUp(self):
+        self.server = ThreadingTCPServer(("127.0.0.1", 0), TCPProxyServer, bind_and_activate=False)
+        self.addCleanup(self.server.server_close)
+
+    def handle_error(self, error: Exception):
+        stderr = io.StringIO()
+        with self.assertLogs("src.server", level="DEBUG") as logs, redirect_stderr(stderr):
+            try:
+                raise error
+            except Exception:
+                self.server.handle_error(MagicMock(), ("203.0.113.5", 40000))
+        self.assertEqual(stderr.getvalue(), "")
+        return logs.records
+
+    def test_routine_disconnect_logs_debug(self):
+        for error in (ConnectionResetError("reset"), OSError(errno.ENOTCONN, "not connected")):
+            with self.subTest(error=repr(error)):
+                records = self.handle_error(error)
+                self.assertEqual([(r.levelno, bool(r.exc_info)) for r in records], [(logging.DEBUG, False)])
+
+    def test_protocol_error_logs_error_without_traceback(self):
+        records = self.handle_error(InvalidVersionError(4))
+        self.assertEqual([(r.levelno, bool(r.exc_info)) for r in records], [(logging.ERROR, False)])
+
+    def test_unexpected_error_logs_traceback(self):
+        records = self.handle_error(RuntimeError("bug"))
+        self.assertEqual([(r.levelno, bool(r.exc_info)) for r in records], [(logging.ERROR, True)])
+        self.assertIn("203.0.113.5", records[0].getMessage())
 
 
 class TestListenBacklog(unittest.TestCase):

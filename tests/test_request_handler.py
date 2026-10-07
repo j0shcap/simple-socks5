@@ -1,3 +1,4 @@
+import errno
 import hmac
 import logging
 import os
@@ -460,6 +461,54 @@ class TestHandshakeTimeout(unittest.TestCase):
             logging.getLogger("src.handlers").debug("start")
             self.handler.parse_request()
         self.assertFalse([r for r in logs.records if r.exc_info or r.levelno >= 30])
+
+
+class TestHandshakeDisconnects(unittest.TestCase):
+    """A client hanging up mid-handshake is routine: DEBUG, no traceback. Anything else keeps its traceback."""
+
+    def setUp(self):
+        strip_socks5_env(self)
+        self.connection = MagicMock()
+        self.handler = TCPHandler(self.connection)
+
+    def assert_debug_only(self, logs):
+        self.assertTrue(logs.records)
+        self.assertFalse([r for r in logs.records if r.exc_info or r.levelno > logging.DEBUG])
+
+    def test_greeting_disconnects_log_debug_without_traceback(self):
+        for recv in (b"", ConnectionResetError("reset"), [b"\x05\x01", b""]):
+            with self.subTest(recv=recv):
+                self.connection.recv.side_effect = recv if isinstance(recv, list) else [recv]
+                with self.assertLogs("src.handlers", level="DEBUG") as logs:
+                    self.assertFalse(self.handler.handle_request())
+                self.assert_debug_only(logs)
+
+    def test_auth_disconnect_logs_debug_without_traceback(self):
+        self.connection.recv.side_effect = [b"\x01", b"\x05", b""]
+        with self.assertLogs("src.handlers", level="DEBUG") as logs:
+            self.assertFalse(self.handler._handle_username_password_auth())
+        self.assert_debug_only(logs)
+
+    def test_no_acceptable_methods_logs_debug(self):
+        strip_socks5_env(self, SOCKS5_AUTH_REQUIRED="true")
+        self.connection.recv.side_effect = [b"\x05\x01", b"\x00"]
+        with self.assertLogs("src.handlers", level="DEBUG") as logs:
+            self.assertFalse(self.handler.handle_request())
+        self.connection.sendall.assert_called_once_with(RESP_CORRECT_VERSION_NO_ACCEPTABLE_METHODS)
+        self.assert_debug_only(logs)
+
+    def test_unexpected_socket_error_logs_traceback(self):
+        self.connection.recv.side_effect = OSError(errno.EBADF, "bad file descriptor")
+        with self.assertLogs("src.handlers", level="ERROR") as logs:
+            self.assertFalse(self.handler.handle_request())
+        self.assertTrue(logs.records[0].exc_info)
+
+    def test_request_disconnect_raises_without_logging(self):
+        for recv in ([b""], [struct.pack("!BBBB", 5, 1, 0, 1), b"\x7f"], [ConnectionResetError("reset")]):
+            with self.subTest(recv=recv):
+                self.connection.recv.side_effect = recv + [b""]
+                with self.assertNoLogs("src.handlers"), self.assertRaises(ConnectionError):
+                    self.handler.parse_request()
 
 
 def userpass_frame(username: bytes, password: bytes) -> list[bytes]:

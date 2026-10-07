@@ -1,3 +1,5 @@
+import errno
+import logging
 import os
 import socket
 import selectors
@@ -168,6 +170,27 @@ class TestTCPRelay(unittest.TestCase):
 
         relay.listen_and_relay()
         selector.close.assert_called()
+
+    def test_routine_disconnect_logs_debug_without_traceback(self):
+        for error in (BrokenPipeError("broken pipe"), ConnectionResetError("reset")):
+            with self.subTest(error=repr(error)):
+                relay, client, proxy, selector = self._create_relay()
+                selector.select.return_value = [(_event(client), selectors.EVENT_READ)]
+                client.recv.side_effect = error
+                with self.assertLogs("src.relays.tcp_relay", level="DEBUG") as logs:
+                    relay.listen_and_relay()
+                problems = [r for r in logs.records if r.exc_info or r.levelno > logging.INFO]
+                self.assertEqual(problems, [])
+                self.assertTrue(any(r.levelno == logging.DEBUG for r in logs.records))
+
+    def test_unexpected_socket_error_logs_traceback(self):
+        relay, client, proxy, selector = self._create_relay()
+        selector.select.return_value = [(_event(client), selectors.EVENT_READ)]
+        client.recv.side_effect = OSError(errno.EBADF, "bad file descriptor")
+        with self.assertLogs("src.relays.tcp_relay", level="ERROR") as logs:
+            relay.listen_and_relay()
+        self.assertTrue(logs.records[0].exc_info)
+        selector.close.assert_called_once()
 
     def test_cleanup_closes_proxy_and_selector_not_client(self):
         relay, client, proxy, selector = self._create_relay()

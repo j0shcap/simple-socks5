@@ -1,4 +1,5 @@
 import socket
+import sys
 import threading
 import time
 from socketserver import StreamRequestHandler, ThreadingMixIn, TCPServer
@@ -10,8 +11,8 @@ from .constants import (
     handshake_timeout,
     max_connections,
 )
-from .errors import reply_code_for
-from .exceptions import HandshakeTimeoutError
+from .errors import is_routine_disconnect, reply_code_for
+from .exceptions import HandshakeTimeoutError, InvalidRequestError, InvalidVersionError
 from .handlers import TCPHandler
 from .relays import TCPRelay, UDPRelay
 from .utils import (
@@ -24,6 +25,9 @@ from .logger import get_logger
 from .models import BindAddress, Request, DetailedAddress
 
 logger = get_logger(__name__)
+
+# Failures with a known cause: logged without a traceback. Anything else is a bug and gets one.
+_EXPECTED_ERRORS = (OSError, InvalidRequestError, InvalidVersionError)
 
 
 class ThreadingTCPServer(ThreadingMixIn, TCPServer):
@@ -78,6 +82,18 @@ class ThreadingTCPServer(ThreadingMixIn, TCPServer):
             self._rejected_since_warning = 0
             self._next_limit_warning = now + CONNECTION_LIMIT_WARNING_INTERVAL
         self.shutdown_request(request)
+
+    def handle_error(self, request, client_address):
+        """
+        Logs an exception that escaped a handler. socketserver's default prints the traceback to stderr, ignoring -L.
+        """
+        e = sys.exc_info()[1]
+        if is_routine_disconnect(e):
+            logger.debug(f"Client {client_address[0]} disconnected: {e}")
+        elif isinstance(e, _EXPECTED_ERRORS):
+            logger.error(f"Error serving {client_address[0]}: {e}")
+        else:
+            logger.exception(f"Unhandled error serving {client_address[0]}")
 
     def process_request_thread(self, request, client_address):
         try:
@@ -146,7 +162,8 @@ class TCPProxyServer(StreamRequestHandler):
         request_handler = TCPHandler(self.connection, deadline=deadline)
 
         if not request_handler.handle_request():
-            logger.error("Handshake failed")
+            # TCPHandler has already logged why, at the right level
+            logger.debug("Handshake failed")
             self.server.shutdown_request(self.request)
             return
 
@@ -157,7 +174,10 @@ class TCPProxyServer(StreamRequestHandler):
             logger.warning("Handshake timed out waiting for the request")
             return
         except Exception as e:
-            logger.error(f"Failed to parse SOCKS5 request: {e}")
+            if is_routine_disconnect(e):
+                logger.debug(f"Client disconnected before finishing its request: {e}")
+            else:
+                logger.error(f"Failed to parse SOCKS5 request: {e}", exc_info=not isinstance(e, _EXPECTED_ERRORS))
             self._send_error_reply(generate_failed_reply(AddressTypeCodes.IPv4, reply_code_for(e)))
             return
 
@@ -187,11 +207,15 @@ class TCPProxyServer(StreamRequestHandler):
                 self._send_error_reply(generate_command_not_supported_reply(atyp))
 
         except Exception as e:
+            exc_info = not isinstance(e, _EXPECTED_ERRORS)
             if self._reply_sent:
-                logger.error(f"Error after replying to the {dst_request.address} request: {e}")
+                if is_routine_disconnect(e):
+                    logger.debug(f"Client disconnected after the reply to the {dst_request.address} request: {e}")
+                else:
+                    logger.error(f"Error after replying to the {dst_request.address} request: {e}", exc_info=exc_info)
                 return
             reply_code = reply_code_for(e)
-            logger.error(f"{reply_code.name} for {dst_request.address}: {e}")
+            logger.error(f"{reply_code.name} for {dst_request.address}: {e}", exc_info=exc_info)
             self._send_error_reply(generate_failed_reply(atyp, reply_code))
 
     def handle_connect(self, dst_address: DetailedAddress) -> None:
@@ -246,7 +270,10 @@ class TCPProxyServer(StreamRequestHandler):
         try:
             self.connection.sendall(reply)
         except OSError as e:
-            logger.error(f"Error sending reply: {e}")
+            if is_routine_disconnect(e):
+                logger.debug(f"Client disconnected before the reply: {e}")
+            else:
+                logger.error(f"Error sending reply: {e}")
 
     def finish(self):
         """

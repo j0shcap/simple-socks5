@@ -4,6 +4,7 @@ import socket
 
 from .base import BaseHandler
 from ..constants import SOCKS_VERSION, MethodCodes, auth_required, credentials
+from ..errors import is_routine_disconnect
 from ..exceptions import InvalidVersionError
 from ..logger import get_logger
 from ..utils import generate_connection_method_response
@@ -74,14 +75,15 @@ class TCPHandler(BaseHandler):
                 # Not implemented yet
                 return self._handle_gssapi_auth()
             else:
-                logger.warning("No acceptable authentication methods")
+                # The client is told with X'FF'. DEBUG, because a healthcheck probe offering only X'00' lands here.
+                logger.debug("No acceptable authentication methods")
                 return False
 
         except TimeoutError:
             logger.warning("Handshake timed out")
             return False
         except socket.error as e:
-            logger.exception(f"Socket error during handshake: {e}")
+            _log_socket_error("handshake", e)
             return False
 
     def _negotiate_authentication_method(self, methods: bytes) -> MethodCodes:
@@ -165,9 +167,7 @@ class TCPHandler(BaseHandler):
             logger.warning("Handshake timed out during authentication")
             return False
         except socket.error as e:
-            logger.exception(
-                f"Socket error during username/password authentication: {e}"
-            )
+            _log_socket_error("username/password authentication", e)
             return False
 
     @staticmethod
@@ -193,3 +193,10 @@ class TCPHandler(BaseHandler):
         """
         logger.warning("GSS-API authentication method not implemented")
         return False
+
+
+def _log_socket_error(stage: str, e: OSError) -> None:
+    if is_routine_disconnect(e):
+        logger.debug(f"Client disconnected during {stage}: {e}")
+    else:
+        logger.exception(f"Socket error during {stage}: {e}")
