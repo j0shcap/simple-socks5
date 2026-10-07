@@ -6,13 +6,14 @@ from socketserver import StreamRequestHandler, ThreadingMixIn, TCPServer
 
 from .constants import (
     CONNECTION_LIMIT_WARNING_INTERVAL,
+    POLICY_DENIED_WARNING_INTERVAL,
     AddressTypeCodes,
     CommandCodes,
     handshake_timeout,
     max_connections,
 )
 from .errors import is_routine_disconnect, reply_code_for
-from .exceptions import HandshakeTimeoutError, InvalidRequestError, InvalidVersionError
+from .exceptions import HandshakeTimeoutError, InvalidRequestError, InvalidVersionError, PolicyDenied
 from .handlers import TCPHandler
 from .relays import TCPRelay, UDPRelay
 from .utils import (
@@ -63,6 +64,10 @@ class ThreadingTCPServer(ThreadingMixIn, TCPServer):
         # Only touched by process_request(), which socketserver calls from the serving thread alone
         self._rejected_since_warning = 0
         self._next_limit_warning = 0.0
+        # Touched by every handler thread that denies a destination
+        self._policy_warning_lock = threading.Lock()
+        self._denied_since_warning = 0
+        self._next_policy_warning = 0.0
         super().__init__(*args, **kwargs)
         # Daemon request threads aren't tracked by ThreadingMixIn, so track their sockets for shutdown.
         self._active_requests: set[socket.socket] = set()
@@ -82,6 +87,31 @@ class ThreadingTCPServer(ThreadingMixIn, TCPServer):
             self._rejected_since_warning = 0
             self._next_limit_warning = now + CONNECTION_LIMIT_WARNING_INTERVAL
         self.shutdown_request(request)
+
+    def log_policy_denial(self, client_ip: str, dst: DetailedAddress) -> None:
+        """
+        Logs a destination the policy denied, as a WARNING at most once per POLICY_DENIED_WARNING_INTERVAL and
+        otherwise at DEBUG, so a scanning client can't flood the log.
+        """
+        with self._policy_warning_lock:
+            now = time.monotonic()
+            warn = now >= self._next_policy_warning
+            if warn:
+                suppressed = self._denied_since_warning
+                self._denied_since_warning = 0
+                self._next_policy_warning = now + POLICY_DENIED_WARNING_INTERVAL
+            else:
+                self._denied_since_warning += 1
+        if not warn:
+            logger.debug(f"Denied {client_ip} -> {dst}")
+            return
+        message = (
+            f"Denied {client_ip} -> {dst}: loopback, link-local and unspecified destinations are blocked; "
+            "set SOCKS5_ALLOW_LOOPBACK=true to allow them"
+        )
+        if suppressed:
+            message += f" ({suppressed} more denied since the last warning)"
+        logger.warning(message)
 
     def handle_error(self, request, client_address):
         """
@@ -215,7 +245,10 @@ class TCPProxyServer(StreamRequestHandler):
                     logger.error(f"Error after replying to the {dst_request.address} request: {e}", exc_info=exc_info)
                 return
             reply_code = reply_code_for(e)
-            logger.error(f"{reply_code.name} for {dst_request.address}: {e}", exc_info=exc_info)
+            if isinstance(e, PolicyDenied):
+                self.server.log_policy_denial(self.client_address.ip, dst_request.address)
+            else:
+                logger.error(f"{reply_code.name} for {dst_request.address}: {e}", exc_info=exc_info)
             self._send_error_reply(generate_failed_reply(atyp, reply_code))
 
     def handle_connect(self, dst_address: DetailedAddress) -> None:

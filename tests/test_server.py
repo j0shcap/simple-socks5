@@ -16,6 +16,7 @@ from src.exceptions import (
     InvalidDomainNameError,
     InvalidRequestError,
     InvalidVersionError,
+    PolicyDenied,
 )
 from src.models import BindAddress, DetailedAddress, Request
 from src.server import TCPProxyServer, ThreadingTCPServer
@@ -415,6 +416,53 @@ class TestConnectionLimit(unittest.TestCase):
             self.assertIn("rejected 54 connection(s)", logs.records[1].getMessage())
 
         self.assertEqual(shutdown_request.call_count, 55)
+
+
+class TestPolicyDenial(unittest.TestCase):
+    def setUp(self):
+        with _without_socks5_env():
+            self.server = ThreadingTCPServer(("127.0.0.1", 0), TCPProxyServer, bind_and_activate=False)
+        self.addCleanup(self.server.server_close)
+        self.dst = DetailedAddress(name="localhost", ip="127.0.0.1", port=80, address_type=AddressTypeCodes.IPv4)
+
+    @patch("src.server.TCPHandler")
+    def test_policy_denied_sends_rep_02_without_error_log(self, mock_tcp_handler_cls):
+        mock_tcp_handler_cls.return_value.handle_request.return_value = True
+        mock_tcp_handler_cls.return_value.parse_request.return_value = Request(5, CommandCodes.CONNECT.value, self.dst)
+        handler = make_proxy_handler()
+        handler.server = self.server
+        with patch("src.server.TCPRelay", side_effect=PolicyDenied("127.0.0.1", 80)), \
+                self.assertLogs("src", level="DEBUG") as logs:
+            handler.handle()
+        handler.connection.sendall.assert_called_once_with(b"\x05\x02\x00\x01\x00\x00\x00\x00\x00\x00")
+        self.assertNotIn("ERROR", [r.levelname for r in logs.records])
+        self.assertTrue(all(r.exc_info is None for r in logs.records))
+
+    def test_first_policy_denial_warns_with_client_dst_and_env_var(self):
+        with self.assertLogs("src.server", level="DEBUG") as logs:
+            self.server.log_policy_denial("192.0.2.7", self.dst)
+        self.assertEqual(len(logs.records), 1)
+        self.assertEqual(logs.records[0].levelname, "WARNING")
+        message = logs.records[0].getMessage()
+        self.assertIn("192.0.2.7 -> localhost:80 (127.0.0.1)", message)
+        self.assertIn("SOCKS5_ALLOW_LOOPBACK=true", message)
+        self.assertNotIn("more denied", message)
+
+    def test_policy_warning_rate_limited_with_suppressed_count(self):
+        now = [0.0]
+        with patch("src.server.time.monotonic", lambda: now[0]), \
+                self.assertLogs("src.server", level="DEBUG") as logs:
+            for _ in range(50):
+                self.server.log_policy_denial("192.0.2.7", self.dst)
+            now[0] = 9.9
+            self.server.log_policy_denial("192.0.2.8", self.dst)
+            now[0] = 10.0
+            self.server.log_policy_denial("192.0.2.9", self.dst)
+
+        levels = [r.levelname for r in logs.records]
+        self.assertEqual(levels, ["WARNING"] + ["DEBUG"] * 50 + ["WARNING"])
+        self.assertIn("192.0.2.9 -> ", logs.records[-1].getMessage())
+        self.assertIn("(50 more denied since the last warning)", logs.records[-1].getMessage())
 
 
 class TestConnectionTracking(unittest.TestCase):
