@@ -73,6 +73,7 @@ class UDPRelay(BaseRelay):
         except OSError as e:
             logger.error(f"UDP relay socket error: {e}")
         finally:
+            logger.info(self.closed_line())
             selector.close()
             try:
                 self.proxy_connection.close()
@@ -138,6 +139,7 @@ class UDPRelay(BaseRelay):
             forward_socket.sendto(
                 datagram.data, (datagram.dst_addr, datagram.dst_port)
             )
+            self.bytes_up += len(datagram.data)
             self._log_relay(
                 BaseAddress(client_addr[0], client_addr[1]),
                 BaseAddress(datagram.dst_addr, datagram.dst_port),
@@ -151,6 +153,7 @@ class UDPRelay(BaseRelay):
                 )
                 encapsulated = header + response
                 self.proxy_connection.sendto(encapsulated, client_addr)
+                self.bytes_down += len(response)
                 self._log_relay(
                     BaseAddress(datagram.dst_addr, datagram.dst_port),
                     BaseAddress(client_addr[0], client_addr[1]),

@@ -1,7 +1,9 @@
+import time
 from socket import socket
 
 from ..models import DetailedAddress, BindAddress
 from ..utils.addresses import map_address_family_to_enum
+from ..utils.logs import format_connection_closed
 
 
 class BaseRelay:
@@ -17,9 +19,25 @@ class BaseRelay:
         self.dst_address = dst_address
         self.proxy_address = None
         self.set_client_address()
+        self._started = time.monotonic()
+        self.bytes_up = 0  # client -> destination
+        self.bytes_down = 0  # destination -> client
 
     def listen_and_relay(self):
         raise NotImplementedError
+
+    def closed_line(self) -> str:
+        """
+        Returns the CLOSED summary logged once when the relay ends.
+        """
+        return format_connection_closed(
+            self.client_address.ip,
+            self.client_address.port,
+            self.dst_address,
+            self.bytes_up,
+            self.bytes_down,
+            time.monotonic() - self._started,
+        )
 
     def set_client_address(self) -> None:
         """

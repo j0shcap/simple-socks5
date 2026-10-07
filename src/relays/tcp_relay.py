@@ -1,6 +1,5 @@
 import socket
 import selectors
-import time
 
 from .base import BaseRelay
 from ..constants import RELAY_BUFFER_SIZE, RELAY_WRITE_TIMEOUT, TCP_SELECTOR_TIMEOUT, connect_timeout
@@ -8,7 +7,7 @@ from ..errors import is_routine_disconnect
 from ..models import DetailedAddress
 from ..logger import get_logger
 from ..policy import check_destination
-from ..utils import format_connection_closed, generate_tcp_socket
+from ..utils import generate_tcp_socket
 
 logger = get_logger(__name__)
 
@@ -27,9 +26,6 @@ class TCPRelay(BaseRelay):
             dst_address (DetailedAddress): The address to connect to.
         """
         super().__init__(client_connection, dst_address)
-        self._started = time.monotonic()
-        self.bytes_up = 0  # client -> destination
-        self.bytes_down = 0  # destination -> client
         self.selector = selectors.DefaultSelector()
         try:
             self.generate_proxy_connection()
@@ -120,19 +116,6 @@ class TCPRelay(BaseRelay):
         self.selector.unregister(eof_sock)
         other_sock.shutdown(socket.SHUT_WR)
 
-    def _log_connection_closed(self) -> None:
-        client_address: DetailedAddress = self.get_client_address()
-        logger.info(
-            format_connection_closed(
-                client_address.ip,
-                client_address.port,
-                self.get_dst_address(),
-                self.bytes_up,
-                self.bytes_down,
-                time.monotonic() - self._started,
-            )
-        )
-
     def _send_data(self, sock: socket.socket, data: bytes) -> None:
         sock.sendall(data)
 
@@ -140,7 +123,7 @@ class TCPRelay(BaseRelay):
         return sock.recv(RELAY_BUFFER_SIZE)
 
     def _cleanup(self) -> None:
-        self._log_connection_closed()
+        logger.info(self.closed_line())
         # Unregister both sockets from the selector
         for sock in [self.client_connection, self.proxy_connection]:
             try:
