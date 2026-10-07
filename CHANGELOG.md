@@ -27,6 +27,8 @@ contain breaking changes, and each one is listed under **Breaking changes**.
   rotated at 1 MB with 5 backups.
 - `SOCKS5_HEALTHCHECK_PORT` (default `1080`): the port the Docker healthcheck probes. Set it
   when you run the image with a different `--port`.
+- `SOCKS5_ALLOW_LOOPBACK` (default `false`): set to `true` to allow destinations on loopback,
+  link-local and unspecified addresses, which are now refused by default.
 
 ### Changed
 - `latest` and `logging-disabled` now move only on stable releases; pushes to `main` publish
@@ -108,6 +110,8 @@ contain breaking changes, and each one is listed under **Breaking changes**.
 - An exception that escaped a connection handler was printed to stderr by `socketserver`,
   even with `-L disabled`. It now goes through logging, so `-L` applies: ERROR with its
   traceback, or `debug` for a client that disconnected.
+- An empty domain name is rejected with `0x04` (host unreachable). It used to connect to the
+  proxy host itself.
 
 ### Security
 - Usernames and passwords are compared in constant time, and both are always checked, so
@@ -118,3 +122,11 @@ contain breaking changes, and each one is listed under **Breaking changes**.
   can no longer be used to log in.
 - A failed login logs the client's IP address instead of the username it submitted.
 - `SOCKS5_USERNAME` and `SOCKS5_PASSWORD` are read for each login rather than once at import.
+- **Behaviour change:** proxying to loopback (`127.0.0.0/8`, `::1`), link-local
+  (`169.254.0.0/16`, including the cloud metadata service at `169.254.169.254`, and
+  `fe80::/10`) and unspecified (`0.0.0.0/8`, `::`) addresses is refused by default, including
+  their IPv4-mapped, IPv4-compatible and NAT64 forms. The resolved IP is checked, so
+  `localhost` is refused too. A refused CONNECT gets `0x02` and a WARNING, logged at most every
+  10 seconds; a refused UDP datagram is dropped. Private ranges stay allowed. Docker users on
+  the default bridge network are unaffected; if you proxy to `localhost` on the host or with
+  `--network host`, set `SOCKS5_ALLOW_LOOPBACK=true` to restore the old behaviour.

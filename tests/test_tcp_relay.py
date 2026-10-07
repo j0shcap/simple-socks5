@@ -7,6 +7,7 @@ import unittest
 from unittest.mock import MagicMock, call, patch
 
 from src.constants import RELAY_BUFFER_SIZE, RELAY_WRITE_TIMEOUT, AddressTypeCodes
+from src.exceptions import PolicyDenied
 from src.models import DetailedAddress
 from src.relays.tcp_relay import TCPRelay
 
@@ -332,6 +333,36 @@ class TestTCPRelay(unittest.TestCase):
 
         proxy.sendall.assert_called_once_with(b"request data")
         proxy.send.assert_not_called()
+
+
+@patch("src.relays.tcp_relay.selectors.DefaultSelector")
+@patch("src.relays.tcp_relay.generate_tcp_socket")
+class TestTCPRelayDestinationPolicy(unittest.TestCase):
+    def setUp(self):
+        environ = {k: v for k, v in os.environ.items() if not k.startswith("SOCKS5_")}
+        patcher = patch.dict(os.environ, environ, clear=True)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def _dst(self, ip: str, address_type=AddressTypeCodes.IPv4) -> DetailedAddress:
+        return DetailedAddress(name="test", ip=ip, port=80, address_type=address_type)
+
+    def test_denied_destination_raises_before_socket(self, mock_gen_socket, mock_sel_cls):
+        with self.assertRaises(PolicyDenied):
+            TCPRelay(MagicMock(), self._dst("169.254.169.254"))
+        mock_gen_socket.assert_not_called()
+        mock_sel_cls.return_value.close.assert_called_once()
+
+    def test_unresolved_hostname_raises_gaierror_without_connect(self, mock_gen_socket, mock_sel_cls):
+        with self.assertRaises(socket.gaierror):
+            TCPRelay(MagicMock(), self._dst("slow-dns.example"))
+        mock_gen_socket.assert_not_called()
+
+    def test_opt_out_connects_to_loopback(self, mock_gen_socket, mock_sel_cls):
+        mock_gen_socket.return_value.getsockname.return_value = ("127.0.0.1", 5000)
+        with patch.dict(os.environ, {"SOCKS5_ALLOW_LOOPBACK": "true"}):
+            TCPRelay(MagicMock(), self._dst("::1", AddressTypeCodes.IPv6))
+        mock_gen_socket.return_value.connect.assert_called_once_with(("::1", 80))
 
 
 if __name__ == "__main__":

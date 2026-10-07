@@ -71,6 +71,7 @@ python3 app.py [--host HOST | -H HOST] [--port PORT | -P PORT] [--logging-level 
 | `SOCKS5_AUTH_REQUIRED` | `false` | Set to `true` to require authentication. |
 | `SOCKS5_HANDSHAKE_TIMEOUT` | `10` | Seconds a client has to finish the greeting, authentication and request. A client that is still sending when it runs out is disconnected without a reply. |
 | `SOCKS5_CONNECT_TIMEOUT` | `10` | Seconds to connect to the destination. A timeout replies `0x04` (host unreachable). |
+| `SOCKS5_ALLOW_LOOPBACK` | `false` | Set to `true` to allow destinations on loopback, link-local and unspecified addresses. See [Destination policy](#destination-policy). |
 | `SOCKS5_MAX_CONNECTIONS` | `200` | Maximum concurrent client connections. Further connections are closed without a reply; a WARNING with the number rejected is logged at most every 10 seconds. |
 | `LOGGING_LEVEL` | `debug` (Docker image: `info`) | Logging level used when `-L` isn't given. Same choices as `-L`. |
 | `SOCKS5_LOG_FILE` | unset | Also write ERROR and CRITICAL lines to this file, rotated at 1 MB with 5 backups. Unset means console only. See [Logging](#logging). |
@@ -180,6 +181,19 @@ The warnings are shown at `-L debug`, `info` and `warning`. They are hidden at `
 ### Publish only on trusted interfaces
 
 Bind or publish the port only where you need it, e.g. `-p 127.0.0.1:1080:1080` or a specific LAN address (`-p 192.168.1.10:1080:1080`). Ports published by Docker bypass host firewalls such as ufw. Never expose the proxy to the internet without authentication.
+
+### Destination policy
+
+By default the proxy refuses to connect or send to:
+
+- loopback: `127.0.0.0/8` and `::1`;
+- unspecified: `0.0.0.0/8` and `::`;
+- link-local: `169.254.0.0/16` and `fe80::/10`, which includes the cloud instance metadata service at `169.254.169.254`;
+- the IPv4-mapped (`::ffff:127.0.0.1`), IPv4-compatible (`::127.0.0.1`) and NAT64 (`64:ff9b::7f00:1`) forms of these.
+
+The check is made on the resolved IP address just before connecting, so `localhost` and names that resolve or rebind to these addresses are refused too. A refused CONNECT gets reply `0x02` (connection not allowed by ruleset), and a WARNING naming the client, the destination and `SOCKS5_ALLOW_LOOPBACK` is logged at most every 10 seconds. A refused UDP datagram is dropped and logged at DEBUG; the association stays open. Private ranges (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `fc00::/7`) and public addresses are allowed, so the proxy and other services stay reachable on the host's or container's own non-loopback addresses. A request with an empty domain name gets `0x04` (host unreachable).
+
+With the Docker image on its default bridge network nothing changes for you: the container's loopback is the container itself, and services on the host are reached through a private address such as `host.docker.internal`. If you run the proxy directly on a host, or with `--network host`, and proxy to services on `localhost`, set `SOCKS5_ALLOW_LOOPBACK=true`. It lifts the whole policy above.
 
 ### Cleartext
 

@@ -1,3 +1,4 @@
+import os
 import select
 import socket
 import struct
@@ -106,6 +107,32 @@ class TestHandleDatagram(unittest.TestCase):
         forward_socket.sendto.side_effect = PermissionError(13, "Permission denied")
         with patch("src.relays.udp_relay.socket.socket", return_value=forward_socket):
             self.assertTrue(self.relay._handle_datagram(build_udp_datagram("255.255.255.255", 53, b"x"), CLIENT_ADDR))
+
+
+class TestHandleDatagramDestinationPolicy(unittest.TestCase):
+    def setUp(self):
+        environ = {k: v for k, v in os.environ.items() if not k.startswith("SOCKS5_")}
+        patcher = patch.dict(os.environ, environ, clear=True)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.relay = make_relay()
+
+    def test_datagram_to_loopback_dropped_at_debug_and_association_kept(self):
+        for dst, atyp in (("127.0.0.1", 1), ("169.254.169.254", 1), ("::ffff:127.0.0.1", 4)):
+            with self.subTest(dst=dst), patch("src.relays.udp_relay.socket.socket") as socket_class, \
+                    self.assertLogs("src.relays", level="DEBUG") as logs:
+                self.assertTrue(self.relay._handle_datagram(build_udp_datagram(dst, 53, b"x", atyp=atyp), CLIENT_ADDR))
+            socket_class.assert_not_called()
+            self.assertEqual(len(logs.records), 1)
+            self.assertEqual(logs.records[0].levelname, "DEBUG")
+            self.assertIn("blocked by the destination policy", logs.output[0])
+
+    def test_datagram_to_loopback_forwarded_with_opt_out(self):
+        forward_socket = mock_forward_socket()
+        with patch.dict(os.environ, {"SOCKS5_ALLOW_LOOPBACK": "true"}), \
+                patch("src.relays.udp_relay.socket.socket", return_value=forward_socket):
+            self.assertTrue(self.relay._handle_datagram(build_udp_datagram("127.0.0.1", 53, b"x"), CLIENT_ADDR))
+        forward_socket.sendto.assert_called_once_with(b"x", ("127.0.0.1", 53))
 
 
 class TestUDPRelay(unittest.TestCase):

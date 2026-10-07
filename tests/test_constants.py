@@ -12,6 +12,7 @@ from src.constants import (
     AddressTypeCodes,
     CommandCodes,
     RELAY_BUFFER_SIZE,
+    allow_loopback,
     connect_timeout,
     credentials,
     handshake_timeout,
@@ -190,6 +191,26 @@ class TestCredentialsEnv(unittest.TestCase):
     def test_credentials_empty_env_stays_empty(self):
         with patch.dict(os.environ, {"SOCKS5_USERNAME": "", "SOCKS5_PASSWORD": ""}):
             self.assertEqual(credentials(), (b"", b""))
+
+
+class TestAllowLoopbackEnv(unittest.TestCase):
+    def setUp(self):
+        patcher = _without_socks5_env()
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_allow_loopback_default_false(self):
+        self.assertFalse(allow_loopback())
+
+    def test_allow_loopback_true_case_insensitive(self):
+        for raw in ("true", "TRUE", "True"):
+            with self.subTest(raw=raw), patch.dict(os.environ, {"SOCKS5_ALLOW_LOOPBACK": raw}):
+                self.assertTrue(allow_loopback())
+
+    def test_allow_loopback_other_values_false(self):
+        for raw in ("1", "yes", "", "false"):
+            with self.subTest(raw=raw), patch.dict(os.environ, {"SOCKS5_ALLOW_LOOPBACK": raw}):
+                self.assertFalse(allow_loopback())
 
 
 class TestLogFileEnv(unittest.TestCase):
