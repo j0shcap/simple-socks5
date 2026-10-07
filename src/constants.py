@@ -23,6 +23,11 @@ def auth_required() -> bool:
     return os.environ.get("SOCKS5_AUTH_REQUIRED", "false").lower() == "true"
 
 
+def allow_loopback() -> bool:
+    """True when loopback, link-local and unspecified destinations may be proxied to."""
+    return os.environ.get("SOCKS5_ALLOW_LOOPBACK", "false").lower() == "true"
+
+
 DEFAULT_HANDSHAKE_TIMEOUT: float = 10.0  # seconds a client has to finish greeting, auth and request
 DEFAULT_CONNECT_TIMEOUT: float = 10.0  # seconds to connect to the destination
 
@@ -50,6 +55,7 @@ def connect_timeout() -> float:
 
 DEFAULT_MAX_CONNECTIONS: int = 200
 CONNECTION_LIMIT_WARNING_INTERVAL: float = 10.0  # seconds between "connection limit reached" warnings
+POLICY_DENIED_WARNING_INTERVAL: float = 10.0  # seconds between "destination denied" warnings
 
 
 def _positive_int_env(name: str, default: int) -> int:
