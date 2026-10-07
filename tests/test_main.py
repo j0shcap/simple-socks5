@@ -2,7 +2,6 @@
 Tests that main() logs the startup advisories before serving, and shuts down gracefully on a signal.
 """
 import io
-import logging
 import os
 import signal
 import threading
@@ -11,7 +10,6 @@ from argparse import Namespace
 from contextlib import redirect_stderr
 from unittest.mock import MagicMock, patch
 
-from src import logger as logger_module
 from src.config import ProxyConfiguration
 from src.constants import SHUTDOWN_FORCE_CLOSE_TIMEOUT, SHUTDOWN_GRACE_PERIOD
 from src.main import GracefulShutdown, main
@@ -29,7 +27,6 @@ class TestMainStartupAdvisories(unittest.TestCase):
         patchers = [
             patch("src.main.ProxyConfiguration", FreshConfig),
             patch("src.logger.ProxyConfiguration", FreshConfig),
-            patch("src.logger.RotatingFileHandler", lambda *args, **kwargs: logging.NullHandler()),
             patch.dict(os.environ, environ, clear=True),
         ]
         for patcher in patchers:
@@ -40,12 +37,6 @@ class TestMainStartupAdvisories(unittest.TestCase):
         self.server_class = server_patcher.start()
         self.addCleanup(server_patcher.stop)
         self.serve_forever = self.server_class.return_value.__enter__.return_value.serve_forever
-
-    def tearDown(self):
-        for logger in logger_module._loggers.values():
-            logger.handlers.clear()
-            logger.addHandler(logging.NullHandler())
-            logger.setLevel(logging.NOTSET)
 
     def run_main(self, host="0.0.0.0", logging_level="info"):
         stderr = io.StringIO()

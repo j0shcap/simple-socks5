@@ -15,6 +15,8 @@ from src.constants import (
     connect_timeout,
     credentials,
     handshake_timeout,
+    healthcheck_port,
+    log_file,
     max_connections,
 )
 
@@ -188,6 +190,46 @@ class TestCredentialsEnv(unittest.TestCase):
     def test_credentials_empty_env_stays_empty(self):
         with patch.dict(os.environ, {"SOCKS5_USERNAME": "", "SOCKS5_PASSWORD": ""}):
             self.assertEqual(credentials(), (b"", b""))
+
+
+class TestLogFileEnv(unittest.TestCase):
+    def setUp(self):
+        patcher = _without_socks5_env()
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_log_file_unset_is_none(self):
+        self.assertIsNone(log_file())
+
+    def test_log_file_blank_is_none(self):
+        for raw in ("", "  "):
+            with self.subTest(raw=raw), patch.dict(os.environ, {"SOCKS5_LOG_FILE": raw}):
+                self.assertIsNone(log_file())
+
+    def test_log_file_reads_path(self):
+        with patch.dict(os.environ, {"SOCKS5_LOG_FILE": "/var/log/socks5.log"}):
+            self.assertEqual(log_file(), "/var/log/socks5.log")
+
+
+class TestHealthcheckPortEnv(unittest.TestCase):
+    def setUp(self):
+        patcher = _without_socks5_env()
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_healthcheck_port_default_is_1080(self):
+        self.assertEqual(healthcheck_port(), 1080)
+
+    def test_healthcheck_port_reads_env(self):
+        for raw, port in (("1", 1), ("8080", 8080), ("65535", 65535)):
+            with self.subTest(raw=raw), patch.dict(os.environ, {"SOCKS5_HEALTHCHECK_PORT": raw}):
+                self.assertEqual(healthcheck_port(), port)
+
+    def test_healthcheck_port_rejects_invalid(self):
+        for raw in ("0", "-1", "65536", "abc", "1.5"):
+            with self.subTest(raw=raw), patch.dict(os.environ, {"SOCKS5_HEALTHCHECK_PORT": raw}):
+                with self.assertRaisesRegex(ValueError, "SOCKS5_HEALTHCHECK_PORT"):
+                    healthcheck_port()
 
 
 if __name__ == '__main__':

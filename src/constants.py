@@ -1,6 +1,7 @@
 import math
 import os
 from enum import Enum
+from typing import Optional
 
 SOCKS_VERSION: int = 5
 
@@ -68,12 +69,29 @@ def max_connections() -> int:
     return _positive_int_env("SOCKS5_MAX_CONNECTIONS", DEFAULT_MAX_CONNECTIONS)
 
 
+def log_file() -> Optional[str]:
+    """The path errors are also written to, or None to log to the console only."""
+    return os.environ.get("SOCKS5_LOG_FILE", "").strip() or None
+
+
+DEFAULT_HEALTHCHECK_PORT: int = 1080
+
+
+def healthcheck_port() -> int:
+    """The port the container healthcheck probes; the server itself never reads it."""
+    port = _positive_int_env("SOCKS5_HEALTHCHECK_PORT", DEFAULT_HEALTHCHECK_PORT)
+    if port > 65535:
+        raise ValueError(f"SOCKS5_HEALTHCHECK_PORT must be a port number up to 65535, got {port}")
+    return port
+
+
 # Buffer and timeout constants
 RELAY_BUFFER_SIZE: int = 65536
 TCP_SELECTOR_TIMEOUT: int = 3  # seconds
 # Bounds a whole sendall() call, so a reader slower than RELAY_BUFFER_SIZE per this many seconds is dropped
 RELAY_WRITE_TIMEOUT: float = 300.0  # seconds
 LOG_FILE_MAX_BYTES: int = 1048576  # 1 MB
+LOG_FILE_BACKUP_COUNT: int = 5
 DNS_LOOKUP_TIMEOUT: float = 2.0  # seconds
 UDP_RECV_TIMEOUT: int = 120  # seconds
 UDP_FORWARD_TIMEOUT: int = 10  # seconds
