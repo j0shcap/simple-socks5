@@ -52,7 +52,7 @@ Setting `SOCKS5_AUTH_REQUIRED=false` explicitly acknowledges the choice: the ope
 
 ### Upgrading to 2.1
 
-2.1 changes some defaults: the image logs at `info`, proxying to loopback and link-local addresses is refused unless `SOCKS5_ALLOW_LOOPBACK=true`, nothing is written to `/app/errors.log` unless `SOCKS5_LOG_FILE` is set, and `latest` moves only on releases. Each change has an opt-out; see [Upgrading from 2.0](CHANGELOG.md#upgrading-from-20-behaviour-changes). To keep the 2.0 behaviour, pin `jcaponigro20/simple-socks5:2.0.0`.
+2.1 changes some defaults: the image logs at `info`, proxying to loopback and link-local addresses is refused unless `SOCKS5_ALLOW_LOOPBACK=true`, nothing is written to `/app/errors.log` unless `SOCKS5_LOG_FILE` is set, and `latest` moves only on releases. Each of these has an opt-out. An empty `SOCKS5_USERNAME` or `SOCKS5_PASSWORD` can no longer be used to log in, with no opt-out. See [Upgrading from 2.0](CHANGELOG.md#upgrading-from-20-behaviour-changes). To keep the 2.0 behaviour, pin `jcaponigro20/simple-socks5:2.0.0`.
 
 ## Usage
 
