@@ -92,7 +92,7 @@ CONNECTION | 172.17.0.1:51234 -> example.com:443 (93.184.216.34)
 CLOSED | 172.17.0.1:51234 -> example.com:443 (93.184.216.34) | up=517 B down=10485943 B | 2.31 s
 ```
 
-`up` counts bytes from the client to the destination, `down` the other way. The destination is the hostname the client sent, with the address it resolved to, or just the IP the client sent: the proxy never does reverse-DNS lookups. Individual UDP datagrams are logged at `debug`.
+`up` counts bytes from the client to the destination, `down` the other way. The destination is the hostname the client sent, with the address it resolved to, or just the IP the client sent: the proxy never does reverse-DNS lookups. A UDP association logs the same two lines: it closes with its TCP control connection, and `up` and `down` count the datagram payloads relayed. Individual UDP datagrams are logged at `debug`.
 
 A client that disconnects mid-handshake is logged at `debug` only; unexpected errors are logged at ERROR with a traceback. Colours are used only when stderr is a terminal. Nothing is written to disk unless `SOCKS5_LOG_FILE` is set.
 
@@ -115,6 +115,8 @@ docker build --build-arg LOGGING_LEVEL=debug -t my-socks5 .
 
 The container always listens on `0.0.0.0` inside Docker; the `-p` flag decides which host interfaces the port is published on.
 
+Docker's default bridge network has no IPv6. A client that resolves names itself (`curl --socks5`, `socks5://` URLs) may send the proxy an IPv6 address, which then fails with reply `0x03` (network unreachable). Let the proxy resolve names instead (`curl --socks5-hostname`, `socks5h://`, "Proxy DNS when using SOCKS v5" in Firefox), or [enable IPv6](https://docs.docker.com/engine/daemon/ipv6/) on the container's network.
+
 ### Version tags and pinning
 
 ```bash
@@ -134,7 +136,7 @@ docker pull jcaponigro20/simple-socks5:2       # 2.x minor and patch releases
 
 The image's `HEALTHCHECK` runs `python -m src.healthcheck` every 30 seconds. It sends a SOCKS5 greeting to `127.0.0.1` on `SOCKS5_HEALTHCHECK_PORT` (default `1080`) and passes on any SOCKS5 reply, so it works with and without authentication, and the proxy logs it at `debug` only. If you override the command with a different `--port`, set `SOCKS5_HEALTHCHECK_PORT` to match. If you bind a specific non-loopback address instead of `0.0.0.0` or `::`, the healthcheck can't reach it.
 
-`docker stop` (SIGTERM) shuts the proxy down gracefully: it stops accepting connections, gives open connections up to 5 seconds to finish, then closes them and exits with code 0. Ctrl-C (SIGINT) does the same.
+`docker stop` (SIGTERM) shuts the proxy down gracefully: it stops accepting connections, gives open connections up to 5 seconds to finish, then closes them and exits with code 0. Ctrl-C (SIGINT) does the same. Docker kills the container if it hasn't exited by the stop timeout, so keep that above 5 seconds: Docker Engine's default is 10, but some Docker Desktop versions use less. Run with `--stop-timeout 10` or stop with `docker stop -t 10` to be sure.
 
 ## Authentication
 

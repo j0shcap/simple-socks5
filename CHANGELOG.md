@@ -123,6 +123,8 @@ defaults changed:
 - A request now gets exactly one SOCKS reply. An error after the success reply (for example
   during a CONNECT tunnel) used to send a second, failure reply, injecting 10 bytes into the
   stream; it is now only logged.
+- A UDP association now logs a `CLOSED` line when it ends, like a TCP connection, with the
+  datagram payload bytes relayed each way.
 - A UDP association now ends as soon as its TCP control connection closes, as RFC 1928
   requires. Before, its relay port kept relaying datagrams for up to 2 minutes after the client
   disconnected. The 2-minute idle timeout stays, but only datagrams from the client reset it.
