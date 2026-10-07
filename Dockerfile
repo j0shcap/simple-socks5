@@ -17,7 +17,8 @@ RUN useradd -m appuser \
 USER appuser
 
 EXPOSE 1080
+# Speaks SOCKS5, so the server logs the probe at DEBUG only. Set SOCKS5_HEALTHCHECK_PORT if you change --port.
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
-    CMD python -c "import socket; s=socket.socket(); s.settimeout(3); s.connect(('127.0.0.1',1080)); s.close()"
+    CMD ["python", "-m", "src.healthcheck"]
 # Exec form so python is PID 1 and receives SIGTERM from docker stop; app.py reads LOGGING_LEVEL itself.
 CMD ["python", "app.py", "--host", "0.0.0.0", "--port", "1080"]
