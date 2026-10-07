@@ -118,7 +118,7 @@ class BaseHandler:
             if address_type == AddressTypeCodes.IPv4.value:
                 address: str = socket.inet_ntoa(self._recv_exact(4))
                 port = self._recv_port()
-                domain_name: str = self._gethostbyaddr(address)
+                domain_name: str = address  # IP literals are never reverse-resolved
             elif address_type == AddressTypeCodes.DOMAIN_NAME.value:
                 domain_length = self._recv_exact(1)[0]
                 raw_domain_name = self._recv_exact(domain_length)
@@ -133,7 +133,7 @@ class BaseHandler:
                     socket.AF_INET6, self._recv_exact(16)
                 )
                 port = self._recv_port()
-                domain_name: str = self._gethostbyaddr(address)
+                domain_name: str = address
             else:
                 raise AddressTypeNotSupportedError(address_type)
 
@@ -176,12 +176,6 @@ class BaseHandler:
                 logger.error(f"DNS lookup error for {label}", exc_info=error[0])
             return None
         return result[0]
-
-    def _gethostbyaddr(self, ip: str) -> str:
-        result = self._dns_lookup_with_timeout(
-            lambda: socket.gethostbyaddr(ip)[0], ip
-        )
-        return result if result is not None else ip
 
     def _resolve_hostname(self, name: str) -> tuple[str, int]:
         """Resolve a hostname to (ip, address_type_value) using getaddrinfo for dual-stack support."""

@@ -19,7 +19,10 @@ class DetailedAddress(BaseAddress):
     address_type: AddressTypeCodes  # IPv4, IPv6, or domain name, see AddressTypeCodes
 
     def __str__(self):
-        return f"{self.name}, {self.ip}:{self.port}"
+        host = f"[{self.name}]" if ":" in self.name else self.name
+        if self.name == self.ip:
+            return f"{host}:{self.port}"
+        return f"{host}:{self.port} ({self.ip})"
 
 
 @dataclass

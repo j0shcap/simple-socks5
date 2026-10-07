@@ -100,3 +100,18 @@ def test_nxdomain_replies_host_unreachable(proxy):
 def test_non_utf8_domain_replies_host_unreachable(proxy):
     request = sc.build_request(sc.CMD_CONNECT, sc.ATYP_DOMAIN, b"\x02\xff\xfe", 80)
     assert _request_reply_code(proxy, request) == sc.REP_HOST_UNREACHABLE
+
+
+def test_connect_by_ip_never_reverse_resolves(proxy, echo_origin, monkeypatch):
+    lookups = []
+
+    def reverse_lookup(ip):
+        lookups.append(ip)
+        raise AssertionError(f"reverse DNS lookup for {ip}")
+
+    monkeypatch.setattr(socket, "gethostbyaddr", reverse_lookup)
+    with sc.open_tunnel(proxy.address, "127.0.0.1", echo_origin.port) as tunnel:
+        _assert_echo(tunnel)
+    proxy.server.wait_for_connections(5)
+
+    assert lookups == []
