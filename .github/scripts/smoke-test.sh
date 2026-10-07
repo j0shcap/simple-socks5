@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Usage: smoke-test.sh IMAGE [CMD...]
-# Runs IMAGE (optionally with CMD), waits for the SOCKS5 server and fetches a file through it, then checks
-# that `docker stop` exits 0 in under 6s, both with a relayed connection open and with none.
+# Runs IMAGE (optionally with CMD), waits for the SOCKS5 server and fetches a file through it, waits for the
+# HEALTHCHECK to report healthy and checks the logs hold no errors, then checks that `docker stop` exits 0 in
+# under 6s, both with a relayed connection open and with none.
 set -euo pipefail
 
 if (( $# < 1 )); then
@@ -71,6 +72,40 @@ try:
 except OSError:
     sys.exit(1)
 PY
+}
+
+# Docker runs the first healthcheck one interval (30s) after the start, so wait_for's 30s isn't enough.
+wait_for_healthy() {
+    local status
+    for _ in $(seq 60); do
+        status=$(docker inspect -f '{{.State.Health.Status}}' "$container")
+        case $status in
+            healthy) return 0 ;;
+            unhealthy)
+                echo "Container is unhealthy: $(docker inspect -f '{{json .State.Health.Log}}' "$container")" >&2
+                exit 1
+                ;;
+        esac
+        sleep 1
+    done
+    echo "Timed out after 60s waiting for the container to become healthy" >&2
+    exit 1
+}
+
+# The readiness probes, the fetch and the healthchecks are all routine, so none of them may log an error.
+# With LOGGING_LEVEL=disabled the logs must be empty.
+assert_quiet_logs() {
+    local logs
+    logs=$(docker logs "$container" 2>&1)
+    if grep -Eq 'ERROR|Traceback' <<<"$logs"; then
+        echo "Expected no ERROR or Traceback in the container logs" >&2
+        exit 1
+    fi
+    if docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$container" | grep -qx 'LOGGING_LEVEL=disabled' \
+            && [[ -n $logs ]]; then
+        echo "Expected no output with LOGGING_LEVEL=disabled" >&2
+        exit 1
+    fi
 }
 
 start_container() {
@@ -145,12 +180,22 @@ wait_for "the HTTP server on port $http_port" http_ready
 # holds once the proxy refuses loopback destinations.
 start_container "$@"
 
+healthcheck=$(docker inspect -f '{{json .Config.Healthcheck.Test}}' "$container")
+if [[ $healthcheck != *src.healthcheck* ]]; then
+    echo "Expected the HEALTHCHECK to run src.healthcheck, got $healthcheck" >&2
+    exit 1
+fi
+
 body=$(curl -fsS --max-time 10 --socks5-hostname "127.0.0.1:$socks_port" \
     "http://host.docker.internal:$http_port/ok.txt")
 if [[ $body != "$nonce" ]]; then
     echo "Expected '$nonce' through the proxy, got '$body'" >&2
     exit 1
 fi
+
+wait_for_healthy
+echo "HEALTHCHECK: healthy"
+assert_quiet_logs
 
 hold_connection > "$tmp/holder.out" &
 holder_pid=$!

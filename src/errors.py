@@ -1,5 +1,6 @@
 """
-Maps exceptions raised while serving a request to SOCKS5 reply codes (RFC 1928 §6).
+Classifies exceptions raised while serving a request: their SOCKS5 reply codes (RFC 1928 §6), and whether they
+are a routine disconnect.
 """
 import errno
 import socket
@@ -30,3 +31,13 @@ def reply_code_for(exc: BaseException) -> ReplyCodes:
     if isinstance(exc, OSError) and exc.errno in _ERRNO_RULES:
         return _ERRNO_RULES[exc.errno]
     return ReplyCodes.GENERAL_SOCKS_SERVER_FAILURE
+
+
+def is_routine_disconnect(exc: BaseException) -> bool:
+    """
+    True when a peer hung up (EOF, reset, broken pipe) or the socket is already disconnected. That is normal at any
+    point of a connection, so it's logged at DEBUG without a traceback. A refused connect is a destination failure.
+    """
+    if isinstance(exc, ConnectionRefusedError):
+        return False
+    return isinstance(exc, ConnectionError) or (isinstance(exc, OSError) and exc.errno == errno.ENOTCONN)

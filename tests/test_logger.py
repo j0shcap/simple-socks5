@@ -1,61 +1,171 @@
+import io
 import logging
-import threading
 import unittest
-from unittest.mock import patch
+
+import pytest
 
 from src.config import ProxyConfiguration
-from src.logger import get_logger, configure_logger, _logger_lock
+from src.logger import ColorFormatter, get_logger, update_loggers
+
+CONSOLE_FORMAT = "%(levelname)s %(message)s"
 
 
-class TestLoggerThreadSafety(unittest.TestCase):
-    def test_logger_lock_exists(self):
-        """A threading.Lock should exist for thread-safe logger access."""
-        self.assertIsInstance(_logger_lock, type(threading.Lock()))
+class TTYStream(io.StringIO):
+    def isatty(self):
+        return True
 
-    def test_get_logger_returns_same_instance(self):
-        """Repeated calls with the same name return the same logger."""
-        logger1 = get_logger("test_same")
-        logger2 = get_logger("test_same")
-        self.assertIs(logger1, logger2)
 
-    def test_get_logger_concurrent_access(self):
-        """Concurrent get_logger calls with the same name should not raise."""
-        errors = []
-        results = []
+@pytest.fixture
+def configure(monkeypatch, tmp_path):
+    """Returns configure(level, stream=None): runs update_loggers() at that level, logging to stream."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("SOCKS5_LOG_FILE", raising=False)
 
-        def worker(name):
-            try:
-                logger = get_logger(name)
-                results.append(logger)
-            except Exception as e:
-                errors.append(e)
+    class FreshConfig(ProxyConfiguration):
+        pass
 
-        threads = [threading.Thread(target=worker, args=("concurrent_test",)) for _ in range(20)]
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join()
+    monkeypatch.setattr("src.logger.ProxyConfiguration", FreshConfig)
 
-        self.assertEqual(len(errors), 0)
-        # All threads should get the same logger instance
-        self.assertTrue(all(r is results[0] for r in results))
+    def _configure(level: str, stream=None) -> io.StringIO:
+        stream = stream if stream is not None else io.StringIO()
+        FreshConfig.initialize("127.0.0.1", 1080, level)
+        monkeypatch.setattr("sys.stderr", stream)
+        update_loggers()
+        return stream
 
-    def test_configure_logger_does_not_duplicate_handlers(self):
-        """Calling configure_logger twice should not add duplicate handlers."""
+    return _configure
 
-        class FreshConfig(ProxyConfiguration):
-            pass
 
-        FreshConfig.initialize("localhost", 1080, "debug")
+def package_logger() -> logging.Logger:
+    return logging.getLogger("src")
 
-        with patch("src.logger.ProxyConfiguration", FreshConfig):
-            logger = logging.getLogger("test_no_dup_handlers")
-            logger.handlers.clear()
-            configure_logger(logger)
-            count_after_first = len(logger.handlers)
-            configure_logger(logger)
-            count_after_second = len(logger.handlers)
-            self.assertEqual(count_after_first, count_after_second)
+
+def test_get_logger_returns_the_stdlib_logger():
+    assert get_logger("src.some.module") is logging.getLogger("src.some.module")
+
+
+def test_module_loggers_have_no_handlers_and_propagate(configure):
+    configure("info")
+    module_logger = get_logger("src.handlers.tcp")
+
+    assert module_logger.handlers == []
+    assert module_logger.propagate
+    assert module_logger.level == logging.NOTSET
+
+
+def test_module_records_reach_the_package_handler(configure):
+    stream = configure("info")
+
+    get_logger("src.a").info("hello")
+    get_logger("src.b").debug("hidden")
+
+    lines = stream.getvalue().splitlines()
+    assert len(lines) == 1
+    assert lines[0].endswith(" - [INFO] - hello")
+
+
+def test_update_loggers_is_idempotent(configure, monkeypatch, tmp_path):
+    configure("info")
+    configure("info")
+    assert len(package_logger().handlers) == 1
+
+    monkeypatch.setenv("SOCKS5_LOG_FILE", str(tmp_path / "proxy.log"))
+    configure("info")
+    configure("info")
+    assert len(package_logger().handlers) == 2
+
+
+def test_configured_package_logger_does_not_propagate(configure):
+    configure("info")
+    assert not package_logger().propagate
+
+
+def test_disabled_writes_nothing_and_creates_no_file(configure, monkeypatch, tmp_path):
+    monkeypatch.setenv("SOCKS5_LOG_FILE", str(tmp_path / "proxy.log"))
+    stream = configure("disabled")
+
+    get_logger("src.x").critical("boom")
+
+    assert stream.getvalue() == ""
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_no_errors_log_by_default(configure, tmp_path):
+    configure("debug")
+
+    get_logger("src.x").error("boom")
+
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_log_file_receives_errors_only(configure, monkeypatch, tmp_path):
+    log_path = tmp_path / "proxy.log"
+    monkeypatch.setenv("SOCKS5_LOG_FILE", str(log_path))
+    configure("debug")
+
+    get_logger("src.x").warning("just a warning")
+    get_logger("src.x").error("boom")
+
+    contents = log_path.read_text()
+    assert "[src.x] - [ERROR] - [boom]" in contents
+    assert "just a warning" not in contents
+
+
+def test_rotation_with_several_module_loggers(configure, monkeypatch, tmp_path):
+    log_path = tmp_path / "proxy.log"
+    monkeypatch.setenv("SOCKS5_LOG_FILE", str(log_path))
+    monkeypatch.setattr("src.logger.LOG_FILE_MAX_BYTES", 300)
+    configure("error")
+
+    for i in range(60):
+        get_logger(f"src.{'ab'[i % 2]}").error(f"record {i:02d}")
+
+    files = sorted(tmp_path.iterdir())
+    assert [f.name for f in files] == [f"proxy.log{suffix}" for suffix in ("", ".1", ".2", ".3", ".4", ".5")]
+    record_size = len(log_path.read_text().splitlines()[0]) + 1
+    assert all(f.stat().st_size <= 300 + record_size for f in files)
+    # Newest records survive, each exactly once and in order
+    kept = [line for f in reversed(files) for line in f.read_text().splitlines()]
+    numbers = [int(line.split("record ")[1][:2]) for line in kept]
+    assert numbers == list(range(numbers[0], 60))
+
+
+def test_unwritable_log_file_logs_error_and_continues(configure, monkeypatch, tmp_path):
+    missing = tmp_path / "missing-dir" / "proxy.log"
+    monkeypatch.setenv("SOCKS5_LOG_FILE", str(missing))
+    stream = configure("info")
+
+    get_logger("src.x").info("still running")
+
+    output = stream.getvalue()
+    assert "SOCKS5_LOG_FILE" in output and str(missing) in output
+    assert "[ERROR]" in output
+    assert "still running" in output
+    assert len(package_logger().handlers) == 1
+
+
+def test_colour_only_on_tty(configure):
+    assert "\x1b[" not in _log_error(configure("info"))
+    assert "\x1b[" in _log_error(configure("info", TTYStream()))
+
+
+def _log_error(stream: io.StringIO) -> str:
+    get_logger("src.x").error("boom")
+    return stream.getvalue()
+
+
+class TestColorFormatter(unittest.TestCase):
+    def record(self, level: int) -> logging.LogRecord:
+        return logging.LogRecord("src.x", level, __file__, 1, "message", None, None)
+
+    def test_colour_wraps_message(self):
+        formatted = ColorFormatter(CONSOLE_FORMAT, use_color=True).format(self.record(logging.ERROR))
+        self.assertTrue(formatted.startswith("\x1b[91m"))
+        self.assertTrue(formatted.endswith("\x1b[0m"))
+
+    def test_no_colour_is_plain(self):
+        formatted = ColorFormatter(CONSOLE_FORMAT, use_color=False).format(self.record(logging.ERROR))
+        self.assertEqual(formatted, "ERROR message")
 
 
 if __name__ == "__main__":

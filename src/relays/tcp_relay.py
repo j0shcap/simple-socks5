@@ -1,15 +1,13 @@
 import socket
 import selectors
+import time
 
 from .base import BaseRelay
 from ..constants import RELAY_BUFFER_SIZE, RELAY_WRITE_TIMEOUT, TCP_SELECTOR_TIMEOUT, connect_timeout
+from ..errors import is_routine_disconnect
 from ..models import DetailedAddress
 from ..logger import get_logger
-from ..utils import (
-    generate_tcp_socket,
-    detailed_relay_template,
-    connection_closed_template,
-)
+from ..utils import format_connection_closed, generate_tcp_socket
 
 logger = get_logger(__name__)
 
@@ -28,6 +26,9 @@ class TCPRelay(BaseRelay):
             dst_address (DetailedAddress): The address to connect to.
         """
         super().__init__(client_connection, dst_address)
+        self._started = time.monotonic()
+        self.bytes_up = 0  # client -> destination
+        self.bytes_down = 0  # destination -> client
         self.selector = selectors.DefaultSelector()
         try:
             self.generate_proxy_connection()
@@ -78,18 +79,6 @@ class TCPRelay(BaseRelay):
                         else self.client_connection
                     )
 
-                    # Metadata for logging
-                    other_info: DetailedAddress = (
-                        self.get_dst_address()
-                        if sock is self.client_connection
-                        else self.get_client_address()
-                    )
-                    sock_info: DetailedAddress = (
-                        self.get_client_address()
-                        if sock is self.client_connection
-                        else self.get_dst_address()
-                    )
-
                     # Handle incoming data
                     data: bytes = self._recv_data(sock)
                     if not data:
@@ -99,16 +88,18 @@ class TCPRelay(BaseRelay):
 
                     # Blocks while the receiver is slow: that is the backpressure
                     self._send_data(other_sock, data)
-                    self._log_relay(sock_info, other_info, len(data))
+                    if sock is self.client_connection:
+                        self.bytes_up += len(data)
+                    else:
+                        self.bytes_down += len(data)
 
-        except BrokenPipeError:
-            logger.exception("Broken Pipe")
-        except ConnectionResetError:
-            logger.exception("Connection Reset")
         except TimeoutError:
             logger.warning(f"Relay write timed out after {RELAY_WRITE_TIMEOUT} seconds")
-        except OSError:
-            logger.exception("Socket error during relay")
+        except OSError as e:
+            if is_routine_disconnect(e):
+                logger.debug(f"Relay ended: {e}")
+            else:
+                logger.exception("Socket error during relay")
         finally:
             self._cleanup()
 
@@ -127,61 +118,24 @@ class TCPRelay(BaseRelay):
         self.selector.unregister(eof_sock)
         other_sock.shutdown(socket.SHUT_WR)
 
-    def _log_relay(
-        self, src_addr: DetailedAddress, dst_addr: DetailedAddress, data_len: int
-    ) -> None:
-        """
-        Logs the relay of data between the client and the destination.
-
-        Args:
-            src_addr (DetailedAddress): The source socket information.
-            dst_addr (DetailedAddress): The destination socket information.
-            data_len (int): The length of the data sent.
-        """
-        logger.debug(
-            detailed_relay_template.substitute(
-                protocol="TCP",
-                src_domain_name=src_addr.name,
-                src_ip=src_addr.ip,
-                src_port=src_addr.port,
-                dst_domain_name=dst_addr.name,
-                dst_ip=dst_addr.ip,
-                dst_port=dst_addr.port,
-                data_size=data_len,
-            )
-        )
-
     def _log_connection_closed(self) -> None:
-        """
-        Logs a connection closed event.
-        """
         client_address: DetailedAddress = self.get_client_address()
-        dst_address: DetailedAddress = self.get_dst_address()
-
         logger.info(
-            connection_closed_template.substitute(
-                src_domain_name=client_address.name,
-                src_ip=client_address.ip,
-                src_port=client_address.port,
-                dst_domain_name=dst_address.name,
-                dst_ip=dst_address.ip,
-                dst_port=dst_address.port,
+            format_connection_closed(
+                client_address.ip,
+                client_address.port,
+                self.get_dst_address(),
+                self.bytes_up,
+                self.bytes_down,
+                time.monotonic() - self._started,
             )
         )
 
     def _send_data(self, sock: socket.socket, data: bytes) -> None:
-        try:
-            sock.sendall(data)
-        except socket.error as e:
-            logger.error(f"Error sending data: {e}")
-            raise
+        sock.sendall(data)
 
     def _recv_data(self, sock: socket.socket) -> bytes:
-        try:
-            return sock.recv(RELAY_BUFFER_SIZE)
-        except socket.error as e:
-            logger.error(f"Error receiving data: {e}")
-            raise
+        return sock.recv(RELAY_BUFFER_SIZE)
 
     def _cleanup(self) -> None:
         self._log_connection_closed()

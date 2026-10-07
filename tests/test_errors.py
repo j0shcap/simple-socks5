@@ -6,9 +6,10 @@ import socket
 import unittest
 
 from src.constants import ReplyCodes
-from src.errors import reply_code_for
+from src.errors import is_routine_disconnect, reply_code_for
 from src.exceptions import (
     AddressTypeNotSupportedError,
+    HandshakeTimeoutError,
     InvalidDomainNameError,
     InvalidRequestError,
     InvalidVersionError,
@@ -43,6 +44,29 @@ class TestReplyCodeFor(unittest.TestCase):
     def test_typed_request_errors_are_invalid_request_errors(self):
         self.assertIsInstance(AddressTypeNotSupportedError(5), InvalidRequestError)
         self.assertIsInstance(InvalidDomainNameError(b"\xff"), InvalidRequestError)
+
+
+ROUTINE_DISCONNECT_CASES = (
+    (ConnectionError("Connection closed during recv"), True),
+    (ConnectionResetError(), True),
+    (BrokenPipeError(), True),
+    (ConnectionAbortedError(), True),
+    (OSError(errno.ENOTCONN, "not connected"), True),
+    (ConnectionRefusedError(), False),
+    (HandshakeTimeoutError("expired"), False),
+    (TimeoutError(), False),
+    (OSError(errno.EBADF, "bad file descriptor"), False),
+    (OSError(), False),
+    (InvalidVersionError(4), False),
+    (RuntimeError("bug"), False),
+)
+
+
+class TestIsRoutineDisconnect(unittest.TestCase):
+    def test_is_routine_disconnect(self):
+        for exc, expected in ROUTINE_DISCONNECT_CASES:
+            with self.subTest(exc=repr(exc)):
+                self.assertIs(is_routine_disconnect(exc), expected)
 
 
 if __name__ == "__main__":

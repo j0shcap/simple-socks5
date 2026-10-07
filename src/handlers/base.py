@@ -5,6 +5,7 @@ import time
 from typing import Optional
 
 from ..constants import SOCKS_VERSION, AddressTypeCodes, DNS_LOOKUP_TIMEOUT
+from ..errors import is_routine_disconnect
 from ..exceptions import (
     AddressTypeNotSupportedError,
     HandshakeTimeoutError,
@@ -108,7 +109,8 @@ class BaseHandler:
         except HandshakeTimeoutError:
             raise  # Expected for stalled clients; the server logs it without a traceback
         except socket.error as e:
-            logger.exception(f"Socket error during request parsing: {e}")
+            if not is_routine_disconnect(e):  # The server logs a disconnect once, at DEBUG
+                logger.exception(f"Socket error during request parsing: {e}")
             raise
 
     def _parse_address(self, address_type: int) -> DetailedAddress:
@@ -118,7 +120,7 @@ class BaseHandler:
             if address_type == AddressTypeCodes.IPv4.value:
                 address: str = socket.inet_ntoa(self._recv_exact(4))
                 port = self._recv_port()
-                domain_name: str = self._gethostbyaddr(address)
+                domain_name: str = address  # IP literals are never reverse-resolved
             elif address_type == AddressTypeCodes.DOMAIN_NAME.value:
                 domain_length = self._recv_exact(1)[0]
                 raw_domain_name = self._recv_exact(domain_length)
@@ -133,7 +135,7 @@ class BaseHandler:
                     socket.AF_INET6, self._recv_exact(16)
                 )
                 port = self._recv_port()
-                domain_name: str = self._gethostbyaddr(address)
+                domain_name: str = address
             else:
                 raise AddressTypeNotSupportedError(address_type)
 
@@ -147,7 +149,8 @@ class BaseHandler:
         except HandshakeTimeoutError:
             raise
         except socket.error as e:
-            logger.exception(f"Socket error during address and port parsing: {e}")
+            if not is_routine_disconnect(e):
+                logger.exception(f"Socket error during address and port parsing: {e}")
             raise
 
     def _recv_port(self) -> int:
@@ -176,12 +179,6 @@ class BaseHandler:
                 logger.error(f"DNS lookup error for {label}", exc_info=error[0])
             return None
         return result[0]
-
-    def _gethostbyaddr(self, ip: str) -> str:
-        result = self._dns_lookup_with_timeout(
-            lambda: socket.gethostbyaddr(ip)[0], ip
-        )
-        return result if result is not None else ip
 
     def _resolve_hostname(self, name: str) -> tuple[str, int]:
         """Resolve a hostname to (ip, address_type_value) using getaddrinfo for dual-stack support."""

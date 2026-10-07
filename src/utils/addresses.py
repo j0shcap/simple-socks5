@@ -1,5 +1,4 @@
 import socket
-from functools import lru_cache
 
 from ..constants import AddressTypeCodes
 
@@ -49,17 +48,3 @@ def map_address_int_to_socket_family(address_type: int) -> int:
         return socket.AF_INET6
     else:
         raise ValueError("Unknown address type")
-
-
-@lru_cache(maxsize=1024)
-def resolve_address_info(ip: str, port: int) -> dict:
-    """
-    Resolves the domain name, IP, and port from a given address.
-    Supports both IPv4 and IPv6 addresses.
-    """
-    try:
-        domain_name: str = socket.gethostbyaddr(ip)[0]
-    except socket.herror:
-        domain_name: str = "Unknown"
-
-    return {"name": domain_name, "ip": ip, "port": port}

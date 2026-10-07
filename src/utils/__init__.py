@@ -4,7 +4,6 @@ from .addresses import (
     map_address_family_to_enum,
     map_address_enum_to_socket_family,
     map_address_int_to_socket_family,
-    resolve_address_info,
 )
 from .replies import (
     generate_general_socks_server_failure_reply,
@@ -23,13 +22,11 @@ from .replies import (
 from .sockets import (
     generate_tcp_socket,
     generate_udp_socket,
-    generate_address_from_socket,
 )
 from .logs import (
-    connection_established_template,
-    connection_closed_template,
     base_relay_template,
-    detailed_relay_template,
+    format_connection_closed,
+    format_connection_established,
 )
 
 __all__ = [
@@ -38,7 +35,6 @@ __all__ = [
     "map_address_family_to_enum",
     "map_address_enum_to_socket_family",
     "map_address_int_to_socket_family",
-    "resolve_address_info",
     "generate_general_socks_server_failure_reply",
     "generate_connection_refused_reply",
     "generate_network_unreachable_reply",
@@ -53,9 +49,7 @@ __all__ = [
     "generate_connection_method_response",
     "generate_tcp_socket",
     "generate_udp_socket",
-    "generate_address_from_socket",
-    "connection_established_template",
-    "connection_closed_template",
     "base_relay_template",
-    "detailed_relay_template",
+    "format_connection_closed",
+    "format_connection_established",
 ]

@@ -1,3 +1,4 @@
+import errno
 import hmac
 import logging
 import os
@@ -165,9 +166,8 @@ class TestTCPRequestHandlerIPv4(unittest.TestCase):
         self.assertFalse(result)
 
     @patch("socket.socket.recv")
-    @patch("src.handlers.base.socket.gethostbyaddr")
+    @patch("src.handlers.base.socket.gethostbyaddr", side_effect=AssertionError("reverse DNS lookup"))
     def test_parse_request(self, mock_gethostbyaddr, mock_recv):
-        mock_gethostbyaddr.return_value = ("example.com", [], ["93.184.216.34"])
         mock_recv.side_effect = [
             struct.pack("!BBBB", 0x05, 0x01, 0x00, 0x01),
             socket.inet_aton("93.184.216.34"),
@@ -178,13 +178,14 @@ class TestTCPRequestHandlerIPv4(unittest.TestCase):
         self.assertEqual(result.version, 5)
         self.assertEqual(result.command, 1)
         self.assertEqual(result.address.ip, "93.184.216.34")
+        self.assertEqual(result.address.name, "93.184.216.34")
         self.assertEqual(result.address.port, 80)
         self.assertEqual(result.address.address_type, AddressTypeCodes.IPv4)
+        mock_gethostbyaddr.assert_not_called()
 
     @patch("socket.socket.recv")
-    @patch("src.handlers.base.socket.gethostbyaddr")
-    def test_parse_address_ipv4(self, mock_gethostbyaddr, mock_recv):
-        mock_gethostbyaddr.return_value = ("example.com", [], ["1.2.3.4"])
+    @patch("src.handlers.base.socket.gethostbyaddr", side_effect=AssertionError("reverse DNS lookup"))
+    def test_parse_address_ipv4_never_reverse_resolves(self, mock_gethostbyaddr, mock_recv):
         mock_recv.side_effect = [
             socket.inet_aton("1.2.3.4"),
             struct.pack("!H", 443),
@@ -192,8 +193,9 @@ class TestTCPRequestHandlerIPv4(unittest.TestCase):
         result = self.handler._parse_address(AddressTypeCodes.IPv4.value)
         self.assertEqual(result.ip, "1.2.3.4")
         self.assertEqual(result.port, 443)
-        self.assertEqual(result.name, "example.com")
+        self.assertEqual(result.name, "1.2.3.4")
         self.assertEqual(result.address_type, AddressTypeCodes.IPv4)
+        mock_gethostbyaddr.assert_not_called()
 
     @patch("socket.socket.recv")
     @patch("src.handlers.base.socket.getaddrinfo")
@@ -232,10 +234,9 @@ class TestTCPRequestHandlerIPv4(unittest.TestCase):
         self.assertEqual(result.address_type, AddressTypeCodes.IPv6)
 
     @patch("socket.socket.recv")
-    @patch("src.handlers.base.socket.gethostbyaddr")
-    def test_parse_address_ipv6(self, mock_gethostbyaddr, mock_recv):
+    @patch("src.handlers.base.socket.gethostbyaddr", side_effect=AssertionError("reverse DNS lookup"))
+    def test_parse_address_ipv6_never_reverse_resolves(self, mock_gethostbyaddr, mock_recv):
         ipv6 = "2001:db8::1"
-        mock_gethostbyaddr.return_value = ("ipv6host.example.com", [], [ipv6])
         mock_recv.side_effect = [
             socket.inet_pton(socket.AF_INET6, ipv6),
             struct.pack("!H", 8080),
@@ -243,8 +244,9 @@ class TestTCPRequestHandlerIPv4(unittest.TestCase):
         result = self.handler._parse_address(AddressTypeCodes.IPv6.value)
         self.assertEqual(result.ip, ipv6)
         self.assertEqual(result.port, 8080)
-        self.assertEqual(result.name, "ipv6host.example.com")
+        self.assertEqual(result.name, ipv6)
         self.assertEqual(result.address_type, AddressTypeCodes.IPv6)
+        mock_gethostbyaddr.assert_not_called()
 
     @patch("socket.socket.recv")
     def test_parse_request_rejects_nonzero_rsv(self, mock_recv):
@@ -258,33 +260,6 @@ class TestTCPRequestHandlerIPv4(unittest.TestCase):
     def test_parse_address_invalid(self):
         with self.assertRaises(InvalidRequestError):
             self.handler._parse_address(0xFF)
-
-    @patch("src.handlers.base.socket.gethostbyaddr")
-    def test_gethostbyaddr_success(self, mock_gethostbyaddr):
-        mock_gethostbyaddr.return_value = ("example.com", [], ["1.2.3.4"])
-        result = self.handler._gethostbyaddr("1.2.3.4")
-        self.assertEqual(result, "example.com")
-
-    @patch("src.handlers.base.socket.gethostbyaddr")
-    def test_gethostbyaddr_failure_returns_ip(self, mock_gethostbyaddr):
-        mock_gethostbyaddr.side_effect = OSError("no reverse DNS")
-        result = self.handler._gethostbyaddr("1.2.3.4")
-        self.assertEqual(result, "1.2.3.4")
-
-    @patch("src.handlers.base.DNS_LOOKUP_TIMEOUT", 0.1)
-    @patch("src.handlers.base.socket.gethostbyaddr")
-    def test_gethostbyaddr_timeout_returns_ip(self, mock_gethostbyaddr):
-        """Reverse DNS should return the IP if the lookup takes too long."""
-        done = threading.Event()
-
-        def slow_lookup(ip):
-            done.wait(timeout=5)
-            return ("example.com", [], [ip])
-
-        mock_gethostbyaddr.side_effect = slow_lookup
-        result = self.handler._gethostbyaddr("1.2.3.4")
-        self.assertEqual(result, "1.2.3.4")
-        done.set()
 
     @patch("src.handlers.base.DNS_LOOKUP_TIMEOUT", 0.1)
     @patch("src.handlers.base.socket.getaddrinfo")
@@ -406,7 +381,6 @@ class TestParseAddress(unittest.TestCase):
         self.events = []
         self.connection = MagicMock()
         self.handler = BaseHandler(self.connection)
-        self.handler._gethostbyaddr = lambda ip: self.events.append("lookup") or ip
         self.handler._resolve_hostname = (
             lambda name: self.events.append("lookup") or ("1.2.3.4", AddressTypeCodes.IPv4.value)
         )
@@ -431,10 +405,15 @@ class TestParseAddress(unittest.TestCase):
             self.handler._parse_address(AddressTypeCodes.DOMAIN_NAME.value)
 
     def test_port_read_before_lookup(self):
+        self.feed(b"\x07", b"example", struct.pack("!H", 80))
+        address = self.handler._parse_address(AddressTypeCodes.DOMAIN_NAME.value)
+        self.assertEqual(address.port, 80)
+        self.assertEqual(self.events, ["recv"] * 3 + ["lookup"])
+
+    def test_ip_literals_need_no_lookup(self):
         cases = {
             AddressTypeCodes.IPv4: (socket.inet_aton("1.2.3.4"), struct.pack("!H", 80)),
             AddressTypeCodes.IPv6: (socket.inet_pton(socket.AF_INET6, "::1"), struct.pack("!H", 80)),
-            AddressTypeCodes.DOMAIN_NAME: (b"\x07", b"example", struct.pack("!H", 80)),
         }
         for address_type, chunks in cases.items():
             with self.subTest(address_type=address_type.name):
@@ -442,7 +421,7 @@ class TestParseAddress(unittest.TestCase):
                 self.feed(*chunks)
                 address = self.handler._parse_address(address_type.value)
                 self.assertEqual(address.port, 80)
-                self.assertEqual(self.events, ["recv"] * len(chunks) + ["lookup"])
+                self.assertEqual(self.events, ["recv"] * len(chunks))
 
 
 class TestHandshakeTimeout(unittest.TestCase):
@@ -482,6 +461,54 @@ class TestHandshakeTimeout(unittest.TestCase):
             logging.getLogger("src.handlers").debug("start")
             self.handler.parse_request()
         self.assertFalse([r for r in logs.records if r.exc_info or r.levelno >= 30])
+
+
+class TestHandshakeDisconnects(unittest.TestCase):
+    """A client hanging up mid-handshake is routine: DEBUG, no traceback. Anything else keeps its traceback."""
+
+    def setUp(self):
+        strip_socks5_env(self)
+        self.connection = MagicMock()
+        self.handler = TCPHandler(self.connection)
+
+    def assert_debug_only(self, logs):
+        self.assertTrue(logs.records)
+        self.assertFalse([r for r in logs.records if r.exc_info or r.levelno > logging.DEBUG])
+
+    def test_greeting_disconnects_log_debug_without_traceback(self):
+        for recv in (b"", ConnectionResetError("reset"), [b"\x05\x01", b""]):
+            with self.subTest(recv=recv):
+                self.connection.recv.side_effect = recv if isinstance(recv, list) else [recv]
+                with self.assertLogs("src.handlers", level="DEBUG") as logs:
+                    self.assertFalse(self.handler.handle_request())
+                self.assert_debug_only(logs)
+
+    def test_auth_disconnect_logs_debug_without_traceback(self):
+        self.connection.recv.side_effect = [b"\x01", b"\x05", b""]
+        with self.assertLogs("src.handlers", level="DEBUG") as logs:
+            self.assertFalse(self.handler._handle_username_password_auth())
+        self.assert_debug_only(logs)
+
+    def test_no_acceptable_methods_logs_debug(self):
+        strip_socks5_env(self, SOCKS5_AUTH_REQUIRED="true")
+        self.connection.recv.side_effect = [b"\x05\x01", b"\x00"]
+        with self.assertLogs("src.handlers", level="DEBUG") as logs:
+            self.assertFalse(self.handler.handle_request())
+        self.connection.sendall.assert_called_once_with(RESP_CORRECT_VERSION_NO_ACCEPTABLE_METHODS)
+        self.assert_debug_only(logs)
+
+    def test_unexpected_socket_error_logs_traceback(self):
+        self.connection.recv.side_effect = OSError(errno.EBADF, "bad file descriptor")
+        with self.assertLogs("src.handlers", level="ERROR") as logs:
+            self.assertFalse(self.handler.handle_request())
+        self.assertTrue(logs.records[0].exc_info)
+
+    def test_request_disconnect_raises_without_logging(self):
+        for recv in ([b""], [struct.pack("!BBBB", 5, 1, 0, 1), b"\x7f"], [ConnectionResetError("reset")]):
+            with self.subTest(recv=recv):
+                self.connection.recv.side_effect = recv + [b""]
+                with self.assertNoLogs("src.handlers"), self.assertRaises(ConnectionError):
+                    self.handler.parse_request()
 
 
 def userpass_frame(username: bytes, password: bytes) -> list[bytes]:

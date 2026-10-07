@@ -73,15 +73,30 @@ python3 app.py [--host HOST | -H HOST] [--port PORT | -P PORT] [--logging-level 
 | `SOCKS5_CONNECT_TIMEOUT` | `10` | Seconds to connect to the destination. A timeout replies `0x04` (host unreachable). |
 | `SOCKS5_MAX_CONNECTIONS` | `200` | Maximum concurrent client connections. Further connections are closed without a reply; a WARNING with the number rejected is logged at most every 10 seconds. |
 | `LOGGING_LEVEL` | `debug` (Docker image: `info`) | Logging level used when `-L` isn't given. Same choices as `-L`. |
+| `SOCKS5_LOG_FILE` | unset | Also write ERROR and CRITICAL lines to this file, rotated at 1 MB with 5 backups. Unset means console only. See [Logging](#logging). |
+| `SOCKS5_HEALTHCHECK_PORT` | `1080` | Port the Docker healthcheck probes. Only the healthcheck reads it; set it when you change `--port`. |
 
 Timeouts accept any positive number of seconds, such as `2.5`. `SOCKS5_MAX_CONNECTIONS` must be a positive integer. An invalid value stops the proxy at startup with an error.
+
+### Logging
+
+Logs go to stderr. Each connection logs one line when it opens and one when it closes:
+
+```
+CONNECTION | 172.17.0.1:51234 -> example.com:443 (93.184.216.34)
+CLOSED | 172.17.0.1:51234 -> example.com:443 (93.184.216.34) | up=517 B down=10485943 B | 2.31 s
+```
+
+`up` counts bytes from the client to the destination, `down` the other way. The destination is the hostname the client sent, with the address it resolved to, or just the IP the client sent: the proxy never does reverse-DNS lookups. Individual UDP datagrams are logged at `debug`.
+
+A client that disconnects mid-handshake is logged at `debug` only; unexpected errors are logged at ERROR with a traceback. Colours are used only when stderr is a terminal. Nothing is written to disk unless `SOCKS5_LOG_FILE` is set.
 
 ## Docker
 
 The examples below forward `SOCKS5_USERNAME` and `SOCKS5_PASSWORD` from your shell (export them as in [Quick Start](#quick-start)).
 
 ```bash
-# Default (logs at info; add -e LOGGING_LEVEL=debug to log every relayed chunk)
+# Default (logs at info; add -e LOGGING_LEVEL=debug for handshake details and UDP datagrams)
 docker run -p 127.0.0.1:1080:1080 -e SOCKS5_AUTH_REQUIRED=true \
   -e SOCKS5_USERNAME -e SOCKS5_PASSWORD jcaponigro20/simple-socks5
 
@@ -94,6 +109,8 @@ docker build --build-arg LOGGING_LEVEL=debug -t my-socks5 .
 ```
 
 The container always listens on `0.0.0.0` inside Docker; the `-p` flag decides which host interfaces the port is published on.
+
+The image's `HEALTHCHECK` runs `python -m src.healthcheck` every 30 seconds. It sends a SOCKS5 greeting to `127.0.0.1` on `SOCKS5_HEALTHCHECK_PORT` (default `1080`) and passes on any SOCKS5 reply, so it works with and without authentication, and the proxy logs it at `debug` only. If you override the command with a different `--port`, set `SOCKS5_HEALTHCHECK_PORT` to match. If you bind a specific non-loopback address instead of `0.0.0.0` or `::`, the healthcheck can't reach it.
 
 `docker stop` (SIGTERM) shuts the proxy down gracefully: it stops accepting connections, gives open connections up to 5 seconds to finish, then closes them and exits with code 0. Ctrl-C (SIGINT) does the same.
 

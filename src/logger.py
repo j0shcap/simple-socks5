@@ -1,9 +1,16 @@
 import logging
-import threading
 from logging.handlers import RotatingFileHandler
 
 from .config import ProxyConfiguration
-from .constants import LOG_FILE_MAX_BYTES
+from .constants import LOG_FILE_BACKUP_COUNT, LOG_FILE_MAX_BYTES, log_file
+
+CONSOLE_FORMAT = "[%(asctime)s] - [%(levelname)s] - %(message)s"
+FILE_FORMAT = "[%(asctime)s] - [%(name)s] - [%(levelname)s] - [%(message)s]"
+
+# Every module logger ("src.server", "src.relays.tcp_relay", ...) propagates to this one, which holds the only
+# handlers. Until update_loggers() runs it just propagates, so library use and tests see records via the root logger.
+_package_logger = logging.getLogger(__name__.rpartition(".")[0])
+_package_logger.addHandler(logging.NullHandler())
 
 
 class LogColors:
@@ -23,60 +30,51 @@ class ColorFormatter(logging.Formatter):
         logging.DEBUG: LogColors.GREY,
     }
 
+    def __init__(self, fmt: str, use_color: bool):
+        super().__init__(fmt)
+        self.use_color = use_color
+
     def format(self, record):
-        color = self.COLORS.get(record.levelno)
         message = super().format(record)
+        color = self.COLORS.get(record.levelno) if self.use_color else None
         if color:
             message = color + message + LogColors.RESET
         return message
 
 
-_loggers = {}
-_logger_lock = threading.Lock()
-
-
 def get_logger(name: str) -> logging.Logger:
-    with _logger_lock:
-        if name not in _loggers:
-            logger = logging.getLogger(name)
-
-            if ProxyConfiguration.is_initialized():
-                configure_logger(logger)
-            else:
-                logger.addHandler(logging.NullHandler())
-
-            _loggers[name] = logger
-
-        return _loggers[name]
-
-
-def configure_logger(logger: logging.Logger) -> None:
-    logging_level = ProxyConfiguration.get_logging_level()
-
-    if logging_level == logging.NOTSET:
-        return
-
-    logger.handlers.clear()
-    logger.setLevel(logging_level)
-
-    # Console Handler for logging
-    c_handler = logging.StreamHandler()
-    c_handler.setLevel(logging_level)
-    c_format = ColorFormatter("[%(asctime)s] - [%(levelname)s] - %(message)s")
-    c_handler.setFormatter(c_format)
-
-    # File Handler for logging errors only
-    f_handler = RotatingFileHandler("errors.log", maxBytes=LOG_FILE_MAX_BYTES, backupCount=5)
-    f_handler.setLevel(logging.ERROR)
-    f_format = logging.Formatter(
-        "[%(asctime)s] - [%(name)s] - [%(levelname)s] - [%(message)s]"
-    )
-    f_handler.setFormatter(f_format)
-
-    logger.addHandler(c_handler)
-    logger.addHandler(f_handler)
+    return logging.getLogger(name)
 
 
 def update_loggers() -> None:
-    for logger in _loggers.values():
-        configure_logger(logger)
+    """
+    Configures the package logger from ProxyConfiguration and SOCKS5_LOG_FILE, replacing any earlier configuration.
+    """
+    for handler in list(_package_logger.handlers):
+        _package_logger.removeHandler(handler)
+        handler.close()
+    # Records stop here, so an application that configures the root logger doesn't print them twice
+    _package_logger.propagate = False
+
+    logging_level = ProxyConfiguration.get_logging_level()
+    if logging_level == logging.NOTSET:
+        _package_logger.setLevel(logging.CRITICAL + 1)
+        _package_logger.addHandler(logging.NullHandler())
+        return
+
+    _package_logger.setLevel(logging_level)
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(ColorFormatter(CONSOLE_FORMAT, use_color=console_handler.stream.isatty()))
+    _package_logger.addHandler(console_handler)
+
+    path = log_file()
+    if path is None:
+        return
+    try:
+        file_handler = RotatingFileHandler(path, maxBytes=LOG_FILE_MAX_BYTES, backupCount=LOG_FILE_BACKUP_COUNT)
+    except OSError as e:
+        _package_logger.error(f"Cannot open SOCKS5_LOG_FILE {path}: {e}. Logging to the console only.")
+        return
+    file_handler.setLevel(logging.ERROR)
+    file_handler.setFormatter(logging.Formatter(FILE_FORMAT))
+    _package_logger.addHandler(file_handler)
