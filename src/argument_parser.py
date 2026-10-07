@@ -2,7 +2,7 @@ import argparse
 import os
 from typing import Mapping, Optional, Sequence
 
-__version__ = "2.0.0"
+__version__ = "2.1.0"
 
 LOGGING_LEVEL_CHOICES: tuple[str, ...] = ("disabled", "debug", "info", "warning", "error", "critical")
 LOGGING_LEVEL_ENV: str = "LOGGING_LEVEL"
