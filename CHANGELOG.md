@@ -23,6 +23,10 @@ contain breaking changes, and each one is listed under **Breaking changes**.
   value exits at startup with an error.
 - `SOCKS5_MAX_CONNECTIONS` (default `200`): the maximum number of concurrent client
   connections. It must be a positive integer; an invalid value exits at startup with an error.
+- `SOCKS5_LOG_FILE`: when set, ERROR and CRITICAL lines are also written to this file,
+  rotated at 1 MB with 5 backups.
+- `SOCKS5_HEALTHCHECK_PORT` (default `1080`): the port the Docker healthcheck probes. Set it
+  when you run the image with a different `--port`.
 
 ### Changed
 - `latest` and `logging-disabled` now move only on stable releases; pushes to `main` publish
@@ -43,6 +47,20 @@ contain breaking changes, and each one is listed under **Breaking changes**.
   receive buffer, which shares the setting, grows to match.
 - The "connection limit reached" warning is logged at most once every 10 seconds, with the
   number of connections rejected since the previous one, instead of once per rejection.
+- No reverse-DNS (PTR) lookups: CONNECT to an IP address no longer waits up to 2 seconds for
+  one, and visited addresses no longer leak to the resolver. Logs show the hostname the client
+  sent or the IP address.
+- Connection log lines have a new format, which matters if you parse them. Each connection
+  logs `CONNECTION | client -> destination` when it opens and one summary line when it
+  closes, `CLOSED | client -> destination | up=N B down=N B | N.NN s`, instead of a debug line
+  per relayed chunk.
+- A client disconnecting mid-handshake or mid-relay is logged at `debug` without a traceback.
+  So is a client that offers no acceptable authentication method, which was a warning.
+- Log colours are used only when the output is a terminal.
+- **Behaviour change:** errors are no longer written to `errors.log` in the working directory
+  (`/app/errors.log` in the Docker image). Set `SOCKS5_LOG_FILE` to keep a log file.
+- The Docker `HEALTHCHECK` runs `python -m src.healthcheck`, which speaks SOCKS5 instead of
+  opening and closing a bare TCP connection.
 
 ### Fixed
 - SIGTERM and SIGINT now shut the server down gracefully: it stops accepting connections, gives
@@ -83,6 +101,13 @@ contain breaking changes, and each one is listed under **Breaking changes**.
 - A UDP association now ends as soon as its TCP control connection closes, as RFC 1928
   requires. Before, its relay port kept relaying datagrams for up to 2 minutes after the client
   disconnected. The 2-minute idle timeout stays, but only datagrams from the client reset it.
+- The Docker healthcheck no longer logs an error with a traceback every 30 seconds (about 2,880
+  a day); the proxy now logs nothing above `debug` for it.
+- Error log rotation: each module had its own handler writing to the same `errors.log`, so
+  rotation renamed the file under the others and could lose or interleave lines.
+- An exception that escaped a connection handler was printed to stderr by `socketserver`,
+  even with `-L disabled`. It now goes through logging, so `-L` applies: ERROR with its
+  traceback, or `debug` for a client that disconnected.
 
 ### Security
 - Usernames and passwords are compared in constant time, and both are always checked, so
