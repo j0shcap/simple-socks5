@@ -125,6 +125,9 @@ class BaseHandler:
                 domain_length = self._recv_exact(1)[0]
                 raw_domain_name = self._recv_exact(domain_length)
                 port = self._recv_port()
+                if not raw_domain_name:
+                    # connect(("", port)) would reach the local host
+                    raise InvalidDomainNameError(raw_domain_name)
                 try:
                     domain_name = raw_domain_name.decode()
                 except UnicodeDecodeError as e:

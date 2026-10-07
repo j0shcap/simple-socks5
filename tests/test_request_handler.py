@@ -16,7 +16,8 @@ from src.exceptions import (
     InvalidRequestError,
     InvalidVersionError,
 )
-from src.constants import AddressTypeCodes, MethodCodes
+from src.constants import AddressTypeCodes, MethodCodes, ReplyCodes
+from src.errors import reply_code_for
 from src.models import Request
 
 # Testing Data
@@ -403,6 +404,14 @@ class TestParseAddress(unittest.TestCase):
         self.feed(b"\x02", b"\xff\xfe", struct.pack("!H", 80))
         with self.assertRaises(InvalidDomainNameError):
             self.handler._parse_address(AddressTypeCodes.DOMAIN_NAME.value)
+
+    def test_empty_domain_raises_invalid_domain_name(self):
+        self.feed(b"\x00", struct.pack("!H", 80))
+        with self.assertRaises(InvalidDomainNameError) as caught:
+            self.handler._parse_address(AddressTypeCodes.DOMAIN_NAME.value)
+        self.assertIs(reply_code_for(caught.exception), ReplyCodes.HOST_UNREACHABLE)
+        # The port is read, so the whole request is consumed, and nothing is looked up
+        self.assertEqual(self.events, ["recv"] * 2)
 
     def test_port_read_before_lookup(self):
         self.feed(b"\x07", b"example", struct.pack("!H", 80))
