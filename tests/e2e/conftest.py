@@ -5,10 +5,12 @@ Every e2e test gets a fresh proxy and fresh origins on port 0; nothing is shared
 Use tests/e2e/socks_client.py to talk to the proxy.
 
 Fixtures (stable public API; regression tests build on them)
-    make_proxy(*, auth_required=False) -> ProxyHandle
-        Sets SOCKS5_AUTH_REQUIRED / SOCKS5_USERNAME / SOCKS5_PASSWORD with monkeypatch, then
-        starts the server. Credentials are E2E_USERNAME / E2E_PASSWORD; they are read per
-        connection, so a test may change them with monkeypatch.setenv(...) at any time.
+    make_proxy(*, auth_required=False, allow_loopback=True) -> ProxyHandle
+        Sets SOCKS5_AUTH_REQUIRED / SOCKS5_USERNAME / SOCKS5_PASSWORD / SOCKS5_ALLOW_LOOPBACK with
+        monkeypatch, then starts the server. The origins listen on loopback, so the destination
+        policy is off unless allow_loopback=False. Credentials are E2E_USERNAME / E2E_PASSWORD.
+        These are all read per connection, so a test may change them with monkeypatch.setenv(...)
+        at any time.
         SOCKS5_MAX_CONNECTIONS is read when the server is constructed, so set it before calling.
     proxy                   make_proxy()
     auth_proxy              make_proxy(auth_required=True)
@@ -105,8 +107,9 @@ def _e2e_leak_guard():
 @pytest.fixture
 def make_proxy(monkeypatch):
     with ExitStack() as stack:
-        def _make_proxy(*, auth_required: bool = False) -> ProxyHandle:
+        def _make_proxy(*, auth_required: bool = False, allow_loopback: bool = True) -> ProxyHandle:
             monkeypatch.setenv("SOCKS5_AUTH_REQUIRED", "true" if auth_required else "false")
+            monkeypatch.setenv("SOCKS5_ALLOW_LOOPBACK", "true" if allow_loopback else "false")
             monkeypatch.setenv("SOCKS5_USERNAME", E2E_USERNAME)
             monkeypatch.setenv("SOCKS5_PASSWORD", E2E_PASSWORD)
             server = stack.enter_context(serve_in_thread(ThreadingTCPServer(("127.0.0.1", 0), TCPProxyServer)))

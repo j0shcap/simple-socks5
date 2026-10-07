@@ -37,8 +37,9 @@ def run_app(
     cwd: Path, *, logging_level: str = "info", env: Optional[dict[str, str]] = None
 ) -> Iterator[tuple[subprocess.Popen, tuple[str, int]]]:
     """
-    Runs app.py on a free loopback port with no SOCKS5_* variables but those in env, and yields (process, address)
-    once it accepts SOCKS5 connections. stdout and stderr are pipes, so the app sees no TTY.
+    Runs app.py on a free loopback port with no SOCKS5_* variables but SOCKS5_ALLOW_LOOPBACK=true (the origins
+    listen on loopback) and those in env, and yields (process, address) once it accepts SOCKS5 connections. stdout
+    and stderr are pipes, so the app sees no TTY.
     """
     if sys.platform == "win32":
         pytest.skip("POSIX signals only")
@@ -47,7 +48,7 @@ def run_app(
     proc = subprocess.Popen(
         [sys.executable, str(APP), "-H", address[0], "-P", str(address[1]), "-L", logging_level],
         cwd=cwd,
-        env={**clean_env, **(env or {})},
+        env={**clean_env, "SOCKS5_ALLOW_LOOPBACK": "true", **(env or {})},
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
