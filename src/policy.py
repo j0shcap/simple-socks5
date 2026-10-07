@@ -47,13 +47,11 @@ def is_destination_allowed(ip: str) -> bool:
     Whether ip may be proxied to. Anything that isn't an IP address is not allowed, unless SOCKS5_ALLOW_LOOPBACK
     turns the policy off.
     """
-    if allow_loopback():
-        return True
     try:
-        addr = ip_address(ip)
-    except ValueError:
+        check_destination(ip, 0)
+    except (socket.gaierror, PolicyDenied):
         return False
-    return not _is_denied(addr)
+    return True
 
 
 def check_destination(host: str, port: int) -> None:
