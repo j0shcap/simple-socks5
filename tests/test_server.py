@@ -358,6 +358,13 @@ class TestHandleError(unittest.TestCase):
         records = self.handle_error(InvalidVersionError(4))
         assert [(r.levelno, bool(r.exc_info)) for r in records] == [(logging.ERROR, False)]
 
+    def test_handle_error_without_active_exception(self):
+        with self.assertLogs("simple_socks5.server", level="DEBUG") as logs:
+            self.server.handle_error(MagicMock(spec=socket.socket), ("203.0.113.5", 40000))
+        assert [(r.levelno, r.getMessage(), r.exc_info) for r in logs.records] == [
+            (logging.ERROR, "Unhandled error serving 203.0.113.5", None)
+        ]
+
     def test_unexpected_error_logs_traceback(self):
         records = self.handle_error(RuntimeError("bug"))
         assert [(r.levelno, bool(r.exc_info)) for r in records] == [(logging.ERROR, True)]
@@ -512,6 +519,17 @@ class TestConnectionTracking(unittest.TestCase):
             patch("socketserver.ThreadingMixIn.process_request_thread", handle),
         ):
             self.server.process_request(request, ("127.0.0.1", 9999))
+
+    def test_process_request_rejects_non_socket_request(self):
+        datagram_request = (b"data", MagicMock(spec=socket.socket))
+        with (
+            patch("socketserver.ThreadingMixIn.process_request") as start_handler,
+            pytest.raises(TypeError, match="expected a connected TCP socket"),
+        ):
+            self.server.process_request(datagram_request, ("127.0.0.1", 9999))
+        start_handler.assert_not_called()
+        self.server._connection_semaphore.acquire.assert_not_called()
+        assert self.server.wait_for_connections(0)
 
     def test_request_tracked_before_handler_thread_runs(self):
         # A shutdown that drains right after serve_forever() returns must see a request whose handler

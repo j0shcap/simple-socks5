@@ -3,6 +3,8 @@ import sys
 import threading
 import time
 from collections.abc import Callable, Sequence
+from types import FrameType
+from typing import Final, Protocol, TypeAlias
 
 from .argument_parser import parse_arguments
 from .config import ProxyConfiguration
@@ -16,25 +18,38 @@ from .startup import collect_startup_advisories, validate_environment
 
 logger = get_logger(__name__)
 
+# What signal.signal() returns: a Python handler, SIG_DFL or SIG_IGN (ints), or None for one installed outside Python
+SignalHandler: TypeAlias = Callable[[int, FrameType | None], object] | int | None
+
+
+class ShutdownTarget(Protocol):
+    """The server operations GracefulShutdown drives."""
+
+    def shutdown(self) -> None: ...
+
+    def wait_for_connections(self, timeout: float) -> bool: ...
+
+    def close_connections(self) -> int: ...
+
 
 class GracefulShutdown:
     """
     Stops the server on SIGTERM or SIGINT and gives in-flight connections a grace period to finish.
     """
 
-    SIGNALS = (signal.SIGTERM, signal.SIGINT)
+    SIGNALS: Final = (signal.SIGTERM, signal.SIGINT)
 
     def __init__(
         self,
-        server: ThreadingTCPServer,
+        server: ShutdownTarget,
         grace: float = SHUTDOWN_GRACE_PERIOD,
         clock: Callable[[], float] = time.monotonic,
-    ):
+    ) -> None:
         self._server = server
         self._grace = grace
         self._clock = clock
         self._deadline: float | None = None
-        self._previous_handlers: dict = {}
+        self._previous_handlers: dict[signal.Signals, SignalHandler] = {}
 
     def install(self) -> None:
         for signum in self.SIGNALS:
@@ -47,7 +62,7 @@ class GracefulShutdown:
                 signal.signal(signum, handler)
         self._previous_handlers.clear()
 
-    def _handle(self, _signum, _frame) -> None:
+    def _handle(self, _signum: int, _frame: FrameType | None) -> None:
         if self._deadline is not None:
             return
         self._deadline = self._clock() + self._grace
