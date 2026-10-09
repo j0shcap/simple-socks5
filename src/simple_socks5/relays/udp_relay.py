@@ -1,9 +1,10 @@
+import contextlib
 import selectors
 import socket
 import time
 
 from ..constants import RELAY_BUFFER_SIZE, UDP_FORWARD_TIMEOUT, UDP_RECV_TIMEOUT
-from ..exceptions import MalformedDatagramError, PolicyDenied
+from ..exceptions import MalformedDatagramError, PolicyDeniedError
 from ..handlers import UDPHandler
 from ..logger import get_logger
 from ..models import BaseAddress, DetailedAddress
@@ -75,10 +76,8 @@ class UDPRelay(BaseRelay):
         finally:
             logger.info(self.closed_line())
             selector.close()
-            try:
+            with contextlib.suppress(OSError):
                 self.proxy_connection.close()
-            except OSError:
-                pass
 
     def _control_connection_open(self) -> bool:
         """
@@ -123,7 +122,7 @@ class UDPRelay(BaseRelay):
 
         try:
             self._forward_packet(datagram, addr)
-        except PolicyDenied as e:
+        except PolicyDeniedError as e:
             logger.debug("(UDP) Dropped datagram from %s: %s", addr, e)
         except (ValueError, KeyError, OSError) as e:
             logger.debug("(UDP) Dropped unsupported datagram from %s: %s", addr, e)

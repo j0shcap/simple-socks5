@@ -4,7 +4,7 @@ import unittest
 import pytest
 
 from simple_socks5.constants import AddressTypeCodes, MethodCodes
-from simple_socks5.models import DetailedAddress
+from simple_socks5.models import BaseAddress, DetailedAddress
 from simple_socks5.utils import (
     format_connection_closed,
     format_connection_established,
@@ -305,17 +305,19 @@ class TestConnectionLogLines(unittest.TestCase):
 
     def test_connection_established(self):
         assert (
-            format_connection_established("172.17.0.1", 51234, self.dst)
+            format_connection_established(BaseAddress("172.17.0.1", 51234), self.dst)
             == "CONNECTION | 172.17.0.1:51234 -> example.com:443 (93.184.216.34)"
         )
 
     def test_connection_established_ipv6_in_brackets(self):
         dst = DetailedAddress(ip="::1", port=80, name="::1", address_type=AddressTypeCodes.IPv6)
-        assert format_connection_established("::1", 5000, dst) == "CONNECTION | [::1]:5000 -> [::1]:80"
+        assert format_connection_established(BaseAddress("::1", 5000), dst) == "CONNECTION | [::1]:5000 -> [::1]:80"
 
     def test_connection_closed(self):
         assert (
-            format_connection_closed("172.17.0.1", 51234, self.dst, bytes_up=517, bytes_down=10485943, duration=2.314)
+            format_connection_closed(
+                BaseAddress("172.17.0.1", 51234), self.dst, bytes_up=517, bytes_down=10485943, duration=2.314
+            )
             == "CLOSED | 172.17.0.1:51234 -> example.com:443 (93.184.216.34) | up=517 B down=10485943 B | 2.31 s"
         )
 

@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, call, patch
 import pytest
 
 from simple_socks5.constants import RELAY_BUFFER_SIZE, RELAY_WRITE_TIMEOUT, AddressTypeCodes
-from simple_socks5.exceptions import PolicyDenied
+from simple_socks5.exceptions import PolicyDeniedError
 from simple_socks5.models import DetailedAddress
 from simple_socks5.relays.tcp_relay import TCPRelay
 
@@ -355,7 +355,7 @@ class TestTCPRelayDestinationPolicy(unittest.TestCase):
         return DetailedAddress(name="test", ip=ip, port=80, address_type=address_type)
 
     def test_denied_destination_raises_before_socket(self, mock_gen_socket, mock_sel_cls):
-        with pytest.raises(PolicyDenied):
+        with pytest.raises(PolicyDeniedError):
             TCPRelay(MagicMock(), self._dst("169.254.169.254"))
         mock_gen_socket.assert_not_called()
         mock_sel_cls.return_value.close.assert_called_once()

@@ -3,6 +3,7 @@ This file contains the configuration for the proxy server set at runtime.
 """
 
 import logging
+from typing import ClassVar
 
 from .models import BaseAddress
 
@@ -12,7 +13,7 @@ class ProxyConfiguration:
     _port: int
     _logging_level: str
 
-    _logging_level_str_to_level = {
+    _logging_level_str_to_level: ClassVar[dict[str, int]] = {
         "disabled": logging.NOTSET,
         "debug": logging.DEBUG,
         "info": logging.INFO,

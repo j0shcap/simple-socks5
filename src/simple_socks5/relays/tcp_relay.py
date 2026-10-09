@@ -1,3 +1,4 @@
+import contextlib
 import selectors
 import socket
 
@@ -122,20 +123,12 @@ class TCPRelay(BaseRelay):
         logger.info(self.closed_line())
         # Unregister both sockets from the selector
         for sock in [self.client_connection, self.proxy_connection]:
-            try:
+            with contextlib.suppress(OSError, ValueError, KeyError):
                 self.selector.unregister(sock)
-            except (OSError, ValueError, KeyError):
-                pass
         # Only close proxy_connection — client_connection is owned by the server
-        try:
+        with contextlib.suppress(OSError):
             self.proxy_connection.shutdown(socket.SHUT_RDWR)
-        except OSError:
-            pass
-        try:
+        with contextlib.suppress(OSError):
             self.proxy_connection.close()
-        except OSError:
-            pass
-        try:
+        with contextlib.suppress(OSError):
             self.selector.close()
-        except OSError:
-            pass

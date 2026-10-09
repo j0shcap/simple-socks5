@@ -7,11 +7,11 @@ import errno
 import socket
 
 from .constants import ReplyCodes
-from .exceptions import AddressTypeNotSupportedError, InvalidDomainNameError, PolicyDenied
+from .exceptions import AddressTypeNotSupportedError, InvalidDomainNameError, PolicyDeniedError
 
 # First match wins
 _TYPE_RULES: tuple[tuple[type[BaseException], ReplyCodes], ...] = (
-    (PolicyDenied, ReplyCodes.CONNECTION_NOT_ALLOWED_BY_RULESET),
+    (PolicyDeniedError, ReplyCodes.CONNECTION_NOT_ALLOWED_BY_RULESET),
     (AddressTypeNotSupportedError, ReplyCodes.ADDRESS_TYPE_NOT_SUPPORTED),
     (InvalidDomainNameError, ReplyCodes.HOST_UNREACHABLE),
     # Before the errno rules: a gaierror's errno is an EAI_* code, which can collide with errno values

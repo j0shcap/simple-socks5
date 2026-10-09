@@ -60,10 +60,7 @@ def generate_failed_reply(address_type: AddressTypeCodes, error_number: ReplyCod
     if address_type == AddressTypeCodes.DOMAIN_NAME:
         address_type = AddressTypeCodes.IPv4
     header = struct.pack("!BBBB", SOCKS_VERSION, error_number.value, 0, address_type.value)
-    if address_type == AddressTypeCodes.IPv6:
-        addr_bytes = b"\x00" * 16
-    else:
-        addr_bytes = b"\x00" * 4
+    addr_bytes = b"\x00" * 16 if address_type == AddressTypeCodes.IPv6 else b"\x00" * 4
     port = struct.pack("!H", 0)
     return header + addr_bytes + port
 

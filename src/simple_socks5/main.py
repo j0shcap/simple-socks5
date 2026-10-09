@@ -46,7 +46,7 @@ class GracefulShutdown:
             signal.signal(signum, handler)
         self._previous_handlers.clear()
 
-    def _handle(self, signum, frame) -> None:
+    def _handle(self, _signum, _frame) -> None:
         if self._deadline is not None:
             return
         self._deadline = self._clock() + self._grace

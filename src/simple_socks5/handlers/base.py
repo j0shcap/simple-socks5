@@ -164,7 +164,7 @@ class BaseHandler:
         def lookup():
             try:
                 result[0] = fn()
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 - handed back to the caller, which logs it
                 error[0] = e
 
         t = threading.Thread(target=lookup, daemon=True)

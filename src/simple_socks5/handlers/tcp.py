@@ -62,24 +62,24 @@ class TCPHandler(BaseHandler):
             # Handles server response
             self.connection.sendall(generate_connection_method_response(negotiated_authentication))
 
-            # Handles authentication
-            if negotiated_authentication == MethodCodes.NO_AUTHENTICATION_REQUIRED:
-                return True
-            if negotiated_authentication == MethodCodes.USERNAME_PASSWORD:
-                return self._handle_username_password_auth()
-            if negotiated_authentication == MethodCodes.GSSAPI:
-                # Not implemented yet
-                return self._handle_gssapi_auth()
-            # The client is told with X'FF'. DEBUG, because a healthcheck probe offering only X'00' lands here.
-            logger.debug("No acceptable authentication methods")
-            return False
-
         except TimeoutError:
             logger.warning("Handshake timed out")
             return False
         except OSError as e:
             _log_socket_error("handshake", e)
             return False
+
+        # Handles authentication; each method catches its own socket errors
+        if negotiated_authentication == MethodCodes.NO_AUTHENTICATION_REQUIRED:
+            return True
+        if negotiated_authentication == MethodCodes.USERNAME_PASSWORD:
+            return self._handle_username_password_auth()
+        if negotiated_authentication == MethodCodes.GSSAPI:
+            # Not implemented yet
+            return self._handle_gssapi_auth()
+        # The client is told with X'FF'. DEBUG, because a healthcheck probe offering only X'00' lands here.
+        logger.debug("No acceptable authentication methods")
+        return False
 
     def _negotiate_authentication_method(self, methods: bytes) -> MethodCodes:
         """
@@ -92,7 +92,7 @@ class TCPHandler(BaseHandler):
         Returns:
             MethodCodes: The negotiated authentication method.
         """
-        client_methods = {method for method in methods}
+        client_methods = set(methods)
 
         supported_methods = {MethodCodes.USERNAME_PASSWORD.value}
         if not auth_required():
@@ -149,19 +149,20 @@ class TCPHandler(BaseHandler):
             password = self._recv_exact(self._recv_exact(1)[0])
 
             expected = credentials()
-            if self._credentials_match(username, password, expected):
+            authenticated = self._credentials_match(username, password, expected)
+            if authenticated:
                 logger.info("Authenticated user: %s", expected[0].decode("utf-8", "backslashreplace"))
                 self.connection.sendall(b"\x01\x00")  # version 1, status 0 (success)
-                return True
-            logger.warning("Authentication failed for client %s", self._peer_ip())
-            self.connection.sendall(b"\x01\x01")  # version 1, status 1 (failure)
-            return False
+            else:
+                logger.warning("Authentication failed for client %s", self._peer_ip())
+                self.connection.sendall(b"\x01\x01")  # version 1, status 1 (failure)
         except TimeoutError:
             logger.warning("Handshake timed out during authentication")
             return False
         except OSError as e:
             _log_socket_error("username/password authentication", e)
             return False
+        return authenticated
 
     @staticmethod
     def _credentials_match(username: bytes, password: bytes, expected: tuple[bytes, bytes]) -> bool:

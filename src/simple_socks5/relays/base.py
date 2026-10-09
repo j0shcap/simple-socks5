@@ -31,8 +31,7 @@ class BaseRelay:
         Returns the CLOSED summary logged once when the relay ends.
         """
         return format_connection_closed(
-            self.client_address.ip,
-            self.client_address.port,
+            self.client_address,
             self.dst_address,
             self.bytes_up,
             self.bytes_down,

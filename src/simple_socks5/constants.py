@@ -5,7 +5,7 @@ from enum import Enum
 SOCKS_VERSION: int = 5
 
 DEFAULT_USERNAME: str = "myusername"
-DEFAULT_PASSWORD: str = "mypassword"
+DEFAULT_PASSWORD: str = "mypassword"  # noqa: S105 - documented default; startup warns while it is in use
 
 
 def credentials() -> tuple[bytes, bytes]:
@@ -80,13 +80,14 @@ def log_file() -> str | None:
 
 
 DEFAULT_HEALTHCHECK_PORT: int = 1080
+MAX_PORT: int = 65535
 
 
 def healthcheck_port() -> int:
     """The port the container healthcheck probes; the server itself never reads it."""
     port = _positive_int_env("SOCKS5_HEALTHCHECK_PORT", DEFAULT_HEALTHCHECK_PORT)
-    if port > 65535:
-        raise ValueError(f"SOCKS5_HEALTHCHECK_PORT must be a port number up to 65535, got {port}")
+    if port > MAX_PORT:
+        raise ValueError(f"SOCKS5_HEALTHCHECK_PORT must be a port number up to {MAX_PORT}, got {port}")
     return port
 
 

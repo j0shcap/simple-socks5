@@ -41,7 +41,7 @@ class HandshakeTimeoutError(TimeoutError):
     """Exception raised when a client doesn't finish the handshake before its deadline."""
 
 
-class PolicyDenied(Exception):
+class PolicyDeniedError(Exception):
     """Exception raised when the destination policy blocks a destination address.
 
     Attributes:

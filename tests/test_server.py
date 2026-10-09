@@ -18,7 +18,7 @@ from simple_socks5.exceptions import (
     InvalidDomainNameError,
     InvalidRequestError,
     InvalidVersionError,
-    PolicyDenied,
+    PolicyDeniedError,
 )
 from simple_socks5.models import BindAddress, DetailedAddress, Request
 from simple_socks5.server import TCPProxyServer, ThreadingTCPServer
@@ -450,7 +450,7 @@ class TestPolicyDenial(unittest.TestCase):
         handler = make_proxy_handler()
         handler.server = self.server
         with (
-            patch("simple_socks5.server.TCPRelay", side_effect=PolicyDenied("127.0.0.1", 80)),
+            patch("simple_socks5.server.TCPRelay", side_effect=PolicyDeniedError("127.0.0.1", 80)),
             self.assertLogs("simple_socks5", level="DEBUG") as logs,
         ):
             handler.handle()

@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 import pytest
 
-from simple_socks5.exceptions import PolicyDenied
+from simple_socks5.exceptions import PolicyDeniedError
 from simple_socks5.policy import check_destination, is_destination_allowed
 
 DENIED = (
@@ -72,7 +72,7 @@ class TestDefaultPolicy(unittest.TestCase):
         for ip in DENIED:
             with self.subTest(ip=ip):
                 assert not is_destination_allowed(ip)
-                with pytest.raises(PolicyDenied):
+                with pytest.raises(PolicyDeniedError):
                     check_destination(ip, 80)
 
     def test_allowed(self):
@@ -90,7 +90,7 @@ class TestDefaultPolicy(unittest.TestCase):
                 assert ctx.value.errno == socket.EAI_NONAME
 
     def test_check_destination_raises_policy_denied_with_host_and_port(self):
-        with pytest.raises(PolicyDenied) as ctx:
+        with pytest.raises(PolicyDeniedError) as ctx:
             check_destination("::1", 8080)
         assert (ctx.value.host, ctx.value.port) == ("::1", 8080)
 

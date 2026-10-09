@@ -1,5 +1,6 @@
 import logging
 from logging.handlers import RotatingFileHandler
+from typing import ClassVar
 
 from .config import ProxyConfiguration
 from .constants import LOG_FILE_BACKUP_COUNT, LOG_FILE_MAX_BYTES, log_file
@@ -24,7 +25,7 @@ class LogColors:
 
 
 class ColorFormatter(logging.Formatter):
-    COLORS = {
+    COLORS: ClassVar[dict[int, str]] = {
         logging.ERROR: LogColors.RED,
         logging.WARNING: LogColors.YELLOW,
         logging.INFO: LogColors.WHITE,
