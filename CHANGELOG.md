@@ -25,6 +25,8 @@ to make the proxy safer; each such change is marked **Behaviour change** and is 
 - The version is read from the installed package, so `pyproject.toml` is the only place it's
   written. `--version` from a clone that was never installed prints `0+unknown`; run
   `pip install -e .` to fix it.
+- Contributors lint and format with Ruff instead of flake8: `pip install -e '.[dev]'`, then
+  `ruff check .` and `ruff format .`.
 
 ### Fixed
 - When the server can't start (for example, the port is already in use), it now exits with code 1
