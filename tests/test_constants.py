@@ -7,11 +7,11 @@ import unittest
 from unittest.mock import patch
 
 from simple_socks5.constants import (
-    ReplyCodes,
-    MethodCodes,
+    RELAY_BUFFER_SIZE,
     AddressTypeCodes,
     CommandCodes,
-    RELAY_BUFFER_SIZE,
+    MethodCodes,
+    ReplyCodes,
     allow_loopback,
     connect_timeout,
     credentials,
@@ -253,5 +253,5 @@ class TestHealthcheckPortEnv(unittest.TestCase):
                     healthcheck_port()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()

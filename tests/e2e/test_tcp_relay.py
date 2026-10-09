@@ -91,6 +91,7 @@ def test_half_close_from_origin(proxy, reply_then_read_origin):
 def test_bidirectional_bulk(proxy, echo_origin):
     upload = deterministic_payload(BULK_SIZE)
     with sc.open_tunnel(proxy.address, "127.0.0.1", echo_origin.port) as tunnel:
+
         def write():
             tunnel.sendall(upload)
             tunnel.shutdown(socket.SHUT_WR)

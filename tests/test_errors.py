@@ -1,6 +1,7 @@
 """
 Tests the mapping from exceptions to SOCKS5 reply codes (RFC 1928 §6).
 """
+
 import errno
 import socket
 import unittest

@@ -2,7 +2,7 @@ import socket
 import sys
 import threading
 import time
-from socketserver import StreamRequestHandler, ThreadingMixIn, TCPServer
+from socketserver import StreamRequestHandler, TCPServer, ThreadingMixIn
 
 from .constants import (
     CONNECTION_LIMIT_WARNING_INTERVAL,
@@ -15,15 +15,15 @@ from .constants import (
 from .errors import is_routine_disconnect, reply_code_for
 from .exceptions import HandshakeTimeoutError, InvalidRequestError, InvalidVersionError, PolicyDenied
 from .handlers import TCPHandler
+from .logger import get_logger
+from .models import BindAddress, DetailedAddress, Request
 from .relays import TCPRelay, UDPRelay
 from .utils import (
+    format_connection_established,
     generate_command_not_supported_reply,
     generate_failed_reply,
     generate_succeeded_reply,
-    format_connection_established,
 )
-from .logger import get_logger
-from .models import BindAddress, Request, DetailedAddress
 
 logger = get_logger(__name__)
 

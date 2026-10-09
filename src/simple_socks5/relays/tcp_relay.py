@@ -1,13 +1,13 @@
-import socket
 import selectors
+import socket
 
-from .base import BaseRelay
 from ..constants import RELAY_BUFFER_SIZE, RELAY_WRITE_TIMEOUT, TCP_SELECTOR_TIMEOUT, connect_timeout
 from ..errors import is_routine_disconnect
-from ..models import DetailedAddress
 from ..logger import get_logger
+from ..models import DetailedAddress
 from ..policy import check_destination
 from ..utils import generate_tcp_socket
+from .base import BaseRelay
 
 logger = get_logger(__name__)
 
@@ -71,11 +71,7 @@ class TCPRelay(BaseRelay):
 
                 for key, _ in events:
                     sock = key.fileobj
-                    other_sock = (
-                        self.proxy_connection
-                        if sock is self.client_connection
-                        else self.client_connection
-                    )
+                    other_sock = self.proxy_connection if sock is self.client_connection else self.client_connection
 
                     # Handle incoming data
                     data: bytes = self._recv_data(sock)

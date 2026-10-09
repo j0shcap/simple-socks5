@@ -42,9 +42,7 @@ class TestVersion(unittest.TestCase):
             importlib.reload(argument_parser)
 
     def test_cli_prints_version(self):
-        result = subprocess.run(
-            [sys.executable, "app.py", "--version"], cwd=ROOT, capture_output=True, text=True
-        )
+        result = subprocess.run([sys.executable, "app.py", "--version"], cwd=ROOT, capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout, f"app.py {__version__}\n")
 

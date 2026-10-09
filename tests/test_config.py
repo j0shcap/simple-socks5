@@ -7,6 +7,7 @@ from simple_socks5.config import ProxyConfiguration
 class TestProxyConfiguration(unittest.TestCase):
     def test_is_initialized_returns_false_before_init(self):
         """Before initialize() is called, is_initialized() should return False."""
+
         # Create a fresh class to avoid pollution from other tests
         class FreshConfig(ProxyConfiguration):
             pass

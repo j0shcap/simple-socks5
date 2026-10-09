@@ -1,6 +1,7 @@
 """
 Tests the logging level precedence: -L/--logging-level, then $LOGGING_LEVEL, then debug.
 """
+
 import io
 import unittest
 from contextlib import redirect_stderr, redirect_stdout

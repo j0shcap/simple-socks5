@@ -3,6 +3,7 @@ Handshake deadline (SOCKS5_HANDSHAKE_TIMEOUT) and outbound connect timeout (SOCK
 
 Both are read per connection, so each test sets a short value before talking to the proxy.
 """
+
 import select
 import socket
 import time

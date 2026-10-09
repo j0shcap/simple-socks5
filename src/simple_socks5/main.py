@@ -5,14 +5,14 @@ import time
 from argparse import Namespace
 from typing import Callable, Optional, Sequence
 
-from .server import (
-    ThreadingTCPServer,
-    TCPProxyServer,
-)
 from .argument_parser import parse_arguments
-from .logger import get_logger, update_loggers
 from .config import ProxyConfiguration
 from .constants import SHUTDOWN_FORCE_CLOSE_TIMEOUT, SHUTDOWN_GRACE_PERIOD
+from .logger import get_logger, update_loggers
+from .server import (
+    TCPProxyServer,
+    ThreadingTCPServer,
+)
 from .startup import collect_startup_advisories, validate_environment
 
 logger = get_logger(__name__)

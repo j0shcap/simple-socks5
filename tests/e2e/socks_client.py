@@ -129,9 +129,7 @@ def build_userpass(username: Address, password: Address, *, ver: int = AUTH_VERS
     return bytes([ver, len(username)]) + username + bytes([len(password)]) + password
 
 
-def build_request(
-    cmd: int, atyp: int, addr: Address, port: int, *, ver: int = SOCKS_VERSION, rsv: int = 0
-) -> bytes:
+def build_request(cmd: int, atyp: int, addr: Address, port: int, *, ver: int = SOCKS_VERSION, rsv: int = 0) -> bytes:
     return bytes([ver, cmd, rsv, atyp]) + encode_address(atyp, addr) + struct.pack("!H", port)
 
 
@@ -153,8 +151,8 @@ def parse_udp_header(datagram: bytes) -> UDPHeader:
         start, end = 5, 5 + datagram[4]
     else:
         start, end = 4, 4 + (4 if atyp == ATYP_IPV4 else 16)
-    (port,) = struct.unpack("!H", datagram[end:end + 2])
-    return UDPHeader(rsv, frag, atyp, _decode_address(atyp, datagram[start:end]), port, datagram[end + 2:])
+    (port,) = struct.unpack("!H", datagram[end : end + 2])
+    return UDPHeader(rsv, frag, atyp, _decode_address(atyp, datagram[start:end]), port, datagram[end + 2 :])
 
 
 def recv_exact(sock: socket.socket, n: int) -> bytes:

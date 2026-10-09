@@ -2,6 +2,7 @@
 Destination policy: loopback, link-local and unspecified destinations are refused with REP 0x02 unless
 SOCKS5_ALLOW_LOOPBACK=true. Every test here turns the policy on explicitly, since the fixtures turn it off.
 """
+
 import logging
 
 import pytest

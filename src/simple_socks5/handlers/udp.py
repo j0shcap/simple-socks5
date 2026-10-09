@@ -1,11 +1,11 @@
 import socket
 import struct
 
-from .base import BaseHandler
-from ..logger import get_logger
 from ..exceptions import MalformedDatagramError
+from ..logger import get_logger
 from ..models import UDPDatagram
 from ..utils import map_address_int_to_enum
+from .base import BaseHandler
 
 logger = get_logger(__name__)
 
@@ -70,8 +70,8 @@ class UDPHandler(BaseHandler):
                 dst_addr = data[5:domain_end].decode()
             except UnicodeDecodeError:
                 raise MalformedDatagramError("domain name is not valid UTF-8") from None
-            dst_port = struct.unpack("!H", data[domain_end:domain_end + 2])[0]
-            user_data = data[domain_end + 2:]
+            dst_port = struct.unpack("!H", data[domain_end : domain_end + 2])[0]
+            user_data = data[domain_end + 2 :]
         elif atyp == 4:  # IPv6
             _require(data, 22, "truncated IPv6 address or port")
             dst_addr = socket.inet_ntop(socket.AF_INET6, data[4:20])

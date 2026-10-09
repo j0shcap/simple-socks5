@@ -2,6 +2,7 @@
 python -m simple_socks5.healthcheck: healthy (exit 0) when a SOCKS5 server answers the greeting, else unhealthy
 (exit 1).
 """
+
 import logging
 import socket
 import subprocess
@@ -22,6 +23,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 def one_shot_server(reply: bytes):
     """Accepts one connection, reads the greeting, sends reply and closes. Yields the port."""
     with socket.create_server(("127.0.0.1", 0)) as server:
+
         def serve():
             conn, _ = server.accept()
             with conn:

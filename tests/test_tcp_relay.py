@@ -1,8 +1,8 @@
 import errno
 import logging
 import os
-import socket
 import selectors
+import socket
 import unittest
 from unittest.mock import MagicMock, call, patch
 
@@ -34,7 +34,9 @@ class TestTCPRelay(unittest.TestCase):
         client_conn.getpeername.return_value = ("127.0.0.1", 1234)
 
         dst = DetailedAddress(
-            name="example.com", ip="93.184.216.34", port=80,
+            name="example.com",
+            ip="93.184.216.34",
+            port=80,
             address_type=AddressTypeCodes.IPv4,
         )
 
@@ -77,7 +79,9 @@ class TestTCPRelay(unittest.TestCase):
         client_conn = MagicMock()
         client_conn.getpeername.return_value = ("127.0.0.1", 1234)
         dst = DetailedAddress(
-            name="test", ip="1.2.3.4", port=80,
+            name="test",
+            ip="1.2.3.4",
+            port=80,
             address_type=AddressTypeCodes.IPv4,
         )
 
@@ -96,7 +100,9 @@ class TestTCPRelay(unittest.TestCase):
         client_conn = MagicMock()
         client_conn.getpeername.return_value = ("127.0.0.1", 1234)
         dst = DetailedAddress(
-            name="test", ip="1.2.3.4", port=80,
+            name="test",
+            ip="1.2.3.4",
+            port=80,
             address_type=AddressTypeCodes.IPv4,
         )
 

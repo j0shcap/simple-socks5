@@ -1,6 +1,7 @@
 """
 Tests for the startup advisories that describe the proxy's exposure.
 """
+
 import itertools
 import logging
 import os
@@ -46,9 +47,11 @@ class TestIsLoopbackHost(unittest.TestCase):
 
     def test_no_dns_lookup(self):
         """Hostnames are classified without resolving them."""
-        with patch("socket.getaddrinfo", side_effect=AssertionError("DNS lookup")), \
-                patch("socket.gethostbyname", side_effect=AssertionError("DNS lookup")), \
-                patch("socket.gethostbyname_ex", side_effect=AssertionError("DNS lookup")):
+        with (
+            patch("socket.getaddrinfo", side_effect=AssertionError("DNS lookup")),
+            patch("socket.gethostbyname", side_effect=AssertionError("DNS lookup")),
+            patch("socket.gethostbyname_ex", side_effect=AssertionError("DNS lookup")),
+        ):
             self.assertFalse(is_loopback_host("example.org"))
 
 
@@ -112,8 +115,12 @@ class TestStartupAdvisories(unittest.TestCase):
 
 class TestAuthExplicitlyDisabled(unittest.TestCase):
     def test_not_explicitly_disabled(self):
-        for environ in ({}, {"SOCKS5_AUTH_REQUIRED": ""}, {"SOCKS5_AUTH_REQUIRED": "true"},
-                        {"SOCKS5_AUTH_REQUIRED": "0"}):
+        for environ in (
+            {},
+            {"SOCKS5_AUTH_REQUIRED": ""},
+            {"SOCKS5_AUTH_REQUIRED": "true"},
+            {"SOCKS5_AUTH_REQUIRED": "0"},
+        ):
             with self.subTest(environ=environ):
                 self.assertFalse(auth_explicitly_disabled(environ))
 

@@ -2,6 +2,7 @@
 Classifies exceptions raised while serving a request: their SOCKS5 reply codes (RFC 1928 §6), and whether they
 are a routine disconnect.
 """
+
 import errno
 import socket
 

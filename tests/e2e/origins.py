@@ -148,10 +148,10 @@ class PayloadHTTPHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         prefix = "/bytes/"
-        if not (self.path.startswith(prefix) and self.path[len(prefix):].isdigit()):
+        if not (self.path.startswith(prefix) and self.path[len(prefix) :].isdigit()):
             self.send_error(404)
             return
-        body = deterministic_payload(int(self.path[len(prefix):]))
+        body = deterministic_payload(int(self.path[len(prefix) :]))
         self.send_response(200)
         self.send_header("Content-Type", "application/octet-stream")
         self.send_header("Content-Length", str(len(body)))

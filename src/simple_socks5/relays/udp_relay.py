@@ -2,18 +2,18 @@ import selectors
 import socket
 import time
 
-from .base import BaseRelay
-from ..constants import RELAY_BUFFER_SIZE, UDP_RECV_TIMEOUT, UDP_FORWARD_TIMEOUT
+from ..constants import RELAY_BUFFER_SIZE, UDP_FORWARD_TIMEOUT, UDP_RECV_TIMEOUT
 from ..exceptions import MalformedDatagramError, PolicyDenied
-from ..models import DetailedAddress, BaseAddress
-from ..logger import get_logger
 from ..handlers import UDPHandler
+from ..logger import get_logger
+from ..models import BaseAddress, DetailedAddress
 from ..policy import check_destination
 from ..utils import (
+    base_relay_template,
     generate_udp_socket,
     map_address_enum_to_socket_family,
-    base_relay_template,
 )
+from .base import BaseRelay
 
 logger = get_logger(__name__)
 
@@ -102,9 +102,7 @@ class UDPRelay(BaseRelay):
         Returns whether it came from the client, which is what keeps the association alive.
         """
         if addr[0] != self.expected_client_ip:
-            logger.debug(
-                f"(UDP) Dropped datagram from unauthorized source: {addr[0]}"
-            )
+            logger.debug(f"(UDP) Dropped datagram from unauthorized source: {addr[0]}")
             return False
 
         try:
@@ -136,9 +134,7 @@ class UDPRelay(BaseRelay):
             socket.SOCK_DGRAM,
         ) as forward_socket:
             forward_socket.settimeout(UDP_FORWARD_TIMEOUT)
-            forward_socket.sendto(
-                datagram.data, (datagram.dst_addr, datagram.dst_port)
-            )
+            forward_socket.sendto(datagram.data, (datagram.dst_addr, datagram.dst_port))
             self.bytes_up += len(datagram.data)
             self._log_relay(
                 BaseAddress(client_addr[0], client_addr[1]),
@@ -148,9 +144,7 @@ class UDPRelay(BaseRelay):
 
             try:
                 response, remote_addr = forward_socket.recvfrom(RELAY_BUFFER_SIZE)
-                header = UDPHandler.build_udp_response_header(
-                    remote_addr[0], remote_addr[1]
-                )
+                header = UDPHandler.build_udp_response_header(remote_addr[0], remote_addr[1])
                 encapsulated = header + response
                 self.proxy_connection.sendto(encapsulated, client_addr)
                 self.bytes_down += len(response)
@@ -160,10 +154,7 @@ class UDPRelay(BaseRelay):
                     len(encapsulated),
                 )
             except socket.timeout:
-                logger.debug(
-                    f"UDP forward timeout waiting for response from "
-                    f"{datagram.dst_addr}:{datagram.dst_port}"
-                )
+                logger.debug(f"UDP forward timeout waiting for response from {datagram.dst_addr}:{datagram.dst_port}")
 
     def _log_relay(self, src_addr: BaseAddress, dst_addr: BaseAddress, data_len: int):
         logger.debug(

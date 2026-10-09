@@ -1,10 +1,10 @@
-import struct
 import socket
+import struct
 import threading
 import time
 from typing import Optional
 
-from ..constants import SOCKS_VERSION, AddressTypeCodes, DNS_LOOKUP_TIMEOUT
+from ..constants import DNS_LOOKUP_TIMEOUT, SOCKS_VERSION, AddressTypeCodes
 from ..errors import is_routine_disconnect
 from ..exceptions import (
     AddressTypeNotSupportedError,
@@ -48,7 +48,7 @@ class BaseHandler:
             chunk = self._recv_before_deadline(n - pos)
             if not chunk:
                 raise ConnectionError("Connection closed during recv")
-            buf[pos:pos + len(chunk)] = chunk
+            buf[pos : pos + len(chunk)] = chunk
             pos += len(chunk)
         return bytes(buf)
 
@@ -134,9 +134,7 @@ class BaseHandler:
                     raise InvalidDomainNameError(raw_domain_name) from e
                 address, address_type = self._resolve_hostname(domain_name)
             elif address_type == AddressTypeCodes.IPv6.value:
-                address: str = socket.inet_ntop(
-                    socket.AF_INET6, self._recv_exact(16)
-                )
+                address: str = socket.inet_ntop(socket.AF_INET6, self._recv_exact(16))
                 port = self._recv_port()
                 domain_name: str = address
             else:

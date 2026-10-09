@@ -1,6 +1,7 @@
 """
 Tests that main() logs the startup advisories before serving, and shuts down gracefully on a signal.
 """
+
 import io
 import os
 import signal
@@ -70,9 +71,13 @@ class TestMainStartupAdvisories(unittest.TestCase):
     def test_password_never_logged(self):
         credentials = (("myusername", "mypassword"), ("admin", "p@ss:w0rd/%s\"'{}\\ü"))
         for (username, password), auth_required in [(c, a) for c in credentials for a in ("true", "false")]:
-            with self.subTest(username=username, auth_required=auth_required), \
-                    patch.dict(os.environ, {"SOCKS5_AUTH_REQUIRED": auth_required,
-                                            "SOCKS5_USERNAME": username, "SOCKS5_PASSWORD": password}):
+            with (
+                self.subTest(username=username, auth_required=auth_required),
+                patch.dict(
+                    os.environ,
+                    {"SOCKS5_AUTH_REQUIRED": auth_required, "SOCKS5_USERNAME": username, "SOCKS5_PASSWORD": password},
+                ),
+            ):
                 output = self.run_main(logging_level="debug")
                 self.assertIn("Server started", output)
                 self.assertNotIn(password, output)
@@ -104,8 +109,7 @@ class TestMainStartupAdvisories(unittest.TestCase):
         self.assertEqual(caught.exception.code, 1)
 
     def test_main_exits_on_invalid_handshake_timeout(self):
-        with patch.dict(os.environ, {"SOCKS5_HANDSHAKE_TIMEOUT": "abc"}), \
-                self.assertRaises(SystemExit) as caught:
+        with patch.dict(os.environ, {"SOCKS5_HANDSHAKE_TIMEOUT": "abc"}), self.assertRaises(SystemExit) as caught:
             self.run_main()
         self.assertNotIn(caught.exception.code, (0, None))
         self.assertIn("SOCKS5_HANDSHAKE_TIMEOUT", str(caught.exception.code))
@@ -113,8 +117,11 @@ class TestMainStartupAdvisories(unittest.TestCase):
 
     def test_invalid_max_connections_exits_with_message(self):
         for raw in ("0", "abc"):
-            with self.subTest(raw=raw), patch.dict(os.environ, {"SOCKS5_MAX_CONNECTIONS": raw}), \
-                    self.assertRaises(SystemExit) as caught:
+            with (
+                self.subTest(raw=raw),
+                patch.dict(os.environ, {"SOCKS5_MAX_CONNECTIONS": raw}),
+                self.assertRaises(SystemExit) as caught,
+            ):
                 self.run_main(logging_level="disabled")
             self.assertEqual(
                 caught.exception.code,

@@ -1,6 +1,7 @@
 """
 Tests the destination policy: which resolved addresses the proxy refuses to connect or send to.
 """
+
 import os
 import socket
 import unittest

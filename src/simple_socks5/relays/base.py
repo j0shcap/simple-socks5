@@ -1,7 +1,7 @@
 import time
 from socket import socket
 
-from ..models import DetailedAddress, BindAddress
+from ..models import BindAddress, DetailedAddress
 from ..utils.addresses import map_address_family_to_enum
 from ..utils.logs import format_connection_closed
 

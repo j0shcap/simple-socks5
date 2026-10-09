@@ -1,25 +1,26 @@
 import socket
 import unittest
+
+from simple_socks5.constants import AddressTypeCodes, MethodCodes
 from simple_socks5.models import DetailedAddress
 from simple_socks5.utils import (
-    generate_connection_method_response,
-    generate_general_socks_server_failure_reply,
-    generate_connection_refused_reply,
-    generate_network_unreachable_reply,
-    generate_host_unreachable_reply,
-    generate_address_type_not_supported_reply,
-    generate_connection_not_allowed_by_ruleset_reply,
-    generate_ttl_expired_reply,
-    generate_command_not_supported_reply,
-    map_address_to_bytes,
-    map_address_int_to_enum,
-    map_address_enum_to_socket_family,
-    generate_succeeded_reply,
-    generate_tcp_socket,
     format_connection_closed,
     format_connection_established,
+    generate_address_type_not_supported_reply,
+    generate_command_not_supported_reply,
+    generate_connection_method_response,
+    generate_connection_not_allowed_by_ruleset_reply,
+    generate_connection_refused_reply,
+    generate_general_socks_server_failure_reply,
+    generate_host_unreachable_reply,
+    generate_network_unreachable_reply,
+    generate_succeeded_reply,
+    generate_tcp_socket,
+    generate_ttl_expired_reply,
+    map_address_enum_to_socket_family,
+    map_address_int_to_enum,
+    map_address_to_bytes,
 )
-from simple_socks5.constants import AddressTypeCodes, MethodCodes
 
 
 class TestErrorUtils(unittest.TestCase):
@@ -285,11 +286,7 @@ class TestSuccessUtils(unittest.TestCase):
         port = 443
         expected_reply = generate_succeeded_reply(address_type, ip, port)
         # VER=05, REP=00, RSV=00, ATYP=04, then 16-byte IPv6 addr, then port
-        expected = (
-            b"\x05\x00\x00\x04"
-            b"\x20\x01\x0d\xb8\x85\xa3\x00\x00\x00\x00\x8a\x2e\x03\x70\x73\x34"
-            b"\x01\xbb"
-        )
+        expected = b"\x05\x00\x00\x04\x20\x01\x0d\xb8\x85\xa3\x00\x00\x00\x00\x8a\x2e\x03\x70\x73\x34\x01\xbb"
         self.assertEqual(expected_reply, expected)
 
 

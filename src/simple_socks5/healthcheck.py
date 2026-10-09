@@ -4,6 +4,7 @@ Container healthcheck: `python -m simple_socks5.healthcheck` exits 0 when a SOCK
 It sends a greeting offering only "no authentication" and accepts any SOCKS5 method reply, X'FF' included, so it
 passes whether or not SOCKS5_AUTH_REQUIRED is set. The server logs such a probe at DEBUG only.
 """
+
 import socket
 import sys
 

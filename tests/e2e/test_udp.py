@@ -83,15 +83,21 @@ MALFORMED = {
 }
 
 
-@pytest.mark.parametrize("make_datagram", [
-    *[pytest.param(lambda port, data=data: data, id=name) for name, data in MALFORMED.items()],
-    # Addressed to the echo origin, so a relayed datagram would come back
-    pytest.param(lambda port: b"\x00\x01" + sc.build_udp_header(sc.ATYP_IPV4, "127.0.0.1", port)[2:] + b"bad",
-                 id="RSV not 0"),
-    pytest.param(lambda port: b"\x00\x00\x00\x09" + sc.build_udp_header(sc.ATYP_IPV4, "127.0.0.1", port)[4:] + b"bad",
-                 id="ATYP 9"),
-    pytest.param(lambda port: sc.build_udp_header(sc.ATYP_IPV4, "127.0.0.1", port, frag=1) + b"bad", id="FRAG 1"),
-])
+@pytest.mark.parametrize(
+    "make_datagram",
+    [
+        *[pytest.param(lambda port, data=data: data, id=name) for name, data in MALFORMED.items()],
+        # Addressed to the echo origin, so a relayed datagram would come back
+        pytest.param(
+            lambda port: b"\x00\x01" + sc.build_udp_header(sc.ATYP_IPV4, "127.0.0.1", port)[2:] + b"bad", id="RSV not 0"
+        ),
+        pytest.param(
+            lambda port: b"\x00\x00\x00\x09" + sc.build_udp_header(sc.ATYP_IPV4, "127.0.0.1", port)[4:] + b"bad",
+            id="ATYP 9",
+        ),
+        pytest.param(lambda port: sc.build_udp_header(sc.ATYP_IPV4, "127.0.0.1", port, frag=1) + b"bad", id="FRAG 1"),
+    ],
+)
 def test_malformed_datagram_is_dropped_and_association_survives(proxy, udp_echo_origin, make_datagram):
     with _udp_association(proxy) as (control, udp, relay_address):
         udp.sendto(make_datagram(udp_echo_origin.port), relay_address)

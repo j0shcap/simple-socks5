@@ -2,13 +2,14 @@ import errno
 import hmac
 import logging
 import os
+import socket
+import struct
 import threading
 import unittest
 from unittest.mock import MagicMock, patch
-import struct
-import socket
-from simple_socks5.handlers.base import BaseHandler
-from simple_socks5.handlers.tcp import TCPHandler
+
+from simple_socks5.constants import AddressTypeCodes, MethodCodes, ReplyCodes
+from simple_socks5.errors import reply_code_for
 from simple_socks5.exceptions import (
     AddressTypeNotSupportedError,
     HandshakeTimeoutError,
@@ -16,8 +17,8 @@ from simple_socks5.exceptions import (
     InvalidRequestError,
     InvalidVersionError,
 )
-from simple_socks5.constants import AddressTypeCodes, MethodCodes, ReplyCodes
-from simple_socks5.errors import reply_code_for
+from simple_socks5.handlers.base import BaseHandler
+from simple_socks5.handlers.tcp import TCPHandler
 from simple_socks5.models import Request
 
 # Testing Data
@@ -32,7 +33,7 @@ CORRECT_VERSION_AUTH_OR_NO_AUTH = [b"\x05\x02", b"\x00\x02"]
 # Initial Responses
 RESP_CORRECT_VERSION_NO_AUTH_REQUIRED = b"\x05\x00"
 RESP_CORRECT_VERSION_AUTH_REQUIRED = b"\x05\x02"
-RESP_CORRECT_VERSION_NO_ACCEPTABLE_METHODS = b"\x05\xFF"
+RESP_CORRECT_VERSION_NO_ACCEPTABLE_METHODS = b"\x05\xff"
 RESP_LOGIN_SUCCESS = b"\x01\x00"
 RESP_LOGIN_FAILURE = b"\x01\x01"
 
@@ -62,18 +63,14 @@ class TestTCPRequestHandlerIPv4(unittest.TestCase):
 
     @patch("socket.socket.recv")
     @patch("socket.socket.sendall")
-    def test_handle_handshake__no_authentication_required(
-        self, mock_sendall, mock_recv
-    ):
+    def test_handle_handshake__no_authentication_required(self, mock_sendall, mock_recv):
         mock_recv.side_effect = CORRECT_VERSION_NO_AUTH_REQUIRED
         self.handler.handle_request()
         mock_sendall.assert_called_with(RESP_CORRECT_VERSION_NO_AUTH_REQUIRED)
 
     @patch("socket.socket.recv")
     @patch("socket.socket.sendall")
-    def test_handle_handshake__correct_version__authentication_required_success(
-        self, mock_sendall, mock_recv
-    ):
+    def test_handle_handshake__correct_version__authentication_required_success(self, mock_sendall, mock_recv):
         username = "myusername"
         password = "mypassword"
         mock_recv.side_effect = [
@@ -134,7 +131,7 @@ class TestTCPRequestHandlerIPv4(unittest.TestCase):
         self.assertEqual(result, MethodCodes.NO_AUTHENTICATION_REQUIRED)
 
     def test_authenticate_with_invalid_methods(self):
-        methods = b"\xFF"
+        methods = b"\xff"
         result = self.handler._negotiate_authentication_method(methods)
         self.assertEqual(result, MethodCodes.NO_ACCEPTABLE_METHODS)
 
@@ -382,8 +379,8 @@ class TestParseAddress(unittest.TestCase):
         self.events = []
         self.connection = MagicMock()
         self.handler = BaseHandler(self.connection)
-        self.handler._resolve_hostname = (
-            lambda name: self.events.append("lookup") or ("1.2.3.4", AddressTypeCodes.IPv4.value)
+        self.handler._resolve_hostname = lambda name: (
+            self.events.append("lookup") or ("1.2.3.4", AddressTypeCodes.IPv4.value)
         )
 
     def feed(self, *chunks: bytes) -> None:

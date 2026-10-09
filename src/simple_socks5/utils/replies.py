@@ -1,7 +1,7 @@
 import struct
 
+from ..constants import SOCKS_VERSION, AddressTypeCodes, MethodCodes, ReplyCodes
 from .addresses import map_address_to_bytes
-from ..constants import SOCKS_VERSION, ReplyCodes, AddressTypeCodes, MethodCodes
 
 
 def generate_general_socks_server_failure_reply(
@@ -37,9 +37,7 @@ def generate_address_type_not_supported_reply(
 def generate_connection_not_allowed_by_ruleset_reply(
     address_type: AddressTypeCodes = AddressTypeCodes.IPv4,
 ) -> bytes:
-    return generate_failed_reply(
-        address_type, ReplyCodes.CONNECTION_NOT_ALLOWED_BY_RULESET
-    )
+    return generate_failed_reply(address_type, ReplyCodes.CONNECTION_NOT_ALLOWED_BY_RULESET)
 
 
 def generate_ttl_expired_reply(
@@ -58,14 +56,10 @@ def generate_unassigned_reply() -> bytes:
     return generate_failed_reply(AddressTypeCodes.IPv4, ReplyCodes.UNASSIGNED)
 
 
-def generate_failed_reply(
-    address_type: AddressTypeCodes, error_number: ReplyCodes
-) -> bytes:
+def generate_failed_reply(address_type: AddressTypeCodes, error_number: ReplyCodes) -> bytes:
     if address_type == AddressTypeCodes.DOMAIN_NAME:
         address_type = AddressTypeCodes.IPv4
-    header = struct.pack(
-        "!BBBB", SOCKS_VERSION, error_number.value, 0, address_type.value
-    )
+    header = struct.pack("!BBBB", SOCKS_VERSION, error_number.value, 0, address_type.value)
     if address_type == AddressTypeCodes.IPv6:
         addr_bytes = b"\x00" * 16
     else:
@@ -74,13 +68,9 @@ def generate_failed_reply(
     return header + addr_bytes + port
 
 
-def generate_succeeded_reply(
-    address_type: AddressTypeCodes, ip: str, port: int
-) -> bytes:
+def generate_succeeded_reply(address_type: AddressTypeCodes, ip: str, port: int) -> bytes:
     addr_bytes: bytes = map_address_to_bytes(address_type, ip)
-    header = struct.pack(
-        "!BBBB", SOCKS_VERSION, ReplyCodes.SUCCEEDED.value, 0, address_type.value
-    )
+    header = struct.pack("!BBBB", SOCKS_VERSION, ReplyCodes.SUCCEEDED.value, 0, address_type.value)
     port_bytes = struct.pack("!H", port)
     return header + addr_bytes + port_bytes
 

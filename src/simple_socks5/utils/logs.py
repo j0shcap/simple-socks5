@@ -1,13 +1,12 @@
 """
 Standardized log messages.
 """
+
 import string
 
 from ..models import DetailedAddress, format_host_port
 
-base_relay_template = string.Template(
-    "RELAY | $protocol | $src_ip:$src_port -> $dst_ip:$dst_port | $data_size bytes"
-)
+base_relay_template = string.Template("RELAY | $protocol | $src_ip:$src_port -> $dst_ip:$dst_port | $data_size bytes")
 
 
 def format_connection_established(client_ip: str, client_port: int, dst: DetailedAddress) -> str:

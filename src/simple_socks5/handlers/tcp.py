@@ -1,13 +1,13 @@
 import hmac
-import struct
 import socket
+import struct
 
-from .base import BaseHandler
 from ..constants import SOCKS_VERSION, MethodCodes, auth_required, credentials
 from ..errors import is_routine_disconnect
 from ..exceptions import InvalidVersionError
 from ..logger import get_logger
 from ..utils import generate_connection_method_response
+from .base import BaseHandler
 
 logger = get_logger(__name__)
 
@@ -57,14 +57,10 @@ class TCPHandler(BaseHandler):
             methods = self._recv_exact(nmethods)
 
             # Handles negotiation for authentication method
-            negotiated_authentication: MethodCodes = (
-                self._negotiate_authentication_method(methods)
-            )
+            negotiated_authentication: MethodCodes = self._negotiate_authentication_method(methods)
 
             # Handles server response
-            self.connection.sendall(
-                generate_connection_method_response(negotiated_authentication)
-            )
+            self.connection.sendall(generate_connection_method_response(negotiated_authentication))
 
             # Handles authentication
             if negotiated_authentication == MethodCodes.NO_AUTHENTICATION_REQUIRED:

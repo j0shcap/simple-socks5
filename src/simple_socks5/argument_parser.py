@@ -36,9 +36,7 @@ def parse_arguments(
         default="localhost",
         help="Host address for the SOCKS server.",
     )
-    server_group.add_argument(
-        "-P", "--port", type=int, default=1080, help="Port number for the SOCKS server."
-    )
+    server_group.add_argument("-P", "--port", type=int, default=1080, help="Port number for the SOCKS server.")
 
     # Logging Configuration
     logging_group = parser.add_argument_group("Logging Configuration")
@@ -52,9 +50,7 @@ def parse_arguments(
     )
 
     # Version Information
-    parser.add_argument(
-        "-V", "--version", action="version", version=f"%(prog)s {__version__}"
-    )
+    parser.add_argument("-V", "--version", action="version", version=f"%(prog)s {__version__}")
 
     args = parser.parse_args(argv)
     # argparse validates choices only for values given on the command line, so an invalid value

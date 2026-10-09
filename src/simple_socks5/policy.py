@@ -4,6 +4,7 @@ Decides which resolved destination addresses the proxy may connect or send to.
 Only IP addresses are checked: a hostname can resolve differently by the time it's used, so callers check the
 address they are about to connect to.
 """
+
 import socket
 from ipaddress import IPv4Address, IPv6Address, ip_address, ip_network
 from typing import Optional, Union

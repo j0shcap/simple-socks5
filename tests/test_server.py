@@ -99,8 +99,10 @@ class TestHandleParseRequestErrors(unittest.TestCase):
 class TestHandshakeDeadline(unittest.TestCase):
     def test_handle_passes_deadline(self, mock_tcp_handler_cls):
         mock_tcp_handler_cls.return_value.handle_request.return_value = False
-        with patch.dict(os.environ, {"SOCKS5_HANDSHAKE_TIMEOUT": "2.5"}), \
-                patch("simple_socks5.server.time.monotonic", return_value=100.0):
+        with (
+            patch.dict(os.environ, {"SOCKS5_HANDSHAKE_TIMEOUT": "2.5"}),
+            patch("simple_socks5.server.time.monotonic", return_value=100.0),
+        ):
             make_proxy_handler().handle()
         self.assertEqual(mock_tcp_handler_cls.call_args.kwargs["deadline"], 102.5)
 
@@ -158,8 +160,10 @@ class TestReplyCodes(unittest.TestCase):
         )
         for exc, code in cases:
             for address_type in (AddressTypeCodes.IPv4, AddressTypeCodes.IPv6):
-                with self.subTest(exc=repr(exc), address_type=address_type.name), \
-                        patch("simple_socks5.server.TCPRelay", side_effect=exc):
+                with (
+                    self.subTest(exc=repr(exc), address_type=address_type.name),
+                    patch("simple_socks5.server.TCPRelay", side_effect=exc),
+                ):
                     reply = self.run_handle(mock_tcp_handler_cls, make_proxy_handler(), connect_request(address_type))
                     zero_address = b"\x00" * (16 if address_type == AddressTypeCodes.IPv6 else 4)
                     self.assertEqual(reply, bytes([5, code, 0, address_type.value]) + zero_address + b"\x00\x00")
@@ -281,14 +285,18 @@ class TestDisconnectLogging(unittest.TestCase):
         handler.connection.sendall.assert_called_once_with(b"\x05\x01\x00\x01\x00\x00\x00\x00\x00\x00")
 
     def test_connect_unexpected_error_logs_traceback(self, mock_tcp_handler_cls):
-        with patch("simple_socks5.server.TCPRelay", side_effect=RuntimeError("bug")), \
-                self.assertLogs("simple_socks5.server", level="ERROR") as logs:
+        with (
+            patch("simple_socks5.server.TCPRelay", side_effect=RuntimeError("bug")),
+            self.assertLogs("simple_socks5.server", level="ERROR") as logs,
+        ):
             self.run_handle(mock_tcp_handler_cls, connect_request())
         self.assertTrue(logs.records[0].exc_info)
 
     def test_connect_refused_logs_error_without_traceback(self, mock_tcp_handler_cls):
-        with patch("simple_socks5.server.TCPRelay", side_effect=ConnectionRefusedError("refused")), \
-                self.assertLogs("simple_socks5.server", level="ERROR") as logs:
+        with (
+            patch("simple_socks5.server.TCPRelay", side_effect=ConnectionRefusedError("refused")),
+            self.assertLogs("simple_socks5.server", level="ERROR") as logs,
+        ):
             self.run_handle(mock_tcp_handler_cls, connect_request())
         self.assertFalse(logs.records[0].exc_info)
 
@@ -405,9 +413,11 @@ class TestConnectionLimit(unittest.TestCase):
             for _ in range(count):
                 server.process_request(MagicMock(spec=socket.socket), ("127.0.0.1", 9999))
 
-        with patch("simple_socks5.server.time.monotonic", lambda: now[0]), \
-                patch.object(server, "shutdown_request") as shutdown_request, \
-                self.assertLogs("simple_socks5.server", level="WARNING") as logs:
+        with (
+            patch("simple_socks5.server.time.monotonic", lambda: now[0]),
+            patch.object(server, "shutdown_request") as shutdown_request,
+            self.assertLogs("simple_socks5.server", level="WARNING") as logs,
+        ):
             reject(50)
             self.assertEqual(len(logs.records), 1)
             self.assertIn("Connection limit of 1 reached: rejected 1 connection(s)", logs.records[0].getMessage())
@@ -437,8 +447,10 @@ class TestPolicyDenial(unittest.TestCase):
         mock_tcp_handler_cls.return_value.parse_request.return_value = Request(5, CommandCodes.CONNECT.value, self.dst)
         handler = make_proxy_handler()
         handler.server = self.server
-        with patch("simple_socks5.server.TCPRelay", side_effect=PolicyDenied("127.0.0.1", 80)), \
-                self.assertLogs("simple_socks5", level="DEBUG") as logs:
+        with (
+            patch("simple_socks5.server.TCPRelay", side_effect=PolicyDenied("127.0.0.1", 80)),
+            self.assertLogs("simple_socks5", level="DEBUG") as logs,
+        ):
             handler.handle()
         handler.connection.sendall.assert_called_once_with(b"\x05\x02\x00\x01\x00\x00\x00\x00\x00\x00")
         self.assertNotIn("ERROR", [r.levelname for r in logs.records])
@@ -456,8 +468,10 @@ class TestPolicyDenial(unittest.TestCase):
 
     def test_policy_warning_rate_limited_with_suppressed_count(self):
         now = [0.0]
-        with patch("simple_socks5.server.time.monotonic", lambda: now[0]), \
-                self.assertLogs("simple_socks5.server", level="DEBUG") as logs:
+        with (
+            patch("simple_socks5.server.time.monotonic", lambda: now[0]),
+            self.assertLogs("simple_socks5.server", level="DEBUG") as logs,
+        ):
             for _ in range(50):
                 self.server.log_policy_denial("192.0.2.7", self.dst)
             now[0] = 9.9
@@ -481,14 +495,17 @@ class TestConnectionTracking(unittest.TestCase):
 
     def _process(self, request, during=lambda: None):
         """Accepts request and runs its handler synchronously instead of on a new thread."""
+
         def start_handler(server, request, client_address):
             server.process_request_thread(request, client_address)
 
         def handle(server, request, client_address):
             during()
 
-        with patch("socketserver.ThreadingMixIn.process_request", start_handler), \
-                patch("socketserver.ThreadingMixIn.process_request_thread", handle):
+        with (
+            patch("socketserver.ThreadingMixIn.process_request", start_handler),
+            patch("socketserver.ThreadingMixIn.process_request_thread", handle),
+        ):
             self.server.process_request(request, ("127.0.0.1", 9999))
 
     def test_request_tracked_before_handler_thread_runs(self):
@@ -566,8 +583,9 @@ class TestConnectionTracking(unittest.TestCase):
         closed, live = MagicMock(spec=socket.socket), MagicMock(spec=socket.socket)
         closed.shutdown.side_effect = OSError("Bad file descriptor")
         counts = []
-        self._process(closed, during=lambda: self._process(
-            live, during=lambda: counts.append(self.server.close_connections())))
+        self._process(
+            closed, during=lambda: self._process(live, during=lambda: counts.append(self.server.close_connections()))
+        )
         self.assertEqual(counts, [1])
         live.shutdown.assert_called_once_with(socket.SHUT_RDWR)
 

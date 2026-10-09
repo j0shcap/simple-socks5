@@ -1,6 +1,7 @@
 """
 Runs app.py as a real process, for tests that need what only a process shows: exit codes, signals and its output.
 """
+
 import os
 import socket
 import subprocess
