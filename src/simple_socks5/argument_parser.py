@@ -1,8 +1,12 @@
 import argparse
 import os
+from importlib.metadata import PackageNotFoundError, version
 from typing import Mapping, Optional, Sequence
 
-__version__ = "2.1.0"
+try:
+    __version__ = version("simple-socks5")
+except PackageNotFoundError:  # a clone run as `python3 app.py` without `pip install -e .`
+    __version__ = "0+unknown"
 
 LOGGING_LEVEL_CHOICES: tuple[str, ...] = ("disabled", "debug", "info", "warning", "error", "critical")
 LOGGING_LEVEL_ENV: str = "LOGGING_LEVEL"

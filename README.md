@@ -68,7 +68,8 @@ python3 app.py [--host HOST | -H HOST] [--port PORT | -P PORT] [--logging-level 
 
 ### Install from source
 
-`python3 app.py` runs straight from a clone. To install the `simple-socks5` command instead, which takes the same flags:
+`python3 app.py` runs straight from a clone, but reports its version as `0+unknown` until you install the package
+(`pip install -e .`). To install the `simple-socks5` command, which takes the same flags:
 
 ```bash
 pip install .
