@@ -45,7 +45,8 @@ Every socket created here has a TIMEOUT-second timeout, so a hang fails instead 
 
 import socket
 import struct
-from typing import Iterable, NamedTuple
+from collections.abc import Iterable
+from typing import NamedTuple
 
 TIMEOUT = 5.0
 SOCKS_VERSION = 5

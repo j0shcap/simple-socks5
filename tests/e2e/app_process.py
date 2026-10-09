@@ -7,9 +7,9 @@ import socket
 import subprocess
 import sys
 import time
+from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Iterator, Optional
 
 import pytest
 
@@ -35,7 +35,7 @@ def socks_ready(address: tuple[str, int]) -> bool:
 
 @contextmanager
 def run_app(
-    cwd: Path, *, logging_level: str = "info", env: Optional[dict[str, str]] = None
+    cwd: Path, *, logging_level: str = "info", env: dict[str, str] | None = None
 ) -> Iterator[tuple[subprocess.Popen, tuple[str, int]]]:
     """
     Runs app.py on a free loopback port with no SOCKS5_* variables but SOCKS5_ALLOW_LOOPBACK=true (the origins

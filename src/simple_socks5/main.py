@@ -3,7 +3,7 @@ import sys
 import threading
 import time
 from argparse import Namespace
-from typing import Callable, Optional, Sequence
+from collections.abc import Callable, Sequence
 
 from .argument_parser import parse_arguments
 from .config import ProxyConfiguration
@@ -34,7 +34,7 @@ class GracefulShutdown:
         self._server = server
         self._grace = grace
         self._clock = clock
-        self._deadline: Optional[float] = None
+        self._deadline: float | None = None
         self._previous_handlers: dict = {}
 
     def install(self) -> None:
@@ -107,7 +107,7 @@ def main(args: Namespace):
         exit(1)
 
 
-def cli(argv: Optional[Sequence[str]] = None) -> None:
+def cli(argv: Sequence[str] | None = None) -> None:
     """
     Console entry point: parses argv (default sys.argv[1:]) and runs main().
     """

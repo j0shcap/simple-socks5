@@ -153,7 +153,7 @@ class UDPRelay(BaseRelay):
                     BaseAddress(client_addr[0], client_addr[1]),
                     len(encapsulated),
                 )
-            except socket.timeout:
+            except TimeoutError:
                 logger.debug(f"UDP forward timeout waiting for response from {datagram.dst_addr}:{datagram.dst_port}")
 
     def _log_relay(self, src_addr: BaseAddress, dst_addr: BaseAddress, data_len: int):

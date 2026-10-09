@@ -1,5 +1,3 @@
-from typing import Union
-
 from .models import format_host_port
 
 
@@ -17,7 +15,7 @@ class InvalidRequestError(Exception):
         request (bytes | int): The invalid request that caused the error.
     """
 
-    def __init__(self, request: Union[bytes, int]) -> None:
+    def __init__(self, request: bytes | int) -> None:
         super().__init__(f"Invalid request: {request}")
 
 

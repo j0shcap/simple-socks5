@@ -86,7 +86,7 @@ class TestHandleParseRequestErrors(unittest.TestCase):
         handler = make_proxy_handler()
         mock_instance = mock_tcp_handler_cls.return_value
         mock_instance.handle_request.return_value = True
-        mock_instance.parse_request.side_effect = socket.error("reset")
+        mock_instance.parse_request.side_effect = OSError("reset")
 
         handler.handle()
 

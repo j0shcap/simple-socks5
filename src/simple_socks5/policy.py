@@ -7,7 +7,6 @@ address they are about to connect to.
 
 import socket
 from ipaddress import IPv4Address, IPv6Address, ip_address, ip_network
-from typing import Optional, Union
 
 from .constants import allow_loopback
 from .exceptions import PolicyDenied
@@ -26,7 +25,7 @@ _V4_COMPATIBLE = ip_network("::/96")
 _NAT64 = ip_network("64:ff9b::/96")
 
 
-def _embedded_ipv4(addr: IPv6Address) -> Optional[IPv4Address]:
+def _embedded_ipv4(addr: IPv6Address) -> IPv4Address | None:
     if addr.ipv4_mapped is not None:
         return addr.ipv4_mapped
     if addr in _V4_COMPATIBLE or addr in _NAT64:
@@ -34,7 +33,7 @@ def _embedded_ipv4(addr: IPv6Address) -> Optional[IPv4Address]:
     return None
 
 
-def _is_denied(addr: Union[IPv4Address, IPv6Address]) -> bool:
+def _is_denied(addr: IPv4Address | IPv6Address) -> bool:
     candidates = [addr]
     if isinstance(addr, IPv6Address):
         embedded = _embedded_ipv4(addr)

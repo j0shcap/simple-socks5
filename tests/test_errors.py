@@ -23,7 +23,7 @@ CASES = (
     (OSError(errno.ENETUNREACH, "network unreachable"), ReplyCodes.NETWORK_UNREACHABLE),
     (OSError(errno.EHOSTUNREACH, "host unreachable"), ReplyCodes.HOST_UNREACHABLE),
     (TimeoutError(), ReplyCodes.HOST_UNREACHABLE),
-    (socket.timeout("timed out"), ReplyCodes.HOST_UNREACHABLE),
+    (TimeoutError("timed out"), ReplyCodes.HOST_UNREACHABLE),
     (socket.gaierror(socket.EAI_NONAME, "not known"), ReplyCodes.HOST_UNREACHABLE),
     # EAI_* codes aren't errno values; a numeric collision must not reach the errno table
     (socket.gaierror(errno.ENETUNREACH, "collides"), ReplyCodes.HOST_UNREACHABLE),

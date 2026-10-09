@@ -65,20 +65,19 @@ class TCPHandler(BaseHandler):
             # Handles authentication
             if negotiated_authentication == MethodCodes.NO_AUTHENTICATION_REQUIRED:
                 return True
-            elif negotiated_authentication == MethodCodes.USERNAME_PASSWORD:
+            if negotiated_authentication == MethodCodes.USERNAME_PASSWORD:
                 return self._handle_username_password_auth()
-            elif negotiated_authentication == MethodCodes.GSSAPI:
+            if negotiated_authentication == MethodCodes.GSSAPI:
                 # Not implemented yet
                 return self._handle_gssapi_auth()
-            else:
-                # The client is told with X'FF'. DEBUG, because a healthcheck probe offering only X'00' lands here.
-                logger.debug("No acceptable authentication methods")
-                return False
+            # The client is told with X'FF'. DEBUG, because a healthcheck probe offering only X'00' lands here.
+            logger.debug("No acceptable authentication methods")
+            return False
 
         except TimeoutError:
             logger.warning("Handshake timed out")
             return False
-        except socket.error as e:
+        except OSError as e:
             _log_socket_error("handshake", e)
             return False
 
@@ -104,11 +103,10 @@ class TCPHandler(BaseHandler):
         if MethodCodes.USERNAME_PASSWORD.value in mutual_method:
             return MethodCodes.USERNAME_PASSWORD
         # TODO: Implement GSS-API authentication
-        elif MethodCodes.NO_AUTHENTICATION_REQUIRED.value in mutual_method:
+        if MethodCodes.NO_AUTHENTICATION_REQUIRED.value in mutual_method:
             return MethodCodes.NO_AUTHENTICATION_REQUIRED
-        else:
-            # No acceptable methods
-            return MethodCodes.NO_ACCEPTABLE_METHODS
+        # No acceptable methods
+        return MethodCodes.NO_ACCEPTABLE_METHODS
 
     def _handle_username_password_auth(self) -> bool:
         """
@@ -155,14 +153,13 @@ class TCPHandler(BaseHandler):
                 logger.info(f"Authenticated user: {expected[0].decode('utf-8', 'backslashreplace')}")
                 self.connection.sendall(b"\x01\x00")  # version 1, status 0 (success)
                 return True
-            else:
-                logger.warning(f"Authentication failed for client {self._peer_ip()}")
-                self.connection.sendall(b"\x01\x01")  # version 1, status 1 (failure)
-                return False
+            logger.warning(f"Authentication failed for client {self._peer_ip()}")
+            self.connection.sendall(b"\x01\x01")  # version 1, status 1 (failure)
+            return False
         except TimeoutError:
             logger.warning("Handshake timed out during authentication")
             return False
-        except socket.error as e:
+        except OSError as e:
             _log_socket_error("username/password authentication", e)
             return False
 

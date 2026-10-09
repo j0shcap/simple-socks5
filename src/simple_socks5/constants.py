@@ -1,7 +1,6 @@
 import math
 import os
 from enum import Enum
-from typing import Optional
 
 SOCKS_VERSION: int = 5
 
@@ -75,7 +74,7 @@ def max_connections() -> int:
     return _positive_int_env("SOCKS5_MAX_CONNECTIONS", DEFAULT_MAX_CONNECTIONS)
 
 
-def log_file() -> Optional[str]:
+def log_file() -> str | None:
     """The path errors are also written to, or None to log to the console only."""
     return os.environ.get("SOCKS5_LOG_FILE", "").strip() or None
 

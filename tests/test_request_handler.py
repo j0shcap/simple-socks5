@@ -358,7 +358,7 @@ class TestRecvExactDeadline(unittest.TestCase):
         self.connection.recv.assert_not_called()
 
     def test_recv_exact_timeout_becomes_handshake_timeout(self):
-        self.connection.recv.side_effect = socket.timeout("timed out")
+        self.connection.recv.side_effect = TimeoutError("timed out")
         handler = BaseHandler(self.connection, deadline=1.0)
 
         with self.assertRaises(HandshakeTimeoutError):

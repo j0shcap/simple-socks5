@@ -1,7 +1,7 @@
 import argparse
 import os
+from collections.abc import Mapping, Sequence
 from importlib.metadata import PackageNotFoundError, version
-from typing import Mapping, Optional, Sequence
 
 try:
     __version__ = version("simple-socks5")
@@ -13,9 +13,7 @@ LOGGING_LEVEL_ENV: str = "LOGGING_LEVEL"
 DEFAULT_LOGGING_LEVEL: str = "debug"
 
 
-def parse_arguments(
-    argv: Optional[Sequence[str]] = None, environ: Mapping[str, str] = os.environ
-) -> argparse.Namespace:
+def parse_arguments(argv: Sequence[str] | None = None, environ: Mapping[str, str] = os.environ) -> argparse.Namespace:
     """
     Parses command line arguments for the SOCKS5 Proxy Server.
 

@@ -278,7 +278,7 @@ class TestTCPRelay(unittest.TestCase):
 
     def test_recv_data_raises_on_error(self):
         relay, client, proxy, _ = self._create_relay()
-        client.recv.side_effect = socket.error("recv failed")
+        client.recv.side_effect = OSError("recv failed")
         with self.assertRaises(socket.error):
             relay._recv_data(client)
 

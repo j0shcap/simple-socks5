@@ -2,7 +2,6 @@ import socket
 import struct
 import threading
 import time
-from typing import Optional
 
 from ..constants import DNS_LOOKUP_TIMEOUT, SOCKS_VERSION, AddressTypeCodes
 from ..errors import is_routine_disconnect
@@ -22,9 +21,9 @@ logger = get_logger(__name__)
 
 class BaseHandler:
     connection: socket.socket
-    deadline: Optional[float] = None
+    deadline: float | None = None
 
-    def __init__(self, connection: socket.socket, deadline: Optional[float] = None):
+    def __init__(self, connection: socket.socket, deadline: float | None = None):
         """
         Initializes a new instance of the BaseRequestHandler class.
 
@@ -108,7 +107,7 @@ class BaseHandler:
 
         except HandshakeTimeoutError:
             raise  # Expected for stalled clients; the server logs it without a traceback
-        except socket.error as e:
+        except OSError as e:
             if not is_routine_disconnect(e):  # The server logs a disconnect once, at DEBUG
                 logger.exception(f"Socket error during request parsing: {e}")
             raise
@@ -149,7 +148,7 @@ class BaseHandler:
 
         except HandshakeTimeoutError:
             raise
-        except socket.error as e:
+        except OSError as e:
             if not is_routine_disconnect(e):
                 logger.exception(f"Socket error during address and port parsing: {e}")
             raise

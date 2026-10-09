@@ -316,7 +316,7 @@ class TCPProxyServer(StreamRequestHandler):
         """
         try:
             self.connection.shutdown(socket.SHUT_RDWR)
-        except socket.error:
+        except OSError:
             pass  # Handle already closed socket
         finally:
             self.connection.close()
