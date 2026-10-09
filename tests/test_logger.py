@@ -4,7 +4,7 @@ import unittest
 
 import pytest
 
-from simple_socks5.config import ProxyConfiguration
+from simple_socks5.config import LOGGING_LEVELS
 from simple_socks5.logger import ColorFormatter, get_logger, update_loggers
 
 CONSOLE_FORMAT = "%(levelname)s %(message)s"
@@ -21,16 +21,10 @@ def configure(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("SOCKS5_LOG_FILE", raising=False)
 
-    class FreshConfig(ProxyConfiguration):
-        pass
-
-    monkeypatch.setattr("simple_socks5.logger.ProxyConfiguration", FreshConfig)
-
     def _configure(level: str, stream=None) -> io.StringIO:
         stream = stream if stream is not None else io.StringIO()
-        FreshConfig.initialize("127.0.0.1", 1080, level)
         monkeypatch.setattr("sys.stderr", stream)
-        update_loggers()
+        update_loggers(LOGGING_LEVELS[level])
         return stream
 
     return _configure

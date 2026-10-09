@@ -33,8 +33,8 @@ ProxyHandle(server, address)
 _e2e_leak_guard (autouse) fails a test that leaves behind a thread it started (after a 3 s grace
 period) or that triggers a ResourceWarning in any thread at any point from setup to teardown.
 
-ProxyConfiguration is deliberately left uninitialised: loggers then get a NullHandler (records
-still reach caplog) instead of writing errors.log into the working directory.
+update_loggers() is deliberately never called: the package logger keeps its NullHandler and
+propagates, so records reach caplog and nothing is written to the console or SOCKS5_LOG_FILE.
 """
 
 import gc

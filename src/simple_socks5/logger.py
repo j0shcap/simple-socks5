@@ -2,7 +2,6 @@ import logging
 from logging.handlers import RotatingFileHandler
 from typing import ClassVar
 
-from .config import ProxyConfiguration
 from .constants import LOG_FILE_BACKUP_COUNT, LOG_FILE_MAX_BYTES, log_file
 
 CONSOLE_FORMAT = "[%(asctime)s] - [%(levelname)s] - %(message)s"
@@ -48,9 +47,10 @@ def get_logger(name: str) -> logging.Logger:
     return logging.getLogger(name)
 
 
-def update_loggers() -> None:
+def update_loggers(logging_level: int) -> None:
     """
-    Configures the package logger from ProxyConfiguration and SOCKS5_LOG_FILE, replacing any earlier configuration.
+    Configures the package logger at logging_level (logging.NOTSET disables it) and from SOCKS5_LOG_FILE, replacing
+    any earlier configuration.
     """
     for handler in list(_package_logger.handlers):
         _package_logger.removeHandler(handler)
@@ -58,7 +58,6 @@ def update_loggers() -> None:
     # Records stop here, so an application that configures the root logger doesn't print them twice
     _package_logger.propagate = False
 
-    logging_level = ProxyConfiguration.get_logging_level()
     if logging_level == logging.NOTSET:
         _package_logger.setLevel(logging.CRITICAL + 1)
         _package_logger.addHandler(logging.NullHandler())

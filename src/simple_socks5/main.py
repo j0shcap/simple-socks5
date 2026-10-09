@@ -2,7 +2,6 @@ import signal
 import sys
 import threading
 import time
-from argparse import Namespace
 from collections.abc import Callable, Sequence
 
 from .argument_parser import parse_arguments
@@ -71,7 +70,7 @@ class GracefulShutdown:
         return max(0.0, until - self._clock())
 
 
-def main(args: Namespace):
+def main(config: ProxyConfiguration) -> None:
     """
     Entry point of the program.
     Sets program configuration, starts the server, and handles server shutdown.
@@ -82,20 +81,16 @@ def main(args: Namespace):
     except ValueError as e:
         sys.exit(f"Invalid configuration: {e}")
 
-    ProxyConfiguration.initialize(args.host, args.port, args.logging_level)
+    update_loggers(config.level)
 
-    update_loggers()
-
-    for level, message in collect_startup_advisories(ProxyConfiguration.get_host()):
+    for level, message in collect_startup_advisories(config.host):
         logger.log(level, message)
 
     try:
-        with ThreadingTCPServer(
-            (ProxyConfiguration.get_host(), ProxyConfiguration.get_port()), TCPProxyServer
-        ) as tcp_server:
+        with ThreadingTCPServer((config.host, config.port), TCPProxyServer) as tcp_server:
             graceful_shutdown = GracefulShutdown(tcp_server)
             graceful_shutdown.install()
-            logger.info("Server started on %s", ProxyConfiguration.get_address())
+            logger.info("Server started on %s", config.address)
 
             try:
                 tcp_server.serve_forever()

@@ -10,7 +10,6 @@ import subprocess
 import sys
 import threading
 import unittest
-from argparse import Namespace
 from contextlib import redirect_stderr
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -28,18 +27,10 @@ BANNER_HEADLINE = OPEN_PROXY_BANNER[1].format(host="0.0.0.0")
 
 class TestMainStartupAdvisories(unittest.TestCase):
     def setUp(self):
-        class FreshConfig(ProxyConfiguration):
-            pass
-
         environ = {k: v for k, v in os.environ.items() if not k.startswith("SOCKS5_")}
-        patchers = [
-            patch("simple_socks5.main.ProxyConfiguration", FreshConfig),
-            patch("simple_socks5.logger.ProxyConfiguration", FreshConfig),
-            patch.dict(os.environ, environ, clear=True),
-        ]
-        for patcher in patchers:
-            patcher.start()
-            self.addCleanup(patcher.stop)
+        environ_patcher = patch.dict(os.environ, environ, clear=True)
+        environ_patcher.start()
+        self.addCleanup(environ_patcher.stop)
 
         server_patcher = patch("simple_socks5.main.ThreadingTCPServer")
         self.server_class = server_patcher.start()
@@ -49,7 +40,7 @@ class TestMainStartupAdvisories(unittest.TestCase):
     def run_main(self, host="0.0.0.0", logging_level="info"):
         stderr = io.StringIO()
         with redirect_stderr(stderr):
-            main(Namespace(host=host, port=1080, logging_level=logging_level))
+            main(ProxyConfiguration(host=host, port=1080, logging_level=logging_level))
         return stderr.getvalue()
 
     def test_banner_logged_before_serve_forever(self):
@@ -58,7 +49,7 @@ class TestMainStartupAdvisories(unittest.TestCase):
         self.serve_forever.side_effect = lambda: logged_before_serving.append(stderr.getvalue())
 
         with redirect_stderr(stderr):
-            main(Namespace(host="0.0.0.0", port=1080, logging_level="info"))
+            main(ProxyConfiguration(host="0.0.0.0", port=1080, logging_level="info"))
 
         self.serve_forever.assert_called_once()
         assert BANNER_HEADLINE in logged_before_serving[0]
@@ -240,7 +231,7 @@ class TestCli(unittest.TestCase):
     def test_cli_passes_parsed_arguments_to_main(self):
         with patch("simple_socks5.main.main") as main_mock:
             cli(["-H", "0.0.0.0", "-P", "1081", "-L", "info"])
-        main_mock.assert_called_once_with(Namespace(host="0.0.0.0", port=1081, logging_level="info"))
+        main_mock.assert_called_once_with(ProxyConfiguration(host="0.0.0.0", port=1081, logging_level="info"))
 
     def test_startup_failure_exits_1_without_site(self):
         # python -S skips the site module, which is what defines the exit() builtin.

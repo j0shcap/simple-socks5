@@ -9,6 +9,7 @@ from contextlib import redirect_stderr, redirect_stdout
 import pytest
 
 from simple_socks5.argument_parser import parse_arguments
+from simple_socks5.config import ProxyConfiguration
 
 
 class TestLoggingLevelPrecedence(unittest.TestCase):
@@ -63,6 +64,18 @@ class TestLoggingLevelPrecedence(unittest.TestCase):
                 assert "$LOGGING_LEVEL" in help_text
                 assert f"(default: {expected})" in help_text
                 assert "None" not in help_text
+
+    def test_returns_proxy_configuration(self):
+        config = parse_arguments(["-H", "0.0.0.0", "-P", "1081", "-L", "info"], {})
+        assert config == ProxyConfiguration(host="0.0.0.0", port=1081, logging_level="info")
+
+    def test_invalid_env_error_message(self):
+        code, stderr = self.parse_error([], {"LOGGING_LEVEL": "verbose"})
+        assert code == 2
+        assert stderr.endswith(
+            "error: LOGGING_LEVEL: invalid choice: 'verbose' "
+            "(choose from disabled, debug, info, warning, error, critical)\n"
+        )
 
     def test_other_defaults_unchanged(self):
         args = parse_arguments([], {})
