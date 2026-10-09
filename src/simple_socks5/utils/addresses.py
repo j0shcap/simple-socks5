@@ -35,11 +35,3 @@ def map_address_enum_to_socket_family(address_type: AddressTypeCodes) -> int:
     if address_type == AddressTypeCodes.IPv6:
         return socket.AF_INET6
     raise ValueError("Unknown address type")
-
-
-def map_address_int_to_socket_family(address_type: int) -> int:
-    if address_type == AddressTypeCodes.IPv4.value:
-        return socket.AF_INET
-    if address_type == AddressTypeCodes.IPv6.value:
-        return socket.AF_INET6
-    raise ValueError("Unknown address type")

@@ -3,146 +3,37 @@ import unittest
 
 import pytest
 
-from simple_socks5.constants import AddressTypeCodes, MethodCodes
+from simple_socks5.constants import AddressTypeCodes, MethodCodes, ReplyCodes
 from simple_socks5.models import BaseAddress, DetailedAddress
 from simple_socks5.utils import (
     format_connection_closed,
     format_connection_established,
     format_relay,
-    generate_address_type_not_supported_reply,
-    generate_command_not_supported_reply,
     generate_connection_method_response,
-    generate_connection_not_allowed_by_ruleset_reply,
-    generate_connection_refused_reply,
-    generate_general_socks_server_failure_reply,
-    generate_host_unreachable_reply,
-    generate_network_unreachable_reply,
+    generate_failed_reply,
     generate_succeeded_reply,
     generate_tcp_socket,
-    generate_ttl_expired_reply,
     map_address_enum_to_socket_family,
     map_address_int_to_enum,
     map_address_to_bytes,
 )
 
+IPV4_ZERO_ADDRESS = b"\x00" * 4 + b"\x00\x00"
+IPV6_ZERO_ADDRESS = b"\x00" * 16 + b"\x00\x00"
 
-class TestErrorUtils(unittest.TestCase):
-    def test_generate_general_socks_server_failure_reply__ipv4(self):
-        address_type = AddressTypeCodes.IPv4
-        expected_reply = generate_general_socks_server_failure_reply(address_type)
-        assert expected_reply == b"\x05\x01\x00\x01\x00\x00\x00\x00\x00\x00"
 
-    def test_generate_general_socks_server_failure_reply__ipv6(self):
-        address_type = AddressTypeCodes.IPv6
-        expected_reply = generate_general_socks_server_failure_reply(address_type)
-        # ATYP=0x04 means 16-byte IPv6 address field + 2-byte port
-        expected = b"\x05\x01\x00\x04" + b"\x00" * 16 + b"\x00\x00"
-        assert expected_reply == expected
-
-    def test_generate_general_socks_server_failure_reply__domain_name(self):
-        result = generate_general_socks_server_failure_reply(AddressTypeCodes.DOMAIN_NAME)
-        assert result == b"\x05\x01\x00\x01\x00\x00\x00\x00\x00\x00"
-
-    def test_generate_connection_refused_reply__ipv4(self):
-        address_type = AddressTypeCodes.IPv4
-        expected_reply = generate_connection_refused_reply(address_type)
-        assert expected_reply == b"\x05\x05\x00\x01\x00\x00\x00\x00\x00\x00"
-
-    def test_generate_connection_refused_reply__ipv6(self):
-        address_type = AddressTypeCodes.IPv6
-        expected_reply = generate_connection_refused_reply(address_type)
-        expected = b"\x05\x05\x00\x04" + b"\x00" * 16 + b"\x00\x00"
-        assert expected_reply == expected
-
-    def test_generate_connection_refused_reply__domain_name(self):
-        result = generate_connection_refused_reply(AddressTypeCodes.DOMAIN_NAME)
-        assert result == b"\x05\x05\x00\x01\x00\x00\x00\x00\x00\x00"
-
-    def test_generate_network_unreachable_reply__ipv4(self):
-        address_type = AddressTypeCodes.IPv4
-        expected_reply = generate_network_unreachable_reply(address_type)
-        assert expected_reply == b"\x05\x03\x00\x01\x00\x00\x00\x00\x00\x00"
-
-    def test_generate_network_unreachable_reply__ipv6(self):
-        address_type = AddressTypeCodes.IPv6
-        expected_reply = generate_network_unreachable_reply(address_type)
-        expected = b"\x05\x03\x00\x04" + b"\x00" * 16 + b"\x00\x00"
-        assert expected_reply == expected
-
-    def test_generate_network_unreachable_reply__domain_name(self):
-        result = generate_network_unreachable_reply(AddressTypeCodes.DOMAIN_NAME)
-        assert result == b"\x05\x03\x00\x01\x00\x00\x00\x00\x00\x00"
-
-    def test_generate_host_unreachable_reply__ipv4(self):
-        address_type = AddressTypeCodes.IPv4
-        expected_reply = generate_host_unreachable_reply(address_type)
-        assert expected_reply == b"\x05\x04\x00\x01\x00\x00\x00\x00\x00\x00"
-
-    def test_generate_host_unreachable_reply__ipv6(self):
-        address_type = AddressTypeCodes.IPv6
-        expected_reply = generate_host_unreachable_reply(address_type)
-        expected = b"\x05\x04\x00\x04" + b"\x00" * 16 + b"\x00\x00"
-        assert expected_reply == expected
-
-    def test_generate_host_unreachable_reply__domain_name(self):
-        result = generate_host_unreachable_reply(AddressTypeCodes.DOMAIN_NAME)
-        assert result == b"\x05\x04\x00\x01\x00\x00\x00\x00\x00\x00"
-
-    def test_generate_address_type_not_supported_reply__ipv4(self):
-        address_type = AddressTypeCodes.IPv4
-        expected_reply = generate_address_type_not_supported_reply(address_type)
-        assert expected_reply == b"\x05\x08\x00\x01\x00\x00\x00\x00\x00\x00"
-
-    def test_generate_address_type_not_supported_reply__ipv6(self):
-        address_type = AddressTypeCodes.IPv6
-        expected_reply = generate_address_type_not_supported_reply(address_type)
-        expected = b"\x05\x08\x00\x04" + b"\x00" * 16 + b"\x00\x00"
-        assert expected_reply == expected
-
-    def test_generate_address_type_not_supported_reply__domain_name(self):
-        result = generate_address_type_not_supported_reply(AddressTypeCodes.DOMAIN_NAME)
-        assert result == b"\x05\x08\x00\x01\x00\x00\x00\x00\x00\x00"
-
-    def test_generate_connection_not_allowed_by_ruleset_reply__ipv4(self):
-        address_type = AddressTypeCodes.IPv4
-        expected_reply = generate_connection_not_allowed_by_ruleset_reply(address_type)
-        assert expected_reply == b"\x05\x02\x00\x01\x00\x00\x00\x00\x00\x00"
-
-    def test_generate_connection_not_allowed_by_ruleset_reply__ipv6(self):
-        address_type = AddressTypeCodes.IPv6
-        expected_reply = generate_connection_not_allowed_by_ruleset_reply(address_type)
-        expected = b"\x05\x02\x00\x04" + b"\x00" * 16 + b"\x00\x00"
-        assert expected_reply == expected
-
-    def test_generate_connection_not_allowed_by_ruleset_reply__domain_name(self):
-        result = generate_connection_not_allowed_by_ruleset_reply(AddressTypeCodes.DOMAIN_NAME)
-        assert result == b"\x05\x02\x00\x01\x00\x00\x00\x00\x00\x00"
-
-    def test_generate_ttl_expired_reply__ipv4(self):
-        address_type = AddressTypeCodes.IPv4
-        expected_reply = generate_ttl_expired_reply(address_type)
-        assert expected_reply == b"\x05\x06\x00\x01\x00\x00\x00\x00\x00\x00"
-
-    def test_generate_ttl_expired_reply__ipv6(self):
-        address_type = AddressTypeCodes.IPv6
-        expected_reply = generate_ttl_expired_reply(address_type)
-        expected = b"\x05\x06\x00\x04" + b"\x00" * 16 + b"\x00\x00"
-        assert expected_reply == expected
-
-    def test_generate_ttl_expired_reply__domain_name(self):
-        result = generate_ttl_expired_reply(AddressTypeCodes.DOMAIN_NAME)
-        assert result == b"\x05\x06\x00\x01\x00\x00\x00\x00\x00\x00"
-
-    def test_generate_command_not_supported_reply__ipv4(self):
-        address_type = AddressTypeCodes.IPv4
-        expected_reply = generate_command_not_supported_reply(address_type)
-        assert expected_reply == b"\x05\x07\x00\x01\x00\x00\x00\x00\x00\x00"
-
-    def test_generate_command_not_supported_reply__ipv6(self):
-        address_type = AddressTypeCodes.IPv6
-        expected_reply = generate_command_not_supported_reply(address_type)
-        expected = b"\x05\x07\x00\x04" + b"\x00" * 16 + b"\x00\x00"
-        assert expected_reply == expected
+@pytest.mark.parametrize("reply_code", [code for code in ReplyCodes if code is not ReplyCodes.SUCCEEDED])
+@pytest.mark.parametrize(
+    ("address_type", "expected_tail"),
+    [
+        (AddressTypeCodes.IPv4, b"\x00\x01" + IPV4_ZERO_ADDRESS),
+        (AddressTypeCodes.IPv6, b"\x00\x04" + IPV6_ZERO_ADDRESS),
+        # A domain name has no fixed-size zero address, so the reply uses IPv4's
+        (AddressTypeCodes.DOMAIN_NAME, b"\x00\x01" + IPV4_ZERO_ADDRESS),
+    ],
+)
+def test_generate_failed_reply(reply_code: ReplyCodes, address_type: AddressTypeCodes, expected_tail: bytes) -> None:
+    assert generate_failed_reply(address_type, reply_code) == bytes([0x05, reply_code.value]) + expected_tail
 
 
 class TestAddressToBytesUtils(unittest.TestCase):

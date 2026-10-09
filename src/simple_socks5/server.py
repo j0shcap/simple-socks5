@@ -9,6 +9,7 @@ from .constants import (
     POLICY_DENIED_WARNING_INTERVAL,
     AddressTypeCodes,
     CommandCodes,
+    ReplyCodes,
     handshake_timeout,
     max_connections,
 )
@@ -20,7 +21,6 @@ from .models import BindAddress, DetailedAddress, Request
 from .relays import TCPRelay, UDPRelay
 from .utils import (
     format_connection_established,
-    generate_command_not_supported_reply,
     generate_failed_reply,
     generate_succeeded_reply,
 )
@@ -247,7 +247,7 @@ class TCPProxyServer(StreamRequestHandler):
                 self.handle_udp_associate(dst_request.address)
 
             else:
-                self._send_error_reply(generate_command_not_supported_reply(atyp))
+                self._send_error_reply(generate_failed_reply(atyp, ReplyCodes.COMMAND_NOT_SUPPORTED))
 
         except Exception as e:
             exc_info = not isinstance(e, _EXPECTED_ERRORS)
@@ -297,7 +297,7 @@ class TCPProxyServer(StreamRequestHandler):
         Handles BIND command.
         """
         logger.error("BIND command not supported")
-        self._send_error_reply(generate_command_not_supported_reply(address.address_type))
+        self._send_error_reply(generate_failed_reply(address.address_type, ReplyCodes.COMMAND_NOT_SUPPORTED))
 
     def _send_success_reply(self, address_type: AddressTypeCodes, bind_address: BindAddress) -> None:
         """
