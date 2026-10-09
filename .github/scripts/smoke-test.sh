@@ -186,6 +186,14 @@ if [[ $healthcheck != *simple_socks5.healthcheck* ]]; then
     exit 1
 fi
 
+# Users override the command with `python app.py ...`, so it must keep working next to the installed package.
+expected_version=$(sed -n 's/^version = "\(.*\)"$/\1/p' "$(dirname "$0")/../../pyproject.toml")
+app_version=$(docker run --rm "$image" python app.py --version)
+if [[ $app_version != "app.py $expected_version" ]]; then
+    echo "Expected 'app.py $expected_version' from python app.py --version, got '$app_version'" >&2
+    exit 1
+fi
+
 body=$(curl -fsS --max-time 10 --socks5-hostname "127.0.0.1:$socks_port" \
     "http://host.docker.internal:$http_port/ok.txt")
 if [[ $body != "$nonce" ]]; then
