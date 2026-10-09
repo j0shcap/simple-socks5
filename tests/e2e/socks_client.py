@@ -1,7 +1,7 @@
 """
 Raw SOCKS5 client for end-to-end tests (RFC 1928 + RFC 1929), stdlib only.
 
-Deliberately independent of ``src``: the constants are re-declared from the RFCs so a
+Deliberately independent of ``simple_socks5``: the constants are re-declared from the RFCs so a
 wrong constant in the code under test cannot hide behind a shared import.
 
 Public API (stable; regression tests build on it):

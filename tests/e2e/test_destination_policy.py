@@ -90,7 +90,7 @@ def test_udp_loopback_dropped_then_allowed_on_same_association(monkeypatch, poli
 
 
 def test_denial_warning_rate_limited(policy_proxy, echo_origin, caplog):
-    caplog.set_level(logging.INFO, logger="src")
+    caplog.set_level(logging.INFO, logger="simple_socks5")
     for _ in range(100):
         assert _connect_reply(policy_proxy, sc.ATYP_IPV4, "127.0.0.1", echo_origin.port).rep == sc.REP_NOT_ALLOWED
 

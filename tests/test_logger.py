@@ -4,8 +4,8 @@ import unittest
 
 import pytest
 
-from src.config import ProxyConfiguration
-from src.logger import ColorFormatter, get_logger, update_loggers
+from simple_socks5.config import ProxyConfiguration
+from simple_socks5.logger import ColorFormatter, get_logger, update_loggers
 
 CONSOLE_FORMAT = "%(levelname)s %(message)s"
 
@@ -24,7 +24,7 @@ def configure(monkeypatch, tmp_path):
     class FreshConfig(ProxyConfiguration):
         pass
 
-    monkeypatch.setattr("src.logger.ProxyConfiguration", FreshConfig)
+    monkeypatch.setattr("simple_socks5.logger.ProxyConfiguration", FreshConfig)
 
     def _configure(level: str, stream=None) -> io.StringIO:
         stream = stream if stream is not None else io.StringIO()
@@ -37,16 +37,16 @@ def configure(monkeypatch, tmp_path):
 
 
 def package_logger() -> logging.Logger:
-    return logging.getLogger("src")
+    return logging.getLogger("simple_socks5")
 
 
 def test_get_logger_returns_the_stdlib_logger():
-    assert get_logger("src.some.module") is logging.getLogger("src.some.module")
+    assert get_logger("simple_socks5.some.module") is logging.getLogger("simple_socks5.some.module")
 
 
 def test_module_loggers_have_no_handlers_and_propagate(configure):
     configure("info")
-    module_logger = get_logger("src.handlers.tcp")
+    module_logger = get_logger("simple_socks5.handlers.tcp")
 
     assert module_logger.handlers == []
     assert module_logger.propagate
@@ -56,8 +56,8 @@ def test_module_loggers_have_no_handlers_and_propagate(configure):
 def test_module_records_reach_the_package_handler(configure):
     stream = configure("info")
 
-    get_logger("src.a").info("hello")
-    get_logger("src.b").debug("hidden")
+    get_logger("simple_socks5.a").info("hello")
+    get_logger("simple_socks5.b").debug("hidden")
 
     lines = stream.getvalue().splitlines()
     assert len(lines) == 1
@@ -84,7 +84,7 @@ def test_disabled_writes_nothing_and_creates_no_file(configure, monkeypatch, tmp
     monkeypatch.setenv("SOCKS5_LOG_FILE", str(tmp_path / "proxy.log"))
     stream = configure("disabled")
 
-    get_logger("src.x").critical("boom")
+    get_logger("simple_socks5.x").critical("boom")
 
     assert stream.getvalue() == ""
     assert list(tmp_path.iterdir()) == []
@@ -93,7 +93,7 @@ def test_disabled_writes_nothing_and_creates_no_file(configure, monkeypatch, tmp
 def test_no_errors_log_by_default(configure, tmp_path):
     configure("debug")
 
-    get_logger("src.x").error("boom")
+    get_logger("simple_socks5.x").error("boom")
 
     assert list(tmp_path.iterdir()) == []
 
@@ -103,22 +103,22 @@ def test_log_file_receives_errors_only(configure, monkeypatch, tmp_path):
     monkeypatch.setenv("SOCKS5_LOG_FILE", str(log_path))
     configure("debug")
 
-    get_logger("src.x").warning("just a warning")
-    get_logger("src.x").error("boom")
+    get_logger("simple_socks5.x").warning("just a warning")
+    get_logger("simple_socks5.x").error("boom")
 
     contents = log_path.read_text()
-    assert "[src.x] - [ERROR] - [boom]" in contents
+    assert "[simple_socks5.x] - [ERROR] - [boom]" in contents
     assert "just a warning" not in contents
 
 
 def test_rotation_with_several_module_loggers(configure, monkeypatch, tmp_path):
     log_path = tmp_path / "proxy.log"
     monkeypatch.setenv("SOCKS5_LOG_FILE", str(log_path))
-    monkeypatch.setattr("src.logger.LOG_FILE_MAX_BYTES", 300)
+    monkeypatch.setattr("simple_socks5.logger.LOG_FILE_MAX_BYTES", 300)
     configure("error")
 
     for i in range(60):
-        get_logger(f"src.{'ab'[i % 2]}").error(f"record {i:02d}")
+        get_logger(f"simple_socks5.{'ab'[i % 2]}").error(f"record {i:02d}")
 
     files = sorted(tmp_path.iterdir())
     assert [f.name for f in files] == [f"proxy.log{suffix}" for suffix in ("", ".1", ".2", ".3", ".4", ".5")]
@@ -135,7 +135,7 @@ def test_unwritable_log_file_logs_error_and_continues(configure, monkeypatch, tm
     monkeypatch.setenv("SOCKS5_LOG_FILE", str(missing))
     stream = configure("info")
 
-    get_logger("src.x").info("still running")
+    get_logger("simple_socks5.x").info("still running")
 
     output = stream.getvalue()
     assert "SOCKS5_LOG_FILE" in output and str(missing) in output
@@ -150,13 +150,13 @@ def test_colour_only_on_tty(configure):
 
 
 def _log_error(stream: io.StringIO) -> str:
-    get_logger("src.x").error("boom")
+    get_logger("simple_socks5.x").error("boom")
     return stream.getvalue()
 
 
 class TestColorFormatter(unittest.TestCase):
     def record(self, level: int) -> logging.LogRecord:
-        return logging.LogRecord("src.x", level, __file__, 1, "message", None, None)
+        return logging.LogRecord("simple_socks5.x", level, __file__, 1, "message", None, None)
 
     def test_colour_wraps_message(self):
         formatted = ColorFormatter(CONSOLE_FORMAT, use_color=True).format(self.record(logging.ERROR))

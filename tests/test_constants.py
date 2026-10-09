@@ -6,7 +6,7 @@ import os
 import unittest
 from unittest.mock import patch
 
-from src.constants import (
+from simple_socks5.constants import (
     ReplyCodes,
     MethodCodes,
     AddressTypeCodes,

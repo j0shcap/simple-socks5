@@ -8,6 +8,24 @@ to make the proxy safer; each such change is marked **Behaviour change** and is 
 
 ## [Unreleased]
 
+### Added
+- `pip install .` installs a `simple-socks5` command, which takes the same flags as
+  `python3 app.py`. `python -m simple_socks5` works too.
+
+### Changed
+- The code is now the `simple_socks5` package under `src/`, and `pip install .` installs it.
+  `python3 app.py` keeps working from a clone and in the image.
+- **Behaviour change:** the image healthcheck runs `python -m simple_socks5.healthcheck`. If
+  you copied `python -m src.healthcheck` into a compose file or Kubernetes probe, update it.
+- **Behaviour change:** logger names in `SOCKS5_LOG_FILE` lines change from `[src.…]` to
+  `[simple_socks5.…]`, which matters if you parse that file. Console lines are unchanged.
+- **Behaviour change:** the image's default command is now
+  `python -m simple_socks5 --host 0.0.0.0 --port 1080`. Commands that override it with
+  `python app.py ...` keep working.
+- The version is read from the installed package, so `pyproject.toml` is the only place it's
+  written. `--version` from a clone that was never installed prints `0+unknown`; run
+  `pip install -e .` to fix it.
+
 ## [2.1.0] - 2026-10-06
 
 ### Upgrading from 2.0 (behaviour changes)

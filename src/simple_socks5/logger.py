@@ -7,8 +7,9 @@ from .constants import LOG_FILE_BACKUP_COUNT, LOG_FILE_MAX_BYTES, log_file
 CONSOLE_FORMAT = "[%(asctime)s] - [%(levelname)s] - %(message)s"
 FILE_FORMAT = "[%(asctime)s] - [%(name)s] - [%(levelname)s] - [%(message)s]"
 
-# Every module logger ("src.server", "src.relays.tcp_relay", ...) propagates to this one, which holds the only
-# handlers. Until update_loggers() runs it just propagates, so library use and tests see records via the root logger.
+# Every module logger ("simple_socks5.server", "simple_socks5.relays.tcp_relay", ...) propagates to this one, which
+# holds the only handlers. Until update_loggers() runs it just propagates, so library use and tests see records via
+# the root logger.
 _package_logger = logging.getLogger(__name__.rpartition(".")[0])
 _package_logger.addHandler(logging.NullHandler())
 

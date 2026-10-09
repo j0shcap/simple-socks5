@@ -181,8 +181,16 @@ wait_for "the HTTP server on port $http_port" http_ready
 start_container "$@"
 
 healthcheck=$(docker inspect -f '{{json .Config.Healthcheck.Test}}' "$container")
-if [[ $healthcheck != *src.healthcheck* ]]; then
-    echo "Expected the HEALTHCHECK to run src.healthcheck, got $healthcheck" >&2
+if [[ $healthcheck != *simple_socks5.healthcheck* ]]; then
+    echo "Expected the HEALTHCHECK to run simple_socks5.healthcheck, got $healthcheck" >&2
+    exit 1
+fi
+
+# Users override the command with `python app.py ...`, so it must keep working next to the installed package.
+expected_version=$(sed -n 's/^version = "\(.*\)"$/\1/p' "$(dirname "$0")/../../pyproject.toml")
+app_version=$(docker run --rm "$image" python app.py --version)
+if [[ $app_version != "app.py $expected_version" ]]; then
+    echo "Expected 'app.py $expected_version' from python app.py --version, got '$app_version'" >&2
     exit 1
 fi
 

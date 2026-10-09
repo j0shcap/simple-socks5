@@ -1,7 +1,7 @@
 import unittest
 
-from src.constants import AddressTypeCodes
-from src.models import DetailedAddress
+from simple_socks5.constants import AddressTypeCodes
+from simple_socks5.models import DetailedAddress
 
 
 class TestDetailedAddressStr(unittest.TestCase):

@@ -7,18 +7,18 @@ import unittest
 from unittest.mock import MagicMock, patch
 import struct
 import socket
-from src.handlers.base import BaseHandler
-from src.handlers.tcp import TCPHandler
-from src.exceptions import (
+from simple_socks5.handlers.base import BaseHandler
+from simple_socks5.handlers.tcp import TCPHandler
+from simple_socks5.exceptions import (
     AddressTypeNotSupportedError,
     HandshakeTimeoutError,
     InvalidDomainNameError,
     InvalidRequestError,
     InvalidVersionError,
 )
-from src.constants import AddressTypeCodes, MethodCodes, ReplyCodes
-from src.errors import reply_code_for
-from src.models import Request
+from simple_socks5.constants import AddressTypeCodes, MethodCodes, ReplyCodes
+from simple_socks5.errors import reply_code_for
+from simple_socks5.models import Request
 
 # Testing Data
 # Initial Requests
@@ -167,7 +167,7 @@ class TestTCPRequestHandlerIPv4(unittest.TestCase):
         self.assertFalse(result)
 
     @patch("socket.socket.recv")
-    @patch("src.handlers.base.socket.gethostbyaddr", side_effect=AssertionError("reverse DNS lookup"))
+    @patch("simple_socks5.handlers.base.socket.gethostbyaddr", side_effect=AssertionError("reverse DNS lookup"))
     def test_parse_request(self, mock_gethostbyaddr, mock_recv):
         mock_recv.side_effect = [
             struct.pack("!BBBB", 0x05, 0x01, 0x00, 0x01),
@@ -185,7 +185,7 @@ class TestTCPRequestHandlerIPv4(unittest.TestCase):
         mock_gethostbyaddr.assert_not_called()
 
     @patch("socket.socket.recv")
-    @patch("src.handlers.base.socket.gethostbyaddr", side_effect=AssertionError("reverse DNS lookup"))
+    @patch("simple_socks5.handlers.base.socket.gethostbyaddr", side_effect=AssertionError("reverse DNS lookup"))
     def test_parse_address_ipv4_never_reverse_resolves(self, mock_gethostbyaddr, mock_recv):
         mock_recv.side_effect = [
             socket.inet_aton("1.2.3.4"),
@@ -199,7 +199,7 @@ class TestTCPRequestHandlerIPv4(unittest.TestCase):
         mock_gethostbyaddr.assert_not_called()
 
     @patch("socket.socket.recv")
-    @patch("src.handlers.base.socket.getaddrinfo")
+    @patch("simple_socks5.handlers.base.socket.getaddrinfo")
     def test_parse_address_domain_name_ipv4(self, mock_getaddrinfo, mock_recv):
         mock_getaddrinfo.return_value = [
             (socket.AF_INET, socket.SOCK_STREAM, 0, "", ("93.184.216.34", 0)),
@@ -217,7 +217,7 @@ class TestTCPRequestHandlerIPv4(unittest.TestCase):
         self.assertEqual(result.address_type, AddressTypeCodes.IPv4)
 
     @patch("socket.socket.recv")
-    @patch("src.handlers.base.socket.getaddrinfo")
+    @patch("simple_socks5.handlers.base.socket.getaddrinfo")
     def test_parse_address_domain_name_ipv6(self, mock_getaddrinfo, mock_recv):
         mock_getaddrinfo.return_value = [
             (socket.AF_INET6, socket.SOCK_STREAM, 0, "", ("2606:4700::6812:1a78", 0, 0, 0)),
@@ -235,7 +235,7 @@ class TestTCPRequestHandlerIPv4(unittest.TestCase):
         self.assertEqual(result.address_type, AddressTypeCodes.IPv6)
 
     @patch("socket.socket.recv")
-    @patch("src.handlers.base.socket.gethostbyaddr", side_effect=AssertionError("reverse DNS lookup"))
+    @patch("simple_socks5.handlers.base.socket.gethostbyaddr", side_effect=AssertionError("reverse DNS lookup"))
     def test_parse_address_ipv6_never_reverse_resolves(self, mock_gethostbyaddr, mock_recv):
         ipv6 = "2001:db8::1"
         mock_recv.side_effect = [
@@ -262,8 +262,8 @@ class TestTCPRequestHandlerIPv4(unittest.TestCase):
         with self.assertRaises(InvalidRequestError):
             self.handler._parse_address(0xFF)
 
-    @patch("src.handlers.base.DNS_LOOKUP_TIMEOUT", 0.1)
-    @patch("src.handlers.base.socket.getaddrinfo")
+    @patch("simple_socks5.handlers.base.DNS_LOOKUP_TIMEOUT", 0.1)
+    @patch("simple_socks5.handlers.base.socket.getaddrinfo")
     def test_resolve_hostname_timeout_returns_name(self, mock_getaddrinfo):
         """Forward DNS should return the name with IPv4 default if the lookup takes too long."""
         done = threading.Event()
@@ -278,7 +278,7 @@ class TestTCPRequestHandlerIPv4(unittest.TestCase):
         self.assertEqual(atyp, AddressTypeCodes.IPv4.value)
         done.set()
 
-    @patch("src.handlers.base.socket.getaddrinfo")
+    @patch("simple_socks5.handlers.base.socket.getaddrinfo")
     def test_resolve_hostname_ipv4(self, mock_getaddrinfo):
         mock_getaddrinfo.return_value = [
             (socket.AF_INET, socket.SOCK_STREAM, 0, "", ("93.184.216.34", 0)),
@@ -287,7 +287,7 @@ class TestTCPRequestHandlerIPv4(unittest.TestCase):
         self.assertEqual(ip, "93.184.216.34")
         self.assertEqual(atyp, AddressTypeCodes.IPv4.value)
 
-    @patch("src.handlers.base.socket.getaddrinfo")
+    @patch("simple_socks5.handlers.base.socket.getaddrinfo")
     def test_resolve_hostname_ipv6(self, mock_getaddrinfo):
         mock_getaddrinfo.return_value = [
             (socket.AF_INET6, socket.SOCK_STREAM, 0, "", ("2606:4700::6812:1a78", 0, 0, 0)),
@@ -296,14 +296,14 @@ class TestTCPRequestHandlerIPv4(unittest.TestCase):
         self.assertEqual(ip, "2606:4700::6812:1a78")
         self.assertEqual(atyp, AddressTypeCodes.IPv6.value)
 
-    @patch("src.handlers.base.socket.getaddrinfo")
+    @patch("simple_socks5.handlers.base.socket.getaddrinfo")
     def test_resolve_hostname_failure_returns_name(self, mock_getaddrinfo):
         mock_getaddrinfo.side_effect = OSError("no DNS")
         ip, atyp = self.handler._resolve_hostname("example.com")
         self.assertEqual(ip, "example.com")
         self.assertEqual(atyp, AddressTypeCodes.IPv4.value)
 
-    @patch("src.handlers.base.socket.getaddrinfo")
+    @patch("simple_socks5.handlers.base.socket.getaddrinfo")
     def test_resolve_hostname_empty_result_returns_name(self, mock_getaddrinfo):
         """getaddrinfo returning empty list should fall back to name with IPv4."""
         mock_getaddrinfo.return_value = []
@@ -323,7 +323,7 @@ class FakeClock:
 class TestRecvExactDeadline(unittest.TestCase):
     def setUp(self):
         self.clock = FakeClock()
-        patcher = patch("src.handlers.base.time.monotonic", self.clock)
+        patcher = patch("simple_socks5.handlers.base.time.monotonic", self.clock)
         patcher.start()
         self.addCleanup(patcher.stop)
         self.connection = MagicMock()
@@ -451,23 +451,23 @@ class TestHandshakeTimeout(unittest.TestCase):
 
     def test_auth_timeout_returns_false_without_status(self):
         self.connection.recv.side_effect = [b"\x01", HandshakeTimeoutError("expired")]
-        with self.assertLogs("src.handlers", level="DEBUG") as logs:
+        with self.assertLogs("simple_socks5.handlers", level="DEBUG") as logs:
             self.assertFalse(self.handler._handle_username_password_auth())
         self.connection.sendall.assert_not_called()
         self.assert_quiet_warning(logs)
 
     def test_greeting_timeout_logs_warning_without_traceback(self):
         self.connection.recv.side_effect = HandshakeTimeoutError("expired")
-        with self.assertLogs("src.handlers", level="DEBUG") as logs:
+        with self.assertLogs("simple_socks5.handlers", level="DEBUG") as logs:
             self.assertFalse(self.handler.handle_request())
         self.connection.sendall.assert_not_called()
         self.assert_quiet_warning(logs)
 
     def test_request_timeout_propagates_without_traceback(self):
         self.connection.recv.side_effect = [struct.pack("!BBBB", 5, 1, 0, 1), HandshakeTimeoutError("expired")]
-        with self.assertLogs("src.handlers", level="DEBUG") as logs, self.assertRaises(HandshakeTimeoutError):
+        with self.assertLogs("simple_socks5.handlers", level="DEBUG") as logs, self.assertRaises(HandshakeTimeoutError):
             # assertLogs needs at least one record; the handler itself must add none above DEBUG
-            logging.getLogger("src.handlers").debug("start")
+            logging.getLogger("simple_socks5.handlers").debug("start")
             self.handler.parse_request()
         self.assertFalse([r for r in logs.records if r.exc_info or r.levelno >= 30])
 
@@ -488,27 +488,27 @@ class TestHandshakeDisconnects(unittest.TestCase):
         for recv in (b"", ConnectionResetError("reset"), [b"\x05\x01", b""]):
             with self.subTest(recv=recv):
                 self.connection.recv.side_effect = recv if isinstance(recv, list) else [recv]
-                with self.assertLogs("src.handlers", level="DEBUG") as logs:
+                with self.assertLogs("simple_socks5.handlers", level="DEBUG") as logs:
                     self.assertFalse(self.handler.handle_request())
                 self.assert_debug_only(logs)
 
     def test_auth_disconnect_logs_debug_without_traceback(self):
         self.connection.recv.side_effect = [b"\x01", b"\x05", b""]
-        with self.assertLogs("src.handlers", level="DEBUG") as logs:
+        with self.assertLogs("simple_socks5.handlers", level="DEBUG") as logs:
             self.assertFalse(self.handler._handle_username_password_auth())
         self.assert_debug_only(logs)
 
     def test_no_acceptable_methods_logs_debug(self):
         strip_socks5_env(self, SOCKS5_AUTH_REQUIRED="true")
         self.connection.recv.side_effect = [b"\x05\x01", b"\x00"]
-        with self.assertLogs("src.handlers", level="DEBUG") as logs:
+        with self.assertLogs("simple_socks5.handlers", level="DEBUG") as logs:
             self.assertFalse(self.handler.handle_request())
         self.connection.sendall.assert_called_once_with(RESP_CORRECT_VERSION_NO_ACCEPTABLE_METHODS)
         self.assert_debug_only(logs)
 
     def test_unexpected_socket_error_logs_traceback(self):
         self.connection.recv.side_effect = OSError(errno.EBADF, "bad file descriptor")
-        with self.assertLogs("src.handlers", level="ERROR") as logs:
+        with self.assertLogs("simple_socks5.handlers", level="ERROR") as logs:
             self.assertFalse(self.handler.handle_request())
         self.assertTrue(logs.records[0].exc_info)
 
@@ -516,7 +516,7 @@ class TestHandshakeDisconnects(unittest.TestCase):
         for recv in ([b""], [struct.pack("!BBBB", 5, 1, 0, 1), b"\x7f"], [ConnectionResetError("reset")]):
             with self.subTest(recv=recv):
                 self.connection.recv.side_effect = recv + [b""]
-                with self.assertNoLogs("src.handlers"), self.assertRaises(ConnectionError):
+                with self.assertNoLogs("simple_socks5.handlers"), self.assertRaises(ConnectionError):
                     self.handler.parse_request()
 
 
@@ -540,7 +540,7 @@ class TestUsernamePasswordAuth(unittest.TestCase):
         return self.handler._handle_username_password_auth()
 
     def assert_rejected(self, username: bytes, password: bytes):
-        with self.assertLogs("src.handlers", level="DEBUG") as logs:
+        with self.assertLogs("simple_socks5.handlers", level="DEBUG") as logs:
             self.assertFalse(self.authenticate(username, password))
         self.connection.sendall.assert_called_once_with(RESP_LOGIN_FAILURE)
         # The whole frame was read, so closing sends FIN rather than RST
@@ -581,7 +581,7 @@ class TestUsernamePasswordAuth(unittest.TestCase):
         self.assert_rejected(b"alice", b"\xff\xfe")
 
     def test_compare_digest_called_for_both_fields_even_on_wrong_username(self):
-        with patch("src.handlers.tcp.hmac.compare_digest", wraps=hmac.compare_digest) as spy:
+        with patch("simple_socks5.handlers.tcp.hmac.compare_digest", wraps=hmac.compare_digest) as spy:
             self.assertFalse(self.authenticate(b"mallory", b"s3cret"))
         self.assertEqual(spy.call_count, 2)
 
@@ -605,7 +605,7 @@ class TestUsernamePasswordAuth(unittest.TestCase):
         self.assertIn("unknown", "\n".join(r.getMessage() for r in logs.records))
 
     def test_success_logs_configured_username_never_password(self):
-        with self.assertLogs("src.handlers", level="DEBUG") as logs:
+        with self.assertLogs("simple_socks5.handlers", level="DEBUG") as logs:
             self.assertTrue(self.authenticate(b"alice", b"s3cret"))
         messages = "\n".join(r.getMessage() for r in logs.records)
         self.assertIn("alice", messages)
@@ -625,21 +625,21 @@ class TestAuthEnforcement(unittest.TestCase):
     def tearDown(self):
         self.connection.close()
 
-    @patch("src.handlers.tcp.auth_required", return_value=True)
+    @patch("simple_socks5.handlers.tcp.auth_required", return_value=True)
     def test_auth_required_rejects_no_auth_only_client(self, _mock):
         """When auth_required() is True, a client offering only NO_AUTH should be rejected."""
         methods = b"\x00"
         result = self.handler._negotiate_authentication_method(methods)
         self.assertEqual(result, MethodCodes.NO_ACCEPTABLE_METHODS)
 
-    @patch("src.handlers.tcp.auth_required", return_value=True)
+    @patch("simple_socks5.handlers.tcp.auth_required", return_value=True)
     def test_auth_required_accepts_username_password(self, _mock):
         """When auth_required() is True, USERNAME_PASSWORD should still be accepted."""
         methods = b"\x00\x02"
         result = self.handler._negotiate_authentication_method(methods)
         self.assertEqual(result, MethodCodes.USERNAME_PASSWORD)
 
-    @patch("src.handlers.tcp.auth_required", return_value=False)
+    @patch("simple_socks5.handlers.tcp.auth_required", return_value=False)
     def test_default_allows_no_auth(self, _mock):
         """Default behavior (auth_required()=False) should allow NO_AUTH."""
         methods = b"\x00"

@@ -6,10 +6,10 @@ import selectors
 import unittest
 from unittest.mock import MagicMock, call, patch
 
-from src.constants import RELAY_BUFFER_SIZE, RELAY_WRITE_TIMEOUT, AddressTypeCodes
-from src.exceptions import PolicyDenied
-from src.models import DetailedAddress
-from src.relays.tcp_relay import TCPRelay
+from simple_socks5.constants import RELAY_BUFFER_SIZE, RELAY_WRITE_TIMEOUT, AddressTypeCodes
+from simple_socks5.exceptions import PolicyDenied
+from simple_socks5.models import DetailedAddress
+from simple_socks5.relays.tcp_relay import TCPRelay
 
 
 def _event(sock):
@@ -19,8 +19,8 @@ def _event(sock):
 
 
 class TestTCPRelay(unittest.TestCase):
-    @patch("src.relays.tcp_relay.selectors.DefaultSelector")
-    @patch("src.relays.tcp_relay.generate_tcp_socket")
+    @patch("simple_socks5.relays.tcp_relay.selectors.DefaultSelector")
+    @patch("simple_socks5.relays.tcp_relay.generate_tcp_socket")
     def _create_relay(self, mock_gen_socket, mock_selector_cls):
         """Helper to create a TCPRelay with fully mocked sockets and selector."""
         mock_proxy_sock = MagicMock()
@@ -54,8 +54,8 @@ class TestTCPRelay(unittest.TestCase):
             _, _, proxy, _ = self._create_relay()
         self.assertEqual(proxy.mock_calls[:2], [call.settimeout(0.5), call.connect(("93.184.216.34", 80))])
 
-    @patch("src.relays.tcp_relay.selectors.DefaultSelector")
-    @patch("src.relays.tcp_relay.generate_tcp_socket")
+    @patch("simple_socks5.relays.tcp_relay.selectors.DefaultSelector")
+    @patch("simple_socks5.relays.tcp_relay.generate_tcp_socket")
     def test_connect_timeout_closes_socket_and_selector(self, mock_gen_socket, mock_sel_cls):
         mock_gen_socket.return_value.connect.side_effect = TimeoutError("timed out")
         dst = DetailedAddress(name="test", ip="10.255.255.1", port=80, address_type=AddressTypeCodes.IPv4)
@@ -66,8 +66,8 @@ class TestTCPRelay(unittest.TestCase):
         mock_gen_socket.return_value.close.assert_called_once()
         mock_sel_cls.return_value.close.assert_called_once()
 
-    @patch("src.relays.tcp_relay.selectors.DefaultSelector")
-    @patch("src.relays.tcp_relay.generate_tcp_socket")
+    @patch("simple_socks5.relays.tcp_relay.selectors.DefaultSelector")
+    @patch("simple_socks5.relays.tcp_relay.generate_tcp_socket")
     def test_init_closes_selector_on_connection_failure(self, mock_gen_socket, mock_sel_cls):
         mock_selector = MagicMock()
         mock_sel_cls.return_value = mock_selector
@@ -86,8 +86,8 @@ class TestTCPRelay(unittest.TestCase):
 
         mock_selector.close.assert_called_once()
 
-    @patch("src.relays.tcp_relay.selectors.DefaultSelector")
-    @patch("src.relays.tcp_relay.generate_tcp_socket")
+    @patch("simple_socks5.relays.tcp_relay.selectors.DefaultSelector")
+    @patch("simple_socks5.relays.tcp_relay.generate_tcp_socket")
     def test_init_closes_proxy_socket_when_connect_fails(self, mock_gen_socket, mock_sel_cls):
         mock_proxy_sock = MagicMock()
         mock_proxy_sock.connect.side_effect = ConnectionRefusedError
@@ -178,7 +178,7 @@ class TestTCPRelay(unittest.TestCase):
                 relay, client, proxy, selector = self._create_relay()
                 selector.select.return_value = [(_event(client), selectors.EVENT_READ)]
                 client.recv.side_effect = error
-                with self.assertLogs("src.relays.tcp_relay", level="DEBUG") as logs:
+                with self.assertLogs("simple_socks5.relays.tcp_relay", level="DEBUG") as logs:
                     relay.listen_and_relay()
                 problems = [r for r in logs.records if r.exc_info or r.levelno > logging.INFO]
                 self.assertEqual(problems, [])
@@ -188,7 +188,7 @@ class TestTCPRelay(unittest.TestCase):
         relay, client, proxy, selector = self._create_relay()
         selector.select.return_value = [(_event(client), selectors.EVENT_READ)]
         client.recv.side_effect = OSError(errno.EBADF, "bad file descriptor")
-        with self.assertLogs("src.relays.tcp_relay", level="ERROR") as logs:
+        with self.assertLogs("simple_socks5.relays.tcp_relay", level="ERROR") as logs:
             relay.listen_and_relay()
         self.assertTrue(logs.records[0].exc_info)
         selector.close.assert_called_once()
@@ -255,7 +255,7 @@ class TestTCPRelay(unittest.TestCase):
         client.recv.return_value = b"data"
         proxy.sendall.side_effect = TimeoutError("timed out")
 
-        with self.assertLogs("src.relays.tcp_relay", level="WARNING") as logs:
+        with self.assertLogs("simple_socks5.relays.tcp_relay", level="WARNING") as logs:
             relay.listen_and_relay()
 
         self.assertTrue(any("timed out" in line for line in logs.output))
@@ -297,9 +297,9 @@ class TestTCPRelay(unittest.TestCase):
         self.assertEqual((relay.bytes_up, relay.bytes_down), (12, 8))
 
     def test_cleanup_logs_one_closed_line(self):
-        with patch("src.relays.base.time.monotonic", side_effect=[100.0, 102.5]):
+        with patch("simple_socks5.relays.base.time.monotonic", side_effect=[100.0, 102.5]):
             relay = self._relay_one_exchange()
-            with self.assertLogs("src.relays.tcp_relay", level="DEBUG") as logs:
+            with self.assertLogs("simple_socks5.relays.tcp_relay", level="DEBUG") as logs:
                 relay.listen_and_relay()
 
         self.assertEqual(
@@ -311,7 +311,7 @@ class TestTCPRelay(unittest.TestCase):
         relay, client, proxy, _ = self._create_relay()
         client.recv.side_effect = ConnectionResetError("reset")
         proxy.sendall.side_effect = BrokenPipeError("broken pipe")
-        with self.assertNoLogs("src.relays.tcp_relay"):
+        with self.assertNoLogs("simple_socks5.relays.tcp_relay"):
             with self.assertRaises(ConnectionResetError):
                 relay._recv_data(client)
             with self.assertRaises(BrokenPipeError):
@@ -335,8 +335,8 @@ class TestTCPRelay(unittest.TestCase):
         proxy.send.assert_not_called()
 
 
-@patch("src.relays.tcp_relay.selectors.DefaultSelector")
-@patch("src.relays.tcp_relay.generate_tcp_socket")
+@patch("simple_socks5.relays.tcp_relay.selectors.DefaultSelector")
+@patch("simple_socks5.relays.tcp_relay.generate_tcp_socket")
 class TestTCPRelayDestinationPolicy(unittest.TestCase):
     def setUp(self):
         environ = {k: v for k, v in os.environ.items() if not k.startswith("SOCKS5_")}

@@ -5,9 +5,9 @@ import errno
 import socket
 import unittest
 
-from src.constants import ReplyCodes
-from src.errors import is_routine_disconnect, reply_code_for
-from src.exceptions import (
+from simple_socks5.constants import ReplyCodes
+from simple_socks5.errors import is_routine_disconnect, reply_code_for
+from simple_socks5.exceptions import (
     AddressTypeNotSupportedError,
     HandshakeTimeoutError,
     InvalidDomainNameError,

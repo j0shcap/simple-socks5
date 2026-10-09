@@ -17,7 +17,7 @@ def _echo(tunnel) -> None:
 
 
 def test_limit_rejects_warns_once_and_recovers(monkeypatch, make_proxy, echo_origin, caplog):
-    caplog.set_level(logging.WARNING, logger="src.server")
+    caplog.set_level(logging.WARNING, logger="simple_socks5.server")
     monkeypatch.setenv("SOCKS5_MAX_CONNECTIONS", "2")
     proxy = make_proxy()
 

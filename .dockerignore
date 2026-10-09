@@ -6,6 +6,6 @@ __pycache__
 tests
 *.pyc
 *.pyo
-*.egg-info
+**/*.egg-info
 errors.log
 CLAUDE.md

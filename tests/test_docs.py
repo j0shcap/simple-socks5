@@ -6,7 +6,7 @@ import re
 import unittest
 from pathlib import Path
 
-from src.argument_parser import __version__
+from simple_socks5.argument_parser import __version__
 
 ROOT = Path(__file__).resolve().parents[1]
 ENV_VAR = r"SOCKS5_[A-Z_]+|LOGGING_LEVEL"
@@ -21,7 +21,7 @@ def readme_env_vars() -> set[str]:
 def src_env_vars() -> set[str]:
     return {
         name
-        for path in (ROOT / "src").rglob("*.py")
+        for path in (ROOT / "src" / "simple_socks5").rglob("*.py")
         for name in re.findall(rf'"({ENV_VAR})"', path.read_text())
     }
 

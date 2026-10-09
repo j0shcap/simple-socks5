@@ -9,8 +9,8 @@ import unittest
 from contextlib import redirect_stderr
 from unittest.mock import MagicMock, patch
 
-from src.constants import AddressTypeCodes, CommandCodes
-from src.exceptions import (
+from simple_socks5.constants import AddressTypeCodes, CommandCodes
+from simple_socks5.exceptions import (
     AddressTypeNotSupportedError,
     HandshakeTimeoutError,
     InvalidDomainNameError,
@@ -18,8 +18,8 @@ from src.exceptions import (
     InvalidVersionError,
     PolicyDenied,
 )
-from src.models import BindAddress, DetailedAddress, Request
-from src.server import TCPProxyServer, ThreadingTCPServer
+from simple_socks5.models import BindAddress, DetailedAddress, Request
+from simple_socks5.server import TCPProxyServer, ThreadingTCPServer
 
 
 def make_proxy_handler() -> TCPProxyServer:
@@ -41,7 +41,7 @@ def connect_request(address_type: AddressTypeCodes = AddressTypeCodes.IPv4) -> R
 class TestHandleParseRequestErrors(unittest.TestCase):
     """Verify parse_request() exceptions produce SOCKS5 error replies."""
 
-    @patch("src.server.TCPHandler")
+    @patch("simple_socks5.server.TCPHandler")
     def test_invalid_version_sends_general_failure(self, mock_tcp_handler_cls):
         handler = make_proxy_handler()
         mock_instance = mock_tcp_handler_cls.return_value
@@ -55,7 +55,7 @@ class TestHandleParseRequestErrors(unittest.TestCase):
         # VER=05, REP=01 (general failure), RSV=00, ATYP=01 (IPv4), zeroed addr+port
         self.assertEqual(reply, b"\x05\x01\x00\x01\x00\x00\x00\x00\x00\x00")
 
-    @patch("src.server.TCPHandler")
+    @patch("simple_socks5.server.TCPHandler")
     def test_invalid_request_sends_general_failure(self, mock_tcp_handler_cls):
         handler = make_proxy_handler()
         mock_instance = mock_tcp_handler_cls.return_value
@@ -68,7 +68,7 @@ class TestHandleParseRequestErrors(unittest.TestCase):
         reply = handler.connection.sendall.call_args[0][0]
         self.assertEqual(reply, b"\x05\x01\x00\x01\x00\x00\x00\x00\x00\x00")
 
-    @patch("src.server.TCPHandler")
+    @patch("simple_socks5.server.TCPHandler")
     def test_connection_error_sends_general_failure(self, mock_tcp_handler_cls):
         handler = make_proxy_handler()
         mock_instance = mock_tcp_handler_cls.return_value
@@ -81,7 +81,7 @@ class TestHandleParseRequestErrors(unittest.TestCase):
         reply = handler.connection.sendall.call_args[0][0]
         self.assertEqual(reply, b"\x05\x01\x00\x01\x00\x00\x00\x00\x00\x00")
 
-    @patch("src.server.TCPHandler")
+    @patch("simple_socks5.server.TCPHandler")
     def test_socket_error_sends_general_failure(self, mock_tcp_handler_cls):
         handler = make_proxy_handler()
         mock_instance = mock_tcp_handler_cls.return_value
@@ -95,12 +95,12 @@ class TestHandleParseRequestErrors(unittest.TestCase):
         self.assertEqual(reply, b"\x05\x01\x00\x01\x00\x00\x00\x00\x00\x00")
 
 
-@patch("src.server.TCPHandler")
+@patch("simple_socks5.server.TCPHandler")
 class TestHandshakeDeadline(unittest.TestCase):
     def test_handle_passes_deadline(self, mock_tcp_handler_cls):
         mock_tcp_handler_cls.return_value.handle_request.return_value = False
         with patch.dict(os.environ, {"SOCKS5_HANDSHAKE_TIMEOUT": "2.5"}), \
-                patch("src.server.time.monotonic", return_value=100.0):
+                patch("simple_socks5.server.time.monotonic", return_value=100.0):
             make_proxy_handler().handle()
         self.assertEqual(mock_tcp_handler_cls.call_args.kwargs["deadline"], 102.5)
 
@@ -126,7 +126,7 @@ class TestHandshakeDeadline(unittest.TestCase):
         handler.connection.sendall.assert_not_called()
 
 
-@patch("src.server.TCPHandler")
+@patch("simple_socks5.server.TCPHandler")
 class TestReplyCodes(unittest.TestCase):
     """Each failure sends exactly one reply, with the code reply_code_for() picks."""
 
@@ -159,13 +159,13 @@ class TestReplyCodes(unittest.TestCase):
         for exc, code in cases:
             for address_type in (AddressTypeCodes.IPv4, AddressTypeCodes.IPv6):
                 with self.subTest(exc=repr(exc), address_type=address_type.name), \
-                        patch("src.server.TCPRelay", side_effect=exc):
+                        patch("simple_socks5.server.TCPRelay", side_effect=exc):
                     reply = self.run_handle(mock_tcp_handler_cls, make_proxy_handler(), connect_request(address_type))
                     zero_address = b"\x00" * (16 if address_type == AddressTypeCodes.IPv6 else 4)
                     self.assertEqual(reply, bytes([5, code, 0, address_type.value]) + zero_address + b"\x00\x00")
 
 
-@patch("src.server.TCPHandler")
+@patch("simple_socks5.server.TCPHandler")
 class TestOneReply(unittest.TestCase):
     """Once a reply has been sent, a later failure writes nothing more to the client."""
 
@@ -184,13 +184,16 @@ class TestOneReply(unittest.TestCase):
 
     def test_connect_relay_error_after_success_sends_nothing_more(self, mock_tcp_handler_cls):
         handler = self.run_handle(
-            mock_tcp_handler_cls, CommandCodes.CONNECT, "src.server.TCPRelay", RuntimeError("boom")
+            mock_tcp_handler_cls, CommandCodes.CONNECT, "simple_socks5.server.TCPRelay", RuntimeError("boom")
         )
         handler.connection.sendall.assert_called_once_with(self.SUCCESS_REPLY)
 
     def test_udp_relay_error_after_success_sends_nothing_more(self, mock_tcp_handler_cls):
         handler = self.run_handle(
-            mock_tcp_handler_cls, CommandCodes.UDP_ASSOCIATE, "src.server.UDPRelay", struct.error("bad datagram")
+            mock_tcp_handler_cls,
+            CommandCodes.UDP_ASSOCIATE,
+            "simple_socks5.server.UDPRelay",
+            struct.error("bad datagram"),
         )
         handler.connection.sendall.assert_called_once_with(self.SUCCESS_REPLY)
 
@@ -200,7 +203,7 @@ class TestOneReply(unittest.TestCase):
         mock_instance.parse_request.return_value = connect_request()
         handler = make_proxy_handler()
         handler.connection.sendall.side_effect = BrokenPipeError
-        with patch("src.server.TCPRelay") as relay_cls:
+        with patch("simple_socks5.server.TCPRelay") as relay_cls:
             relay_cls.return_value.get_proxy_address.return_value = BindAddress("127.0.0.1", 5000)
             handler.handle()
         handler.connection.sendall.assert_called_once_with(self.SUCCESS_REPLY)
@@ -237,7 +240,7 @@ class TestSendErrorReply(unittest.TestCase):
         handler._send_error_reply(b"\x05\x01\x00\x01\x00\x00\x00\x00\x00\x00")
 
 
-@patch("src.server.TCPHandler")
+@patch("simple_socks5.server.TCPHandler")
 class TestDisconnectLogging(unittest.TestCase):
     """A client hanging up is DEBUG without a traceback; an unexpected exception is ERROR with one."""
 
@@ -256,36 +259,36 @@ class TestDisconnectLogging(unittest.TestCase):
         self.assertFalse([r for r in logs.records if r.exc_info or r.levelno > logging.DEBUG])
 
     def test_failed_handshake_logs_debug(self, mock_tcp_handler_cls):
-        with self.assertLogs("src.server", level="DEBUG") as logs:
+        with self.assertLogs("simple_socks5.server", level="DEBUG") as logs:
             self.run_handle(mock_tcp_handler_cls, handshake_ok=False)
         self.assert_debug_only(logs)
 
     def test_parse_disconnect_logs_debug(self, mock_tcp_handler_cls):
         for error in (ConnectionError("Connection closed during recv"), ConnectionResetError("reset")):
-            with self.subTest(error=repr(error)), self.assertLogs("src.server", level="DEBUG") as logs:
+            with self.subTest(error=repr(error)), self.assertLogs("simple_socks5.server", level="DEBUG") as logs:
                 self.run_handle(mock_tcp_handler_cls, error)
             self.assert_debug_only(logs)
 
     def test_parse_protocol_error_logs_error_without_traceback(self, mock_tcp_handler_cls):
-        with self.assertLogs("src.server", level="ERROR") as logs:
+        with self.assertLogs("simple_socks5.server", level="ERROR") as logs:
             self.run_handle(mock_tcp_handler_cls, InvalidVersionError(4))
         self.assertFalse(logs.records[0].exc_info)
 
     def test_parse_unexpected_error_logs_traceback_and_replies(self, mock_tcp_handler_cls):
-        with self.assertLogs("src.server", level="ERROR") as logs:
+        with self.assertLogs("simple_socks5.server", level="ERROR") as logs:
             handler = self.run_handle(mock_tcp_handler_cls, RuntimeError("bug"))
         self.assertTrue(logs.records[0].exc_info)
         handler.connection.sendall.assert_called_once_with(b"\x05\x01\x00\x01\x00\x00\x00\x00\x00\x00")
 
     def test_connect_unexpected_error_logs_traceback(self, mock_tcp_handler_cls):
-        with patch("src.server.TCPRelay", side_effect=RuntimeError("bug")), \
-                self.assertLogs("src.server", level="ERROR") as logs:
+        with patch("simple_socks5.server.TCPRelay", side_effect=RuntimeError("bug")), \
+                self.assertLogs("simple_socks5.server", level="ERROR") as logs:
             self.run_handle(mock_tcp_handler_cls, connect_request())
         self.assertTrue(logs.records[0].exc_info)
 
     def test_connect_refused_logs_error_without_traceback(self, mock_tcp_handler_cls):
-        with patch("src.server.TCPRelay", side_effect=ConnectionRefusedError("refused")), \
-                self.assertLogs("src.server", level="ERROR") as logs:
+        with patch("simple_socks5.server.TCPRelay", side_effect=ConnectionRefusedError("refused")), \
+                self.assertLogs("simple_socks5.server", level="ERROR") as logs:
             self.run_handle(mock_tcp_handler_cls, connect_request())
         self.assertFalse(logs.records[0].exc_info)
 
@@ -295,7 +298,10 @@ class TestDisconnectLogging(unittest.TestCase):
         mock_instance.parse_request.return_value = connect_request()
         handler = make_proxy_handler()
         handler.connection.sendall.side_effect = BrokenPipeError("broken pipe")
-        with patch("src.server.TCPRelay") as relay_cls, self.assertLogs("src.server", level="DEBUG") as logs:
+        with (
+            patch("simple_socks5.server.TCPRelay") as relay_cls,
+            self.assertLogs("simple_socks5.server", level="DEBUG") as logs,
+        ):
             relay_cls.return_value.get_proxy_address.return_value = BindAddress("127.0.0.1", 5000)
             handler.handle()
         # Only the CONNECTION line, which is logged before the reply
@@ -304,14 +310,14 @@ class TestDisconnectLogging(unittest.TestCase):
     def test_error_reply_to_departed_client_logs_debug(self, _mock_tcp_handler_cls):
         handler = make_proxy_handler()
         handler.connection.sendall.side_effect = BrokenPipeError("broken pipe")
-        with self.assertLogs("src.server", level="DEBUG") as logs:
+        with self.assertLogs("simple_socks5.server", level="DEBUG") as logs:
             handler._send_error_reply(b"\x05\x01\x00\x01\x00\x00\x00\x00\x00\x00")
         self.assert_debug_only(logs)
 
     def test_error_reply_unexpected_oserror_logs_error(self, _mock_tcp_handler_cls):
         handler = make_proxy_handler()
         handler.connection.sendall.side_effect = OSError(errno.EBADF, "bad file descriptor")
-        with self.assertLogs("src.server", level="ERROR"):
+        with self.assertLogs("simple_socks5.server", level="ERROR"):
             handler._send_error_reply(b"\x05\x01\x00\x01\x00\x00\x00\x00\x00\x00")
 
 
@@ -324,7 +330,7 @@ class TestHandleError(unittest.TestCase):
 
     def handle_error(self, error: Exception):
         stderr = io.StringIO()
-        with self.assertLogs("src.server", level="DEBUG") as logs, redirect_stderr(stderr):
+        with self.assertLogs("simple_socks5.server", level="DEBUG") as logs, redirect_stderr(stderr):
             try:
                 raise error
             except Exception:
@@ -399,9 +405,9 @@ class TestConnectionLimit(unittest.TestCase):
             for _ in range(count):
                 server.process_request(MagicMock(spec=socket.socket), ("127.0.0.1", 9999))
 
-        with patch("src.server.time.monotonic", lambda: now[0]), \
+        with patch("simple_socks5.server.time.monotonic", lambda: now[0]), \
                 patch.object(server, "shutdown_request") as shutdown_request, \
-                self.assertLogs("src.server", level="WARNING") as logs:
+                self.assertLogs("simple_socks5.server", level="WARNING") as logs:
             reject(50)
             self.assertEqual(len(logs.records), 1)
             self.assertIn("Connection limit of 1 reached: rejected 1 connection(s)", logs.records[0].getMessage())
@@ -425,21 +431,21 @@ class TestPolicyDenial(unittest.TestCase):
         self.addCleanup(self.server.server_close)
         self.dst = DetailedAddress(name="localhost", ip="127.0.0.1", port=80, address_type=AddressTypeCodes.IPv4)
 
-    @patch("src.server.TCPHandler")
+    @patch("simple_socks5.server.TCPHandler")
     def test_policy_denied_sends_rep_02_without_error_log(self, mock_tcp_handler_cls):
         mock_tcp_handler_cls.return_value.handle_request.return_value = True
         mock_tcp_handler_cls.return_value.parse_request.return_value = Request(5, CommandCodes.CONNECT.value, self.dst)
         handler = make_proxy_handler()
         handler.server = self.server
-        with patch("src.server.TCPRelay", side_effect=PolicyDenied("127.0.0.1", 80)), \
-                self.assertLogs("src", level="DEBUG") as logs:
+        with patch("simple_socks5.server.TCPRelay", side_effect=PolicyDenied("127.0.0.1", 80)), \
+                self.assertLogs("simple_socks5", level="DEBUG") as logs:
             handler.handle()
         handler.connection.sendall.assert_called_once_with(b"\x05\x02\x00\x01\x00\x00\x00\x00\x00\x00")
         self.assertNotIn("ERROR", [r.levelname for r in logs.records])
         self.assertTrue(all(r.exc_info is None for r in logs.records))
 
     def test_first_policy_denial_warns_with_client_dst_and_env_var(self):
-        with self.assertLogs("src.server", level="DEBUG") as logs:
+        with self.assertLogs("simple_socks5.server", level="DEBUG") as logs:
             self.server.log_policy_denial("192.0.2.7", self.dst)
         self.assertEqual(len(logs.records), 1)
         self.assertEqual(logs.records[0].levelname, "WARNING")
@@ -450,8 +456,8 @@ class TestPolicyDenial(unittest.TestCase):
 
     def test_policy_warning_rate_limited_with_suppressed_count(self):
         now = [0.0]
-        with patch("src.server.time.monotonic", lambda: now[0]), \
-                self.assertLogs("src.server", level="DEBUG") as logs:
+        with patch("simple_socks5.server.time.monotonic", lambda: now[0]), \
+                self.assertLogs("simple_socks5.server", level="DEBUG") as logs:
             for _ in range(50):
                 self.server.log_policy_denial("192.0.2.7", self.dst)
             now[0] = 9.9

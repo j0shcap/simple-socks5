@@ -1,7 +1,7 @@
 import socket
 import unittest
-from src.models import DetailedAddress
-from src.utils import (
+from simple_socks5.models import DetailedAddress
+from simple_socks5.utils import (
     generate_connection_method_response,
     generate_general_socks_server_failure_reply,
     generate_connection_refused_reply,
@@ -19,7 +19,7 @@ from src.utils import (
     format_connection_closed,
     format_connection_established,
 )
-from src.constants import AddressTypeCodes, MethodCodes
+from simple_socks5.constants import AddressTypeCodes, MethodCodes
 
 
 class TestErrorUtils(unittest.TestCase):

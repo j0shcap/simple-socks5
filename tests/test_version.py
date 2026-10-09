@@ -1,14 +1,20 @@
 """
-Keeps the two version sources in sync until the version is single-sourced, and checks what `--version` prints.
+Checks that __version__ comes from the installed package metadata, which pip takes from pyproject.toml, and what
+`--version` prints.
 """
 
+import importlib
 import re
 import subprocess
 import sys
 import unittest
+from importlib.metadata import PackageNotFoundError, entry_points, version
 from pathlib import Path
+from unittest.mock import patch
 
-from src.argument_parser import __version__
+from simple_socks5 import argument_parser
+from simple_socks5.argument_parser import __version__
+from simple_socks5.main import cli
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -22,8 +28,18 @@ def pyproject_version() -> str:
 
 
 class TestVersion(unittest.TestCase):
-    def test_pyproject_version_matches_dunder_version(self):
-        self.assertEqual(pyproject_version(), __version__)
+    def test_installed_version_matches_pyproject(self):
+        # Fails after a version bump until `pip install -e .` is rerun.
+        self.assertEqual(version("simple-socks5"), pyproject_version())
+        self.assertEqual(__version__, version("simple-socks5"))
+
+    def test_version_falls_back_when_not_installed(self):
+        try:
+            with patch("importlib.metadata.version", side_effect=PackageNotFoundError("simple-socks5")):
+                importlib.reload(argument_parser)
+            self.assertEqual(argument_parser.__version__, "0+unknown")
+        finally:
+            importlib.reload(argument_parser)
 
     def test_cli_prints_version(self):
         result = subprocess.run(
@@ -31,6 +47,18 @@ class TestVersion(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout, f"app.py {__version__}\n")
+
+    def test_module_prints_version(self):
+        result = subprocess.run(
+            [sys.executable, "-m", "simple_socks5", "--version"], cwd=ROOT, capture_output=True, text=True
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        # argparse's prog for -m differs across Python versions, so only the version is checked.
+        self.assertTrue(result.stdout.endswith(f" {__version__}\n"), result.stdout)
+
+    def test_console_script_points_at_cli(self):
+        (script,) = entry_points(group="console_scripts", name="simple-socks5")
+        self.assertIs(script.load(), cli)
 
 
 if __name__ == "__main__":

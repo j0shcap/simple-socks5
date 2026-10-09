@@ -10,10 +10,10 @@ from argparse import Namespace
 from contextlib import redirect_stderr
 from unittest.mock import MagicMock, patch
 
-from src.config import ProxyConfiguration
-from src.constants import SHUTDOWN_FORCE_CLOSE_TIMEOUT, SHUTDOWN_GRACE_PERIOD
-from src.main import GracefulShutdown, main
-from src.startup import DEFAULT_CREDENTIALS_MESSAGE, OPEN_PROXY_BANNER
+from simple_socks5.config import ProxyConfiguration
+from simple_socks5.constants import SHUTDOWN_FORCE_CLOSE_TIMEOUT, SHUTDOWN_GRACE_PERIOD
+from simple_socks5.main import GracefulShutdown, cli, main
+from simple_socks5.startup import DEFAULT_CREDENTIALS_MESSAGE, OPEN_PROXY_BANNER
 
 BANNER_HEADLINE = OPEN_PROXY_BANNER[1].format(host="0.0.0.0")
 
@@ -25,15 +25,15 @@ class TestMainStartupAdvisories(unittest.TestCase):
 
         environ = {k: v for k, v in os.environ.items() if not k.startswith("SOCKS5_")}
         patchers = [
-            patch("src.main.ProxyConfiguration", FreshConfig),
-            patch("src.logger.ProxyConfiguration", FreshConfig),
+            patch("simple_socks5.main.ProxyConfiguration", FreshConfig),
+            patch("simple_socks5.logger.ProxyConfiguration", FreshConfig),
             patch.dict(os.environ, environ, clear=True),
         ]
         for patcher in patchers:
             patcher.start()
             self.addCleanup(patcher.stop)
 
-        server_patcher = patch("src.main.ThreadingTCPServer")
+        server_patcher = patch("simple_socks5.main.ThreadingTCPServer")
         self.server_class = server_patcher.start()
         self.addCleanup(server_patcher.stop)
         self.serve_forever = self.server_class.return_value.__enter__.return_value.serve_forever
@@ -209,6 +209,13 @@ class TestGracefulShutdown(unittest.TestCase):
         finally:
             self.shutdown.restore()
         self.assertEqual({signum: signal.getsignal(signum) for signum in previous}, previous)
+
+
+class TestCli(unittest.TestCase):
+    def test_cli_passes_parsed_arguments_to_main(self):
+        with patch("simple_socks5.main.main") as main_mock:
+            cli(["-H", "0.0.0.0", "-P", "1081", "-L", "info"])
+        main_mock.assert_called_once_with(Namespace(host="0.0.0.0", port=1081, logging_level="info"))
 
 
 if __name__ == "__main__":

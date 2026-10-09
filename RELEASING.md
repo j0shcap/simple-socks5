@@ -5,8 +5,8 @@ tests and the container smoke test pass. Replace `X.Y.Z` below with the version.
 
 ## 1. Prepare the release PR
 
-- Bump `version` in `pyproject.toml` and `__version__` in `src/argument_parser.py`. `tests/test_version.py`
-  fails if they differ.
+- Bump `version` in `pyproject.toml`, the only place it's written; `__version__` reads it from the installed
+  package. Rerun `pip install -e .` afterwards, or `tests/test_version.py` fails on the stale version.
 - In `CHANGELOG.md`, move the `[Unreleased]` entries into `## [X.Y.Z] - YYYY-MM-DD`, leave `## [Unreleased]`
   empty above it, and update the link references at the bottom. List every **Behaviour change** and its opt-out
   under "Upgrading". `tests/test_docs.py` fails without a dated section for the current version.
