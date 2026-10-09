@@ -104,7 +104,7 @@ def main(args: Namespace):
                 graceful_shutdown.restore()
     except OSError as e:
         logger.error(f"Error starting server: {e}")
-        exit(1)
+        sys.exit(1)
 
 
 def cli(argv: Sequence[str] | None = None) -> None:

@@ -5,10 +5,14 @@ Tests that main() logs the startup advisories before serving, and shuts down gra
 import io
 import os
 import signal
+import socket
+import subprocess
+import sys
 import threading
 import unittest
 from argparse import Namespace
 from contextlib import redirect_stderr
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -18,6 +22,7 @@ from simple_socks5.constants import SHUTDOWN_FORCE_CLOSE_TIMEOUT, SHUTDOWN_GRACE
 from simple_socks5.main import GracefulShutdown, cli, main
 from simple_socks5.startup import DEFAULT_CREDENTIALS_MESSAGE, OPEN_PROXY_BANNER
 
+ROOT = Path(__file__).resolve().parents[1]
 BANNER_HEADLINE = OPEN_PROXY_BANNER[1].format(host="0.0.0.0")
 
 
@@ -225,6 +230,26 @@ class TestCli(unittest.TestCase):
         with patch("simple_socks5.main.main") as main_mock:
             cli(["-H", "0.0.0.0", "-P", "1081", "-L", "info"])
         main_mock.assert_called_once_with(Namespace(host="0.0.0.0", port=1081, logging_level="info"))
+
+    def test_startup_failure_exits_1_without_site(self):
+        # python -S skips the site module, which is what defines the exit() builtin.
+        env = {k: v for k, v in os.environ.items() if not k.startswith("SOCKS5_")}
+        env["PYTHONPATH"] = str(ROOT / "src")
+        with socket.socket() as taken:
+            taken.bind(("127.0.0.1", 0))
+            taken.listen()
+            port = taken.getsockname()[1]
+            result = subprocess.run(  # noqa: S603 - fixed argv built by the test
+                [sys.executable, "-S", "-m", "simple_socks5", "-H", "127.0.0.1", "-P", str(port)],
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=False,
+            )
+        assert result.returncode == 1, result.stderr
+        assert "Error starting server" in result.stdout + result.stderr
+        assert "NameError" not in result.stderr
 
 
 if __name__ == "__main__":
