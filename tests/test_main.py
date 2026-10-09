@@ -224,6 +224,14 @@ class TestGracefulShutdown(unittest.TestCase):
             self.shutdown.restore()
         assert {signum: signal.getsignal(signum) for signum in previous} == previous
 
+    def test_restore_skips_handler_python_did_not_install(self):
+        # signal.signal() returns None for a handler installed outside Python, and rejects None when given it back
+        with patch("signal.signal", return_value=None) as set_handler:
+            self.shutdown.install()
+            set_handler.reset_mock()
+            self.shutdown.restore()
+        set_handler.assert_not_called()
+
 
 class TestCli(unittest.TestCase):
     def test_cli_passes_parsed_arguments_to_main(self):

@@ -43,7 +43,9 @@ class GracefulShutdown:
 
     def restore(self) -> None:
         for signum, handler in self._previous_handlers.items():
-            signal.signal(signum, handler)
+            # None means the handler wasn't installed from Python, so it can't be reinstalled
+            if handler is not None:
+                signal.signal(signum, handler)
         self._previous_handlers.clear()
 
     def _handle(self, _signum, _frame) -> None:
