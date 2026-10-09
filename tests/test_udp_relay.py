@@ -200,7 +200,7 @@ class TestListenAndRelay(unittest.TestCase):
         dst = DetailedAddress(name="test", ip="0.0.0.0", port=0, address_type=AddressTypeCodes.IPv4)
         self.relay = UDPRelay(accepted, dst)
         self.addCleanup(self.relay.proxy_connection.close)
-        self.relay_address = ("127.0.0.1", self.relay.get_proxy_port())
+        self.relay_address = ("127.0.0.1", self.relay.get_proxy_address().port)
 
     def start_relay(self) -> threading.Thread:
         thread = threading.Thread(target=self.relay.listen_and_relay)

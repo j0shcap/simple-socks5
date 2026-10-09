@@ -7,7 +7,7 @@ from ..constants import RELAY_BUFFER_SIZE, UDP_FORWARD_TIMEOUT, UDP_RECV_TIMEOUT
 from ..exceptions import MalformedDatagramError, PolicyDeniedError
 from ..handlers import UDPHandler
 from ..logger import get_logger
-from ..models import BaseAddress, DetailedAddress
+from ..models import BaseAddress, DetailedAddress, SocketAddress, UDPDatagram
 from ..policy import check_destination
 from ..utils import (
     format_relay,
@@ -24,12 +24,11 @@ class UDPRelay(BaseRelay):
     Class responsible for relaying data between a client socket and a remote socket via UDP.
     """
 
-    def __init__(self, client_connection: socket.socket, dst_address: DetailedAddress):
+    def __init__(self, client_connection: socket.socket, dst_address: DetailedAddress) -> None:
         super().__init__(client_connection, dst_address)
-        self.expected_client_ip = client_connection.getpeername()[0]
-        self.generate_proxy_connection()
+        self.proxy_connection = self._bind_relay_socket()
 
-    def generate_proxy_connection(self) -> None:
+    def _bind_relay_socket(self) -> socket.socket:
         sock = generate_udp_socket(self.dst_address.address_type)
         try:
             sock.bind(("", 0))  # Bind to any available port
@@ -38,10 +37,9 @@ class UDPRelay(BaseRelay):
         except Exception:
             sock.close()
             raise
-        self.proxy_connection = sock
-        self.set_proxy_address()
+        return sock
 
-    def listen_and_relay(self):
+    def listen_and_relay(self) -> None:
         """
         Relays client datagrams until the control connection closes or no client datagram arrives for
         UDP_RECV_TIMEOUT seconds (RFC 1928 §7: the association ends with its TCP connection).
@@ -94,13 +92,13 @@ class UDPRelay(BaseRelay):
             logger.debug("(UDP) Ignored %s bytes on the control connection", len(data))
         return bool(data)
 
-    def _handle_datagram(self, data: bytes, addr: tuple) -> bool:
+    def _handle_datagram(self, data: bytes, addr: SocketAddress) -> bool:
         """
         Forwards one datagram received on the relay socket, or drops it.
 
         Returns whether it came from the client, which is what keeps the association alive.
         """
-        if addr[0] != self.expected_client_ip:
+        if addr[0] != self.client_address.ip:
             logger.debug("(UDP) Dropped datagram from unauthorized source: %s", addr[0])
             return False
 
@@ -128,7 +126,7 @@ class UDPRelay(BaseRelay):
             logger.debug("(UDP) Dropped unsupported datagram from %s: %s", addr, e)
         return True
 
-    def _forward_packet(self, datagram, client_addr: tuple) -> None:
+    def _forward_packet(self, datagram: UDPDatagram, client_addr: SocketAddress) -> None:
         check_destination(datagram.dst_addr, datagram.dst_port)
         with socket.socket(
             map_address_enum_to_socket_family(datagram.address_type),
@@ -159,5 +157,5 @@ class UDPRelay(BaseRelay):
                     "UDP forward timeout waiting for response from %s:%s", datagram.dst_addr, datagram.dst_port
                 )
 
-    def _log_relay(self, src_addr: BaseAddress, dst_addr: BaseAddress, data_len: int):
+    def _log_relay(self, src_addr: BaseAddress, dst_addr: BaseAddress, data_len: int) -> None:
         logger.debug(format_relay("UDP", src_addr, dst_addr, data_len))

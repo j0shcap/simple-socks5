@@ -113,6 +113,18 @@ class TestTCPRelay(unittest.TestCase):
 
         mock_proxy_sock.close.assert_called_once()
 
+    @patch("simple_socks5.relays.tcp_relay.selectors.DefaultSelector")
+    @patch("simple_socks5.relays.tcp_relay.generate_tcp_socket")
+    def test_init_closes_proxy_socket_when_register_fails(self, mock_gen_socket, mock_sel_cls):
+        mock_sel_cls.return_value.register.side_effect = [None, ValueError("Invalid file descriptor: -1")]
+        dst = DetailedAddress(name="test", ip="1.2.3.4", port=80, address_type=AddressTypeCodes.IPv4)
+
+        with pytest.raises(ValueError, match="Invalid file descriptor"):
+            TCPRelay(MagicMock(), dst)
+
+        mock_gen_socket.return_value.close.assert_called_once()
+        mock_sel_cls.return_value.close.assert_called_once()
+
     def test_relay_data_eof_triggers_cleanup(self):
         relay, client, proxy, selector = self._create_relay()
 
@@ -227,13 +239,6 @@ class TestTCPRelay(unittest.TestCase):
         proxy.close.assert_called_once()
         selector.close.assert_called_once()
 
-    def test_send_data(self):
-        relay, _client, proxy, _ = self._create_relay()
-        result = relay._send_data(proxy, b"hello")
-        assert result is None
-        proxy.sendall.assert_called_once_with(b"hello")
-        proxy.send.assert_not_called()
-
     def test_init_leaves_sockets_blocking(self):
         _relay, client, proxy, _ = self._create_relay()
         client.setblocking.assert_not_called()
@@ -271,19 +276,6 @@ class TestTCPRelay(unittest.TestCase):
         selector.close.assert_called_once()
         client.close.assert_not_called()
 
-    def test_recv_data(self):
-        relay, client, _proxy, _ = self._create_relay()
-        client.recv.return_value = b"data"
-        result = relay._recv_data(client)
-        assert result == b"data"
-        client.recv.assert_called_once_with(RELAY_BUFFER_SIZE)
-
-    def test_recv_data_raises_on_error(self):
-        relay, client, _proxy, _ = self._create_relay()
-        client.recv.side_effect = OSError("recv failed")
-        with pytest.raises(OSError, match="recv failed"):
-            relay._recv_data(client)
-
     def _relay_one_exchange(self):
         """Client sends 12 bytes, the destination answers with 8, then both sides close."""
         relay, client, proxy, selector = self._create_relay()
@@ -296,6 +288,18 @@ class TestTCPRelay(unittest.TestCase):
         client.recv.side_effect = [b"request data", b""]
         proxy.recv.side_effect = [b"response", b""]
         return relay
+
+    def test_reads_up_to_buffer_size_and_writes_with_sendall(self):
+        relay = self._relay_one_exchange()
+        client, proxy = relay.client_connection, relay.proxy_connection
+
+        relay.listen_and_relay()
+
+        assert client.recv.call_args_list == [call(RELAY_BUFFER_SIZE)] * 2
+        proxy.sendall.assert_called_once_with(b"request data")
+        client.sendall.assert_called_once_with(b"response")
+        proxy.send.assert_not_called()
+        client.send.assert_not_called()
 
     def test_counts_bytes_each_direction(self):
         relay = self._relay_one_exchange()
@@ -313,16 +317,6 @@ class TestTCPRelay(unittest.TestCase):
         assert [(r.levelname, r.getMessage()) for r in logs.records] == [
             ("INFO", "CLOSED | 127.0.0.1:1234 -> example.com:80 (93.184.216.34) | up=12 B down=8 B | 2.50 s")
         ]
-
-    def test_send_and_recv_errors_reraise_without_logging(self):
-        relay, client, proxy, _ = self._create_relay()
-        client.recv.side_effect = ConnectionResetError("reset")
-        proxy.sendall.side_effect = BrokenPipeError("broken pipe")
-        with self.assertNoLogs("simple_socks5.relays.tcp_relay"):
-            with pytest.raises(ConnectionResetError):
-                relay._recv_data(client)
-            with pytest.raises(BrokenPipeError):
-                relay._send_data(proxy, b"data")
 
     def test_relay_forwards_data_between_sockets(self):
         relay, client, proxy, selector = self._create_relay()
