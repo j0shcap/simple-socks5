@@ -126,9 +126,12 @@ class TestTimeoutEnv(unittest.TestCase):
 
     def test_invalid_timeout_raises_naming_var(self):
         for (name, getter), raw in [(g, r) for g in TIMEOUT_GETTERS for r in ("abc", "0", "-1", "nan", "inf")]:
-            with self.subTest(name=name, raw=raw), patch.dict(os.environ, {name: raw}):
-                with pytest.raises(ValueError, match=name):
-                    getter()
+            with (
+                self.subTest(name=name, raw=raw),
+                patch.dict(os.environ, {name: raw}),
+                pytest.raises(ValueError, match=name),
+            ):
+                getter()
 
     def test_timeout_read_at_call_time(self):
         for name, getter in TIMEOUT_GETTERS:
@@ -164,9 +167,12 @@ class TestMaxConnectionsEnv(unittest.TestCase):
 
     def test_max_connections_rejects_invalid(self):
         for raw in ("0", "-3", "abc", "1.5"):
-            with self.subTest(raw=raw), patch.dict(os.environ, {"SOCKS5_MAX_CONNECTIONS": raw}):
-                with pytest.raises(ValueError, match=f"SOCKS5_MAX_CONNECTIONS must be a positive integer, got '{raw}'"):
-                    max_connections()
+            with (
+                self.subTest(raw=raw),
+                patch.dict(os.environ, {"SOCKS5_MAX_CONNECTIONS": raw}),
+                pytest.raises(ValueError, match=f"SOCKS5_MAX_CONNECTIONS must be a positive integer, got '{raw}'"),
+            ):
+                max_connections()
 
 
 class TestCredentialsEnv(unittest.TestCase):
@@ -248,9 +254,12 @@ class TestHealthcheckPortEnv(unittest.TestCase):
 
     def test_healthcheck_port_rejects_invalid(self):
         for raw in ("0", "-1", "65536", "abc", "1.5"):
-            with self.subTest(raw=raw), patch.dict(os.environ, {"SOCKS5_HEALTHCHECK_PORT": raw}):
-                with pytest.raises(ValueError, match="SOCKS5_HEALTHCHECK_PORT"):
-                    healthcheck_port()
+            with (
+                self.subTest(raw=raw),
+                patch.dict(os.environ, {"SOCKS5_HEALTHCHECK_PORT": raw}),
+                pytest.raises(ValueError, match="SOCKS5_HEALTHCHECK_PORT"),
+            ):
+                healthcheck_port()
 
 
 if __name__ == "__main__":

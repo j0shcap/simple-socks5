@@ -184,7 +184,7 @@ class TestAddressToBytesUtils(unittest.TestCase):
     def test_translate_address_to_bytes__domain_name(self):
         address_type = AddressTypeCodes.DOMAIN_NAME
         ip = "google.com"
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="not suitable for byte translation"):
             map_address_to_bytes(address_type, ip)
 
 
@@ -238,7 +238,7 @@ class TestMapAddressTypeUtils(unittest.TestCase):
 
     def test_map_address_type_to_socket_family__domain_name(self):
         address_type = AddressTypeCodes.DOMAIN_NAME
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="Unknown address type"):
             map_address_enum_to_socket_family(address_type)
 
 
@@ -296,7 +296,7 @@ class TestGenerateSocketUtils(unittest.TestCase):
             port=80,
             address_type=AddressTypeCodes.DOMAIN_NAME,
         )
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="Unknown address type"):
             generate_tcp_socket(address.address_type)
 
 

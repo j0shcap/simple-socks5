@@ -47,6 +47,7 @@ def run_module(port: int) -> subprocess.CompletedProcess:
         capture_output=True,
         text=True,
         timeout=15,
+        check=False,
     )
 
 

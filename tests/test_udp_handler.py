@@ -59,7 +59,7 @@ class TestParseUDPDatagram(unittest.TestCase):
         assert "malformed UDP datagram (too short: 2 bytes)" in str(ctx.value)
 
     def test_fuzz_only_raises_malformed_datagram_error(self):
-        rng = random.Random(0x5EC5)
+        rng = random.Random(0x5EC5)  # noqa: S311 - seeded for reproducible fuzz input, not security
         parsed = rejected = 0
         for i in range(20_000):
             if i % 3 == 0:
@@ -72,7 +72,7 @@ class TestParseUDPDatagram(unittest.TestCase):
                 result = UDPHandler.parse_udp_datagram(data)
             except MalformedDatagramError:
                 rejected += 1
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 - reports any other exception together with its input
                 self.fail(f"{type(e).__name__} for input {data!r}: {e}")
             else:
                 assert isinstance(result, UDPDatagram)

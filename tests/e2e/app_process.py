@@ -46,7 +46,7 @@ def run_app(
         pytest.skip("POSIX signals only")
     address = ("127.0.0.1", free_port())
     clean_env = {k: v for k, v in os.environ.items() if not k.startswith("SOCKS5_") and k != "LOGGING_LEVEL"}
-    proc = subprocess.Popen(
+    proc = subprocess.Popen(  # noqa: S603 - fixed argv built by the test
         [sys.executable, str(APP), "-H", address[0], "-P", str(address[1]), "-L", logging_level],
         cwd=cwd,
         env={**clean_env, "SOCKS5_ALLOW_LOOPBACK": "true", **(env or {})},

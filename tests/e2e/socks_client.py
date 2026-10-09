@@ -130,7 +130,9 @@ def build_userpass(username: Address, password: Address, *, ver: int = AUTH_VERS
     return bytes([ver, len(username)]) + username + bytes([len(password)]) + password
 
 
-def build_request(cmd: int, atyp: int, addr: Address, port: int, *, ver: int = SOCKS_VERSION, rsv: int = 0) -> bytes:
+def build_request(  # noqa: PLR0913 - one parameter per RFC 1928 request field
+    cmd: int, atyp: int, addr: Address, port: int, *, ver: int = SOCKS_VERSION, rsv: int = 0
+) -> bytes:
     return bytes([ver, cmd, rsv, atyp]) + encode_address(atyp, addr) + struct.pack("!H", port)
 
 
@@ -212,13 +214,18 @@ def read_reply(sock: socket.socket) -> Reply:
     return Reply(ver, rep, rsv, atyp, _decode_address(atyp, raw), port)
 
 
+def _is_address(family: int, addr: str) -> bool:
+    try:
+        socket.inet_pton(family, addr)
+    except OSError:
+        return False
+    return True
+
+
 def infer_atyp(addr: str) -> int:
     for family, atyp in ((socket.AF_INET, ATYP_IPV4), (socket.AF_INET6, ATYP_IPV6)):
-        try:
-            socket.inet_pton(family, addr)
+        if _is_address(family, addr):
             return atyp
-        except OSError:
-            pass
     return ATYP_DOMAIN
 
 
@@ -232,17 +239,28 @@ def open_tunnel(
 ) -> socket.socket:
     sock = socket.create_connection(proxy_addr, timeout=TIMEOUT)
     try:
-        wanted = METHOD_USERPASS if credentials else METHOD_NO_AUTH
-        method = greet(sock, [wanted])
-        if method != wanted:
-            raise Socks5Error(f"proxy selected method {method:#04x}, wanted {wanted:#04x}")
-        if credentials and authenticate(sock, *credentials) != AUTH_SUCCESS:
-            raise Socks5Error("authentication failed")
-        send_request(sock, CMD_CONNECT, atyp or infer_atyp(dst_addr), dst_addr, dst_port)
-        reply = read_reply(sock)
-        if reply.rep != REP_SUCCEEDED:
-            raise Socks5Error(f"CONNECT failed with REP {reply.rep:#04x}", reply)
-        return sock
+        _connect(sock, dst_addr, dst_port, atyp=atyp, credentials=credentials)
     except BaseException:
         sock.close()
         raise
+    return sock
+
+
+def _connect(
+    sock: socket.socket,
+    dst_addr: str,
+    dst_port: int,
+    *,
+    atyp: int | None,
+    credentials: tuple[Address, Address] | None,
+) -> None:
+    wanted = METHOD_USERPASS if credentials else METHOD_NO_AUTH
+    method = greet(sock, [wanted])
+    if method != wanted:
+        raise Socks5Error(f"proxy selected method {method:#04x}, wanted {wanted:#04x}")
+    if credentials and authenticate(sock, *credentials) != AUTH_SUCCESS:
+        raise Socks5Error("authentication failed")
+    send_request(sock, CMD_CONNECT, atyp or infer_atyp(dst_addr), dst_addr, dst_port)
+    reply = read_reply(sock)
+    if reply.rep != REP_SUCCEEDED:
+        raise Socks5Error(f"CONNECT failed with REP {reply.rep:#04x}", reply)

@@ -56,7 +56,7 @@ def serve_in_thread(server: socketserver.BaseServer, poll_interval: float = 0.01
 
 
 def deterministic_payload(n: int) -> bytes:
-    return random.Random(n).randbytes(n)
+    return random.Random(n).randbytes(n)  # noqa: S311 - seeded for reproducible test data, not security
 
 
 @dataclass(frozen=True)
@@ -158,7 +158,7 @@ class PayloadHTTPHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def log_message(self, format, *args):
+    def log_message(self, _format, *_args):
         pass
 
 

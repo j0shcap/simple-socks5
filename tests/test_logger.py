@@ -138,7 +138,8 @@ def test_unwritable_log_file_logs_error_and_continues(configure, monkeypatch, tm
     get_logger("simple_socks5.x").info("still running")
 
     output = stream.getvalue()
-    assert "SOCKS5_LOG_FILE" in output and str(missing) in output
+    assert "SOCKS5_LOG_FILE" in output
+    assert str(missing) in output
     assert "[ERROR]" in output
     assert "still running" in output
     assert len(package_logger().handlers) == 1

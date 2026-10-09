@@ -2,6 +2,7 @@
 Ensures the release tag guard only lets refs through that can never retarget the immutable 2.0.x image tags.
 """
 
+import shutil
 import subprocess
 import unittest
 from pathlib import Path
@@ -10,7 +11,9 @@ GUARD = Path(__file__).resolve().parents[1] / ".github" / "scripts" / "release-g
 
 
 def run_guard(ref_name: str) -> subprocess.CompletedProcess:
-    return subprocess.run(["bash", str(GUARD), ref_name], capture_output=True, text=True)
+    return subprocess.run(  # noqa: S603 - fixed argv built by the test
+        [shutil.which("bash"), str(GUARD), ref_name], capture_output=True, text=True, check=False
+    )
 
 
 class TestReleaseGuard(unittest.TestCase):

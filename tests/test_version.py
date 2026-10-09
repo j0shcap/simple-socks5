@@ -42,13 +42,15 @@ class TestVersion(unittest.TestCase):
             importlib.reload(argument_parser)
 
     def test_cli_prints_version(self):
-        result = subprocess.run([sys.executable, "app.py", "--version"], cwd=ROOT, capture_output=True, text=True)
+        result = subprocess.run(
+            [sys.executable, "app.py", "--version"], cwd=ROOT, capture_output=True, text=True, check=False
+        )
         assert result.returncode == 0, result.stderr
         assert result.stdout == f"app.py {__version__}\n"
 
     def test_module_prints_version(self):
         result = subprocess.run(
-            [sys.executable, "-m", "simple_socks5", "--version"], cwd=ROOT, capture_output=True, text=True
+            [sys.executable, "-m", "simple_socks5", "--version"], cwd=ROOT, capture_output=True, text=True, check=False
         )
         assert result.returncode == 0, result.stderr
         # argparse's prog for -m differs across Python versions, so only the version is checked.

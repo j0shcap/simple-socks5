@@ -154,7 +154,7 @@ class TestCollectStartupAdvisories(unittest.TestCase):
             return collect_startup_advisories(host)
 
     def test_no_env_on_all_interfaces_warns_banner_and_default_credentials(self):
-        assert self.collect("0.0.0.0", {}) == banner_for("0.0.0.0") + [(logging.WARNING, DEFAULT_CREDENTIALS_MESSAGE)]
+        assert self.collect("0.0.0.0", {}) == [*banner_for("0.0.0.0"), (logging.WARNING, DEFAULT_CREDENTIALS_MESSAGE)]
 
     def test_loopback_logs_no_banner(self):
         assert self.collect("127.0.0.1", {}) == [(logging.WARNING, DEFAULT_CREDENTIALS_MESSAGE)]
@@ -176,15 +176,21 @@ class TestValidateEnvironment(unittest.TestCase):
 
     def test_validate_environment_rejects_invalid_timeout(self):
         for name in ("SOCKS5_HANDSHAKE_TIMEOUT", "SOCKS5_CONNECT_TIMEOUT"):
-            with self.subTest(name=name), patch.dict(os.environ, {name: "abc"}):
-                with pytest.raises(ValueError, match=name):
-                    validate_environment()
+            with (
+                self.subTest(name=name),
+                patch.dict(os.environ, {name: "abc"}),
+                pytest.raises(ValueError, match=name),
+            ):
+                validate_environment()
 
     def test_rejects_invalid_max_connections(self):
         for raw in ("0", "abc"):
-            with self.subTest(raw=raw), patch.dict(os.environ, {"SOCKS5_MAX_CONNECTIONS": raw}):
-                with pytest.raises(ValueError, match="SOCKS5_MAX_CONNECTIONS must be a positive integer"):
-                    validate_environment()
+            with (
+                self.subTest(raw=raw),
+                patch.dict(os.environ, {"SOCKS5_MAX_CONNECTIONS": raw}),
+                pytest.raises(ValueError, match="SOCKS5_MAX_CONNECTIONS must be a positive integer"),
+            ):
+                validate_environment()
 
 
 if __name__ == "__main__":

@@ -215,15 +215,9 @@ class TestOneReply(unittest.TestCase):
         handler.connection.sendall.assert_called_once_with(self.SUCCESS_REPLY)
         relay_cls.return_value.listen_and_relay.assert_not_called()
 
-    def test_send_error_reply_twice_sends_once(self, _mock_tcp_handler_cls):
-        handler = make_proxy_handler()
-        handler._send_error_reply(b"\x05\x01\x00\x01\x00\x00\x00\x00\x00\x00")
-        handler._send_error_reply(b"\x05\x07\x00\x01\x00\x00\x00\x00\x00\x00")
-        handler.connection.sendall.assert_called_once_with(b"\x05\x01\x00\x01\x00\x00\x00\x00\x00\x00")
-
 
 class TestSendErrorReply(unittest.TestCase):
-    """Verify _send_error_reply swallows all OSError subclasses."""
+    """_send_error_reply sends at most one reply and swallows every OSError, logging it at the right level."""
 
     def _make_handler(self):
         handler = object.__new__(TCPProxyServer)
@@ -244,6 +238,25 @@ class TestSendErrorReply(unittest.TestCase):
         handler = self._make_handler()
         handler.connection.sendall.side_effect = OSError("transport endpoint closed")
         handler._send_error_reply(b"\x05\x01\x00\x01\x00\x00\x00\x00\x00\x00")
+
+    def test_send_error_reply_twice_sends_once(self):
+        handler = make_proxy_handler()
+        handler._send_error_reply(b"\x05\x01\x00\x01\x00\x00\x00\x00\x00\x00")
+        handler._send_error_reply(b"\x05\x07\x00\x01\x00\x00\x00\x00\x00\x00")
+        handler.connection.sendall.assert_called_once_with(b"\x05\x01\x00\x01\x00\x00\x00\x00\x00\x00")
+
+    def test_error_reply_to_departed_client_logs_debug(self):
+        handler = make_proxy_handler()
+        handler.connection.sendall.side_effect = BrokenPipeError("broken pipe")
+        with self.assertLogs("simple_socks5.server", level="DEBUG") as logs:
+            handler._send_error_reply(b"\x05\x01\x00\x01\x00\x00\x00\x00\x00\x00")
+        assert not [r for r in logs.records if r.exc_info or r.levelno > logging.DEBUG]
+
+    def test_error_reply_unexpected_oserror_logs_error(self):
+        handler = make_proxy_handler()
+        handler.connection.sendall.side_effect = OSError(errno.EBADF, "bad file descriptor")
+        with self.assertLogs("simple_socks5.server", level="ERROR"):
+            handler._send_error_reply(b"\x05\x01\x00\x01\x00\x00\x00\x00\x00\x00")
 
 
 @patch("simple_socks5.server.TCPHandler")
@@ -317,19 +330,6 @@ class TestDisconnectLogging(unittest.TestCase):
         # Only the CONNECTION line, which is logged before the reply
         assert not [r for r in logs.records if r.exc_info or r.levelno > logging.INFO]
 
-    def test_error_reply_to_departed_client_logs_debug(self, _mock_tcp_handler_cls):
-        handler = make_proxy_handler()
-        handler.connection.sendall.side_effect = BrokenPipeError("broken pipe")
-        with self.assertLogs("simple_socks5.server", level="DEBUG") as logs:
-            handler._send_error_reply(b"\x05\x01\x00\x01\x00\x00\x00\x00\x00\x00")
-        self.assert_debug_only(logs)
-
-    def test_error_reply_unexpected_oserror_logs_error(self, _mock_tcp_handler_cls):
-        handler = make_proxy_handler()
-        handler.connection.sendall.side_effect = OSError(errno.EBADF, "bad file descriptor")
-        with self.assertLogs("simple_socks5.server", level="ERROR"):
-            handler._send_error_reply(b"\x05\x01\x00\x01\x00\x00\x00\x00\x00\x00")
-
 
 class TestHandleError(unittest.TestCase):
     """Exceptions escaping a handler go through logging (and so respect -L), never straight to stderr."""
@@ -343,7 +343,7 @@ class TestHandleError(unittest.TestCase):
         with self.assertLogs("simple_socks5.server", level="DEBUG") as logs, redirect_stderr(stderr):
             try:
                 raise error
-            except Exception:
+            except type(error):
                 self.server.handle_error(MagicMock(), ("203.0.113.5", 40000))
         assert stderr.getvalue() == ""
         return logs.records
@@ -401,9 +401,12 @@ class TestConnectionLimit(unittest.TestCase):
         assert second._connection_semaphore.acquire(blocking=False)
 
     def test_invalid_limit_raises_before_binding(self):
-        with _without_socks5_env(SOCKS5_MAX_CONNECTIONS="0"), patch("socketserver.socket.socket") as socket_class:
-            with pytest.raises(ValueError, match="SOCKS5_MAX_CONNECTIONS"):
-                ThreadingTCPServer(("127.0.0.1", 0), TCPProxyServer)
+        with (
+            _without_socks5_env(SOCKS5_MAX_CONNECTIONS="0"),
+            patch("socketserver.socket.socket") as socket_class,
+            pytest.raises(ValueError, match="SOCKS5_MAX_CONNECTIONS"),
+        ):
+            ThreadingTCPServer(("127.0.0.1", 0), TCPProxyServer)
         socket_class.assert_not_called()
 
     def test_rejection_warning_rate_limited(self):
@@ -501,7 +504,7 @@ class TestConnectionTracking(unittest.TestCase):
         def start_handler(server, request, client_address):
             server.process_request_thread(request, client_address)
 
-        def handle(server, request, client_address):
+        def handle(_server, _request, _client_address):
             during()
 
         with (
@@ -518,9 +521,11 @@ class TestConnectionTracking(unittest.TestCase):
         assert not self.server.wait_for_connections(0)
 
     def test_request_untracked_when_handler_thread_fails_to_start(self):
-        with patch("socketserver.ThreadingMixIn.process_request", side_effect=RuntimeError("can't start thread")):
-            with pytest.raises(RuntimeError):
-                self.server.process_request(MagicMock(spec=socket.socket), ("127.0.0.1", 9999))
+        with (
+            patch("socketserver.ThreadingMixIn.process_request", side_effect=RuntimeError("can't start thread")),
+            pytest.raises(RuntimeError),
+        ):
+            self.server.process_request(MagicMock(spec=socket.socket), ("127.0.0.1", 9999))
         assert self.server.wait_for_connections(0)
         self.server._connection_semaphore.release.assert_called_once()
 
@@ -539,9 +544,11 @@ class TestConnectionTracking(unittest.TestCase):
         request = MagicMock(spec=socket.socket)
         with patch("socketserver.ThreadingMixIn.process_request"):
             self.server.process_request(request, ("127.0.0.1", 9999))
-        with patch("socketserver.ThreadingMixIn.process_request_thread", side_effect=RuntimeError("handler failed")):
-            with pytest.raises(RuntimeError):
-                self.server.process_request_thread(request, ("127.0.0.1", 9999))
+        with (
+            patch("socketserver.ThreadingMixIn.process_request_thread", side_effect=RuntimeError("handler failed")),
+            pytest.raises(RuntimeError),
+        ):
+            self.server.process_request_thread(request, ("127.0.0.1", 9999))
         assert self.server.wait_for_connections(0)
         self.server._connection_semaphore.release.assert_called_once()
 

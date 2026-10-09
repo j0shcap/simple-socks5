@@ -95,7 +95,7 @@ class TestMainStartupAdvisories(unittest.TestCase):
             with self.subTest(signal=signum.name):
                 shutdown_called = threading.Event()
                 server.shutdown.side_effect = shutdown_called.set
-                self.serve_forever.side_effect = lambda: signal.getsignal(signum)(signum, None)
+                self.serve_forever.side_effect = lambda s=signum: signal.getsignal(s)(s, None)
 
                 output = self.run_main()
 

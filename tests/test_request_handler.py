@@ -267,7 +267,7 @@ class TestTCPRequestHandlerIPv4(unittest.TestCase):
         """Forward DNS should return the name with IPv4 default if the lookup takes too long."""
         done = threading.Event()
 
-        def slow_lookup(*args, **kwargs):
+        def slow_lookup(*_args, **_kwargs):
             done.wait(timeout=5)
             return [(socket.AF_INET, socket.SOCK_STREAM, 0, "", ("93.184.216.34", 0))]
 
@@ -328,7 +328,7 @@ class TestRecvExactDeadline(unittest.TestCase):
         self.connection = MagicMock()
 
     def test_recv_exact_sets_remaining_timeout(self):
-        def recv(n):
+        def recv(_n):
             self.clock.now += 0.25
             return b"x"
 
@@ -340,7 +340,7 @@ class TestRecvExactDeadline(unittest.TestCase):
         assert timeouts == [1.0, 0.75, 0.5]
 
     def test_recv_exact_drip_feed_hits_deadline(self):
-        def recv(n):
+        def recv(_n):
             self.clock.now += 0.6
             return b"x"
 
@@ -381,14 +381,14 @@ class TestParseAddress(unittest.TestCase):
         self.events = []
         self.connection = MagicMock()
         self.handler = BaseHandler(self.connection)
-        self.handler._resolve_hostname = lambda name: (
+        self.handler._resolve_hostname = lambda _name: (
             self.events.append("lookup") or ("1.2.3.4", AddressTypeCodes.IPv4.value)
         )
 
     def feed(self, *chunks: bytes) -> None:
         remaining = list(chunks)
 
-        def recv(n):
+        def recv(_n):
             self.events.append("recv")
             return remaining.pop(0)
 
@@ -464,10 +464,11 @@ class TestHandshakeTimeout(unittest.TestCase):
 
     def test_request_timeout_propagates_without_traceback(self):
         self.connection.recv.side_effect = [struct.pack("!BBBB", 5, 1, 0, 1), HandshakeTimeoutError("expired")]
-        with self.assertLogs("simple_socks5.handlers", level="DEBUG") as logs, pytest.raises(HandshakeTimeoutError):
+        with self.assertLogs("simple_socks5.handlers", level="DEBUG") as logs:
             # assertLogs needs at least one record; the handler itself must add none above DEBUG
             logging.getLogger("simple_socks5.handlers").debug("start")
-            self.handler.parse_request()
+            with pytest.raises(HandshakeTimeoutError):
+                self.handler.parse_request()
         assert not [r for r in logs.records if r.exc_info or r.levelno >= 30]
 
 
@@ -514,7 +515,7 @@ class TestHandshakeDisconnects(unittest.TestCase):
     def test_request_disconnect_raises_without_logging(self):
         for recv in ([b""], [struct.pack("!BBBB", 5, 1, 0, 1), b"\x7f"], [ConnectionResetError("reset")]):
             with self.subTest(recv=recv):
-                self.connection.recv.side_effect = recv + [b""]
+                self.connection.recv.side_effect = [*recv, b""]
                 with self.assertNoLogs("simple_socks5.handlers"), pytest.raises(ConnectionError):
                     self.handler.parse_request()
 
@@ -624,22 +625,22 @@ class TestAuthEnforcement(unittest.TestCase):
     def tearDown(self):
         self.connection.close()
 
-    @patch("simple_socks5.handlers.tcp.auth_required", return_value=True)
-    def test_auth_required_rejects_no_auth_only_client(self, _mock):
+    @patch("simple_socks5.handlers.tcp.auth_required", lambda: True)
+    def test_auth_required_rejects_no_auth_only_client(self):
         """When auth_required() is True, a client offering only NO_AUTH should be rejected."""
         methods = b"\x00"
         result = self.handler._negotiate_authentication_method(methods)
         assert result == MethodCodes.NO_ACCEPTABLE_METHODS
 
-    @patch("simple_socks5.handlers.tcp.auth_required", return_value=True)
-    def test_auth_required_accepts_username_password(self, _mock):
+    @patch("simple_socks5.handlers.tcp.auth_required", lambda: True)
+    def test_auth_required_accepts_username_password(self):
         """When auth_required() is True, USERNAME_PASSWORD should still be accepted."""
         methods = b"\x00\x02"
         result = self.handler._negotiate_authentication_method(methods)
         assert result == MethodCodes.USERNAME_PASSWORD
 
-    @patch("simple_socks5.handlers.tcp.auth_required", return_value=False)
-    def test_default_allows_no_auth(self, _mock):
+    @patch("simple_socks5.handlers.tcp.auth_required", lambda: False)
+    def test_default_allows_no_auth(self):
         """Default behavior (auth_required()=False) should allow NO_AUTH."""
         methods = b"\x00"
         result = self.handler._negotiate_authentication_method(methods)

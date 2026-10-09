@@ -91,7 +91,7 @@ def _reset_on_close(sock: socket.socket) -> None:
 
 
 MID_HANDSHAKE_CASES = {
-    "after connect": (False, lambda sock: None),
+    "after connect": (False, lambda _sock: None),
     "partial greeting": (False, lambda sock: sock.sendall(b"\x05")),
     "after method reply": (False, lambda sock: sc.greet(sock, [sc.METHOD_NO_AUTH])),
     "after method reply, RST": (False, lambda sock: (sc.greet(sock, [sc.METHOD_NO_AUTH]), _reset_on_close(sock))),
