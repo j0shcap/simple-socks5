@@ -2,6 +2,7 @@
 Connection limit (SOCKS5_MAX_CONNECTIONS): connections over the limit are closed, the warning is rate-limited,
 and a freed slot is reusable.
 """
+
 import logging
 import time
 from contextlib import ExitStack

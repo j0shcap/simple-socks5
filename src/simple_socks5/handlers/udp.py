@@ -1,11 +1,12 @@
 import socket
 import struct
 
-from .base import BaseHandler
-from ..logger import get_logger
+from ..constants import AddressTypeCodes
 from ..exceptions import MalformedDatagramError
+from ..logger import get_logger
 from ..models import UDPDatagram
 from ..utils import map_address_int_to_enum
+from .base import BaseHandler
 
 logger = get_logger(__name__)
 
@@ -57,12 +58,12 @@ class UDPHandler(BaseHandler):
         if rsv != 0:
             raise MalformedDatagramError(f"RSV must be 0, got {rsv:#06x}")
 
-        if atyp == 1:  # IPv4
+        if atyp == AddressTypeCodes.IPv4.value:
             _require(data, 10, "truncated IPv4 address or port")
             dst_addr = socket.inet_ntoa(data[4:8])
             dst_port = struct.unpack("!H", data[8:10])[0]
             user_data = data[10:]
-        elif atyp == 3:  # Domain name
+        elif atyp == AddressTypeCodes.DOMAIN_NAME.value:
             _require(data, 5, "missing domain name length")
             domain_end = 5 + data[4]
             _require(data, domain_end + 2, "truncated domain name or port")
@@ -70,9 +71,9 @@ class UDPHandler(BaseHandler):
                 dst_addr = data[5:domain_end].decode()
             except UnicodeDecodeError:
                 raise MalformedDatagramError("domain name is not valid UTF-8") from None
-            dst_port = struct.unpack("!H", data[domain_end:domain_end + 2])[0]
-            user_data = data[domain_end + 2:]
-        elif atyp == 4:  # IPv6
+            dst_port = struct.unpack("!H", data[domain_end : domain_end + 2])[0]
+            user_data = data[domain_end + 2 :]
+        elif atyp == AddressTypeCodes.IPv6.value:
             _require(data, 22, "truncated IPv6 address or port")
             dst_addr = socket.inet_ntop(socket.AF_INET6, data[4:20])
             dst_port = struct.unpack("!H", data[20:22])[0]
@@ -101,11 +102,11 @@ class UDPHandler(BaseHandler):
         """
         try:
             addr_bytes = socket.inet_aton(addr)
-            atyp = 0x01
+            atyp = AddressTypeCodes.IPv4.value
         except OSError:
             try:
                 addr_bytes = socket.inet_pton(socket.AF_INET6, addr)
-                atyp = 0x04
+                atyp = AddressTypeCodes.IPv6.value
             except OSError:
-                raise ValueError(f"Invalid IP address: {addr}")
+                raise ValueError(f"Invalid IP address: {addr}") from None
         return struct.pack("!HBB", 0, 0, atyp) + addr_bytes + struct.pack("!H", port)

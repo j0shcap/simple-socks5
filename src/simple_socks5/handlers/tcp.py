@@ -1,13 +1,13 @@
 import hmac
-import struct
 import socket
+import struct
 
-from .base import BaseHandler
 from ..constants import SOCKS_VERSION, MethodCodes, auth_required, credentials
 from ..errors import is_routine_disconnect
 from ..exceptions import InvalidVersionError
 from ..logger import get_logger
 from ..utils import generate_connection_method_response
+from .base import BaseHandler
 
 logger = get_logger(__name__)
 
@@ -57,34 +57,29 @@ class TCPHandler(BaseHandler):
             methods = self._recv_exact(nmethods)
 
             # Handles negotiation for authentication method
-            negotiated_authentication: MethodCodes = (
-                self._negotiate_authentication_method(methods)
-            )
+            negotiated_authentication: MethodCodes = self._negotiate_authentication_method(methods)
 
             # Handles server response
-            self.connection.sendall(
-                generate_connection_method_response(negotiated_authentication)
-            )
-
-            # Handles authentication
-            if negotiated_authentication == MethodCodes.NO_AUTHENTICATION_REQUIRED:
-                return True
-            elif negotiated_authentication == MethodCodes.USERNAME_PASSWORD:
-                return self._handle_username_password_auth()
-            elif negotiated_authentication == MethodCodes.GSSAPI:
-                # Not implemented yet
-                return self._handle_gssapi_auth()
-            else:
-                # The client is told with X'FF'. DEBUG, because a healthcheck probe offering only X'00' lands here.
-                logger.debug("No acceptable authentication methods")
-                return False
+            self.connection.sendall(generate_connection_method_response(negotiated_authentication))
 
         except TimeoutError:
             logger.warning("Handshake timed out")
             return False
-        except socket.error as e:
+        except OSError as e:
             _log_socket_error("handshake", e)
             return False
+
+        # Handles authentication; each method catches its own socket errors
+        if negotiated_authentication == MethodCodes.NO_AUTHENTICATION_REQUIRED:
+            return True
+        if negotiated_authentication == MethodCodes.USERNAME_PASSWORD:
+            return self._handle_username_password_auth()
+        if negotiated_authentication == MethodCodes.GSSAPI:
+            # Not implemented yet
+            return self._handle_gssapi_auth()
+        # The client is told with X'FF'. DEBUG, because a healthcheck probe offering only X'00' lands here.
+        logger.debug("No acceptable authentication methods")
+        return False
 
     def _negotiate_authentication_method(self, methods: bytes) -> MethodCodes:
         """
@@ -97,7 +92,7 @@ class TCPHandler(BaseHandler):
         Returns:
             MethodCodes: The negotiated authentication method.
         """
-        client_methods = {method for method in methods}
+        client_methods = set(methods)
 
         supported_methods = {MethodCodes.USERNAME_PASSWORD.value}
         if not auth_required():
@@ -108,11 +103,10 @@ class TCPHandler(BaseHandler):
         if MethodCodes.USERNAME_PASSWORD.value in mutual_method:
             return MethodCodes.USERNAME_PASSWORD
         # TODO: Implement GSS-API authentication
-        elif MethodCodes.NO_AUTHENTICATION_REQUIRED.value in mutual_method:
+        if MethodCodes.NO_AUTHENTICATION_REQUIRED.value in mutual_method:
             return MethodCodes.NO_AUTHENTICATION_REQUIRED
-        else:
-            # No acceptable methods
-            return MethodCodes.NO_ACCEPTABLE_METHODS
+        # No acceptable methods
+        return MethodCodes.NO_ACCEPTABLE_METHODS
 
     def _handle_username_password_auth(self) -> bool:
         """
@@ -146,7 +140,7 @@ class TCPHandler(BaseHandler):
             # Receive and verify the version
             version = self._recv_exact(1)
             if version != b"\x01":
-                logger.error(f"Incorrect subnegotiation version: {version}")
+                logger.error("Incorrect subnegotiation version: %s", version)
                 self.connection.sendall(b"\x01\x01")
                 return False
 
@@ -155,20 +149,20 @@ class TCPHandler(BaseHandler):
             password = self._recv_exact(self._recv_exact(1)[0])
 
             expected = credentials()
-            if self._credentials_match(username, password, expected):
-                logger.info(f"Authenticated user: {expected[0].decode('utf-8', 'backslashreplace')}")
+            authenticated = self._credentials_match(username, password, expected)
+            if authenticated:
+                logger.info("Authenticated user: %s", expected[0].decode("utf-8", "backslashreplace"))
                 self.connection.sendall(b"\x01\x00")  # version 1, status 0 (success)
-                return True
             else:
-                logger.warning(f"Authentication failed for client {self._peer_ip()}")
+                logger.warning("Authentication failed for client %s", self._peer_ip())
                 self.connection.sendall(b"\x01\x01")  # version 1, status 1 (failure)
-                return False
         except TimeoutError:
             logger.warning("Handshake timed out during authentication")
             return False
-        except socket.error as e:
+        except OSError as e:
             _log_socket_error("username/password authentication", e)
             return False
+        return authenticated
 
     @staticmethod
     def _credentials_match(username: bytes, password: bytes, expected: tuple[bytes, bytes]) -> bool:
@@ -197,6 +191,6 @@ class TCPHandler(BaseHandler):
 
 def _log_socket_error(stage: str, e: OSError) -> None:
     if is_routine_disconnect(e):
-        logger.debug(f"Client disconnected during {stage}: {e}")
+        logger.debug("Client disconnected during %s: %s", stage, e)
     else:
-        logger.exception(f"Socket error during {stage}: {e}")
+        logger.error("Socket error during %s: %s", stage, e, exc_info=e)

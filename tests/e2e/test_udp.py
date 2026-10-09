@@ -40,13 +40,13 @@ def _assert_nothing_received(sock):
 
 
 def test_udp_associate_echo(proxy, udp_echo_origin):
-    with _udp_association(proxy) as (control, udp, relay_address):
+    with _udp_association(proxy) as (_control, udp, relay_address):
         _assert_echo(udp, relay_address, udp_echo_origin.port)
 
 
 def test_udp_relay_lines_logged_at_debug_only(proxy, udp_echo_origin, caplog):
     caplog.set_level(logging.DEBUG, logger="simple_socks5")
-    with _udp_association(proxy) as (control, udp, relay_address):
+    with _udp_association(proxy) as (_control, udp, relay_address):
         _assert_echo(udp, relay_address, udp_echo_origin.port)
 
     relay_records = [r for r in caplog.records if r.getMessage().startswith("RELAY | UDP")]
@@ -83,15 +83,21 @@ MALFORMED = {
 }
 
 
-@pytest.mark.parametrize("make_datagram", [
-    *[pytest.param(lambda port, data=data: data, id=name) for name, data in MALFORMED.items()],
-    # Addressed to the echo origin, so a relayed datagram would come back
-    pytest.param(lambda port: b"\x00\x01" + sc.build_udp_header(sc.ATYP_IPV4, "127.0.0.1", port)[2:] + b"bad",
-                 id="RSV not 0"),
-    pytest.param(lambda port: b"\x00\x00\x00\x09" + sc.build_udp_header(sc.ATYP_IPV4, "127.0.0.1", port)[4:] + b"bad",
-                 id="ATYP 9"),
-    pytest.param(lambda port: sc.build_udp_header(sc.ATYP_IPV4, "127.0.0.1", port, frag=1) + b"bad", id="FRAG 1"),
-])
+@pytest.mark.parametrize(
+    "make_datagram",
+    [
+        *[pytest.param(lambda _port, data=data: data, id=name) for name, data in MALFORMED.items()],
+        # Addressed to the echo origin, so a relayed datagram would come back
+        pytest.param(
+            lambda port: b"\x00\x01" + sc.build_udp_header(sc.ATYP_IPV4, "127.0.0.1", port)[2:] + b"bad", id="RSV not 0"
+        ),
+        pytest.param(
+            lambda port: b"\x00\x00\x00\x09" + sc.build_udp_header(sc.ATYP_IPV4, "127.0.0.1", port)[4:] + b"bad",
+            id="ATYP 9",
+        ),
+        pytest.param(lambda port: sc.build_udp_header(sc.ATYP_IPV4, "127.0.0.1", port, frag=1) + b"bad", id="FRAG 1"),
+    ],
+)
 def test_malformed_datagram_is_dropped_and_association_survives(proxy, udp_echo_origin, make_datagram):
     with _udp_association(proxy) as (control, udp, relay_address):
         udp.sendto(make_datagram(udp_echo_origin.port), relay_address)

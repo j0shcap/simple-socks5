@@ -1,10 +1,13 @@
 import os
+import re
 import select
 import socket
 import struct
 import threading
 import unittest
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 from simple_socks5.constants import AddressTypeCodes
 from simple_socks5.handlers.udp import UDPHandler
@@ -31,22 +34,24 @@ class TestBuildUDPResponseHeader(unittest.TestCase):
         header = UDPHandler.build_udp_response_header("10.0.0.1", 53)
         # RSV(2) + FRAG(1) + ATYP(1) + IPv4(4) + PORT(2) = 10 bytes
         expected = b"\x00\x00\x00\x01" + socket.inet_aton("10.0.0.1") + struct.pack("!H", 53)
-        self.assertEqual(header, expected)
+        assert header == expected
 
     def test_ipv6_response_header(self):
         addr = "2001:db8::1"
         header = UDPHandler.build_udp_response_header(addr, 443)
         # RSV(2) + FRAG(1) + ATYP(1) + IPv6(16) + PORT(2) = 22 bytes
-        expected = (
-            b"\x00\x00\x00\x04"
-            + socket.inet_pton(socket.AF_INET6, addr)
-            + struct.pack("!H", 443)
-        )
-        self.assertEqual(header, expected)
+        expected = b"\x00\x00\x00\x04" + socket.inet_pton(socket.AF_INET6, addr) + struct.pack("!H", 443)
+        assert header == expected
 
     def test_invalid_address_raises(self):
-        with self.assertRaises(ValueError):
+        with pytest.raises(ValueError, match="Invalid IP address"):
             UDPHandler.build_udp_response_header("not-an-ip", 80)
+
+    def test_invalid_address_error_hides_internal_oserror(self):
+        # The OSErrors are how the address family is probed, not the cause of the failure.
+        with pytest.raises(ValueError, match="Invalid IP address: not-an-ip") as caught:
+            UDPHandler.build_udp_response_header("not-an-ip", 80)
+        assert caught.value.__suppress_context__
 
 
 CLIENT_ADDR = ("127.0.0.1", 1234)
@@ -76,7 +81,7 @@ class TestHandleDatagram(unittest.TestCase):
     def test_valid_datagram_forwarded_and_encapsulated(self):
         forward_socket = mock_forward_socket()
         with patch("simple_socks5.relays.udp_relay.socket.socket", return_value=forward_socket):
-            self.assertTrue(self.relay._handle_datagram(build_udp_datagram("10.0.0.1", 53, b"hello"), CLIENT_ADDR))
+            assert self.relay._handle_datagram(build_udp_datagram("10.0.0.1", 53, b"hello"), CLIENT_ADDR)
 
         forward_socket.sendto.assert_called_once_with(b"hello", ("10.0.0.1", 53))
         # RSV(2) + FRAG(1) + ATYP(1)=IPv4 + ADDR(4) + PORT(2) + DATA
@@ -88,39 +93,42 @@ class TestHandleDatagram(unittest.TestCase):
             self.relay._handle_datagram(build_udp_datagram("10.0.0.1", 53, b"hello"), CLIENT_ADDR)
             self.relay._handle_datagram(build_udp_datagram("10.0.0.1", 53, b"hi"), CLIENT_ADDR)
 
-        self.assertEqual((self.relay.bytes_up, self.relay.bytes_down), (7, 16))
+        assert (self.relay.bytes_up, self.relay.bytes_down) == (7, 16)
 
     def test_dropped_datagram_not_counted(self):
         with patch("simple_socks5.relays.udp_relay.socket.socket"):
             self.relay._handle_datagram(b"\x00\x00", CLIENT_ADDR)
             self.relay._handle_datagram(build_udp_datagram("10.0.0.1", 53, b"x"), ("192.168.1.99", 5))
 
-        self.assertEqual((self.relay.bytes_up, self.relay.bytes_down), (0, 0))
+        assert (self.relay.bytes_up, self.relay.bytes_down) == (0, 0)
 
     def test_foreign_source_dropped_returns_false(self):
         """RFC 1928 Section 7: drop datagrams from IPs other than the client."""
         with patch("simple_socks5.relays.udp_relay.socket.socket") as socket_class:
-            self.assertFalse(self.relay._handle_datagram(build_udp_datagram("10.0.0.1", 53, b"x"), ("192.168.1.99", 5)))
+            assert not self.relay._handle_datagram(build_udp_datagram("10.0.0.1", 53, b"x"), ("192.168.1.99", 5))
         socket_class.assert_not_called()
 
     def test_fragmented_dropped(self):
         with patch("simple_socks5.relays.udp_relay.socket.socket") as socket_class:
-            self.assertTrue(self.relay._handle_datagram(build_udp_datagram("10.0.0.1", 53, b"x", frag=1), CLIENT_ADDR))
+            assert self.relay._handle_datagram(build_udp_datagram("10.0.0.1", 53, b"x", frag=1), CLIENT_ADDR)
         socket_class.assert_not_called()
 
     def test_malformed_dropped_with_debug_log(self):
         for data in (b"\x00\x05", b"\x00\x01" + build_udp_datagram("10.0.0.1", 53, b"x")[2:], b"\x00\x00\x00\x09"):
-            with self.subTest(data=data), patch("simple_socks5.relays.udp_relay.socket.socket") as socket_class, \
-                    self.assertLogs("simple_socks5.relays", level="DEBUG") as logs:
-                self.assertTrue(self.relay._handle_datagram(data, CLIENT_ADDR))
+            with (
+                self.subTest(data=data),
+                patch("simple_socks5.relays.udp_relay.socket.socket") as socket_class,
+                self.assertLogs("simple_socks5.relays", level="DEBUG") as logs,
+            ):
+                assert self.relay._handle_datagram(data, CLIENT_ADDR)
             socket_class.assert_not_called()
-            self.assertIn("malformed UDP datagram", logs.output[0])
+            assert "malformed UDP datagram" in logs.output[0]
 
     def test_forward_oserror_dropped(self):
         forward_socket = mock_forward_socket()
         forward_socket.sendto.side_effect = PermissionError(13, "Permission denied")
         with patch("simple_socks5.relays.udp_relay.socket.socket", return_value=forward_socket):
-            self.assertTrue(self.relay._handle_datagram(build_udp_datagram("255.255.255.255", 53, b"x"), CLIENT_ADDR))
+            assert self.relay._handle_datagram(build_udp_datagram("255.255.255.255", 53, b"x"), CLIENT_ADDR)
 
 
 class TestHandleDatagramDestinationPolicy(unittest.TestCase):
@@ -133,19 +141,24 @@ class TestHandleDatagramDestinationPolicy(unittest.TestCase):
 
     def test_datagram_to_loopback_dropped_at_debug_and_association_kept(self):
         for dst, atyp in (("127.0.0.1", 1), ("169.254.169.254", 1), ("::ffff:127.0.0.1", 4)):
-            with self.subTest(dst=dst), patch("simple_socks5.relays.udp_relay.socket.socket") as socket_class, \
-                    self.assertLogs("simple_socks5.relays", level="DEBUG") as logs:
-                self.assertTrue(self.relay._handle_datagram(build_udp_datagram(dst, 53, b"x", atyp=atyp), CLIENT_ADDR))
+            with (
+                self.subTest(dst=dst),
+                patch("simple_socks5.relays.udp_relay.socket.socket") as socket_class,
+                self.assertLogs("simple_socks5.relays", level="DEBUG") as logs,
+            ):
+                assert self.relay._handle_datagram(build_udp_datagram(dst, 53, b"x", atyp=atyp), CLIENT_ADDR)
             socket_class.assert_not_called()
-            self.assertEqual(len(logs.records), 1)
-            self.assertEqual(logs.records[0].levelname, "DEBUG")
-            self.assertIn("blocked by the destination policy", logs.output[0])
+            assert len(logs.records) == 1
+            assert logs.records[0].levelname == "DEBUG"
+            assert "blocked by the destination policy" in logs.output[0]
 
     def test_datagram_to_loopback_forwarded_with_opt_out(self):
         forward_socket = mock_forward_socket()
-        with patch.dict(os.environ, {"SOCKS5_ALLOW_LOOPBACK": "true"}), \
-                patch("simple_socks5.relays.udp_relay.socket.socket", return_value=forward_socket):
-            self.assertTrue(self.relay._handle_datagram(build_udp_datagram("127.0.0.1", 53, b"x"), CLIENT_ADDR))
+        with (
+            patch.dict(os.environ, {"SOCKS5_ALLOW_LOOPBACK": "true"}),
+            patch("simple_socks5.relays.udp_relay.socket.socket", return_value=forward_socket),
+        ):
+            assert self.relay._handle_datagram(build_udp_datagram("127.0.0.1", 53, b"x"), CLIENT_ADDR)
         forward_socket.sendto.assert_called_once_with(b"x", ("127.0.0.1", 53))
 
 
@@ -159,15 +172,17 @@ class TestUDPRelay(unittest.TestCase):
         client_conn = MagicMock()
         client_conn.getpeername.return_value = ("127.0.0.1", 1234)
         dst = DetailedAddress(
-            name="test", ip="1.2.3.4", port=80,
+            name="test",
+            ip="1.2.3.4",
+            port=80,
             address_type=AddressTypeCodes.IPv4,
         )
 
         relay = UDPRelay(client_conn, dst)
         mock_sock.bind.assert_called_once_with(("", 0))
         mock_sock.setblocking.assert_called_once_with(False)
-        self.assertEqual(relay.get_proxy_address().ip, "0.0.0.0")
-        self.assertEqual(relay.get_proxy_address().port, 5000)
+        assert relay.get_proxy_address().ip == "0.0.0.0"
+        assert relay.get_proxy_address().port == 5000
 
 
 JOIN_TIMEOUT = 2.0  # seconds
@@ -195,8 +210,8 @@ class TestListenAndRelay(unittest.TestCase):
 
     def assert_relay_ends(self, thread: threading.Thread) -> None:
         thread.join(JOIN_TIMEOUT)
-        self.assertFalse(thread.is_alive(), "association did not end")
-        self.assertEqual(self.relay.proxy_connection.fileno(), -1)
+        assert not thread.is_alive(), "association did not end"
+        assert self.relay.proxy_connection.fileno() == -1
 
     def send_datagrams(self, *datagrams: bytes) -> None:
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as udp:
@@ -215,11 +230,11 @@ class TestListenAndRelay(unittest.TestCase):
             self.control.close()
             self.assert_relay_ends(thread)
 
-        self.assertEqual(len(logs.records), 1, logs.output)
-        self.assertEqual(logs.records[0].levelname, "INFO")
-        self.assertRegex(
-            logs.records[0].getMessage(),
+        assert len(logs.records) == 1, logs.output
+        assert logs.records[0].levelname == "INFO"
+        assert re.search(
             r"^CLOSED \| 127\.0\.0\.1:\d+ -> test:0 \(0\.0\.0\.0\) \| up=12 B down=8 B \| \d+\.\d\d s$",
+            logs.records[0].getMessage(),
         )
 
     def test_control_reset_ends_association(self):
@@ -232,8 +247,8 @@ class TestListenAndRelay(unittest.TestCase):
         thread = self.start_relay()
         self.control.sendall(b"unexpected")
         readable, _, _ = select.select([self.control], [], [], 0.2)
-        self.assertEqual(readable, [], "relay wrote to or closed the control connection")
-        self.assertTrue(thread.is_alive())
+        assert readable == [], "relay wrote to or closed the control connection"
+        assert thread.is_alive()
         self.control.close()
         self.assert_relay_ends(thread)
 
@@ -247,11 +262,11 @@ class TestListenAndRelay(unittest.TestCase):
         with patch.object(self.relay, "_forward_packet", side_effect=lambda *_: forwarded.set()) as forward:
             thread = self.start_relay()
             self.send_datagrams(b"\x00\x00", build_udp_datagram("10.0.0.1", 53, b"hello"))
-            self.assertTrue(forwarded.wait(JOIN_TIMEOUT))
+            assert forwarded.wait(JOIN_TIMEOUT)
             self.control.close()
             self.assert_relay_ends(thread)
         forward.assert_called_once()
-        self.assertEqual(forward.call_args[0][0].data, b"hello")
+        assert forward.call_args[0][0].data == b"hello"
 
     def test_spurious_readiness_keeps_association(self):
         """select() may report a datagram that recvfrom then finds discarded (e.g. a bad UDP checksum)."""
@@ -270,7 +285,7 @@ class TestListenAndRelay(unittest.TestCase):
         with patch.object(self.relay, "_forward_packet", side_effect=lambda *_: forwarded.set()):
             thread = self.start_relay()
             self.send_datagrams(build_udp_datagram("10.0.0.1", 53, b"hello"))
-            self.assertTrue(forwarded.wait(JOIN_TIMEOUT))
+            assert forwarded.wait(JOIN_TIMEOUT)
             self.control.close()
             self.assert_relay_ends(thread)
 

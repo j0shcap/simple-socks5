@@ -2,7 +2,7 @@ import socket
 import sys
 import threading
 import time
-from socketserver import StreamRequestHandler, ThreadingMixIn, TCPServer
+from socketserver import StreamRequestHandler, TCPServer, ThreadingMixIn
 
 from .constants import (
     CONNECTION_LIMIT_WARNING_INTERVAL,
@@ -13,17 +13,17 @@ from .constants import (
     max_connections,
 )
 from .errors import is_routine_disconnect, reply_code_for
-from .exceptions import HandshakeTimeoutError, InvalidRequestError, InvalidVersionError, PolicyDenied
+from .exceptions import HandshakeTimeoutError, InvalidRequestError, InvalidVersionError, PolicyDeniedError
 from .handlers import TCPHandler
+from .logger import get_logger
+from .models import BindAddress, DetailedAddress, Request
 from .relays import TCPRelay, UDPRelay
 from .utils import (
+    format_connection_established,
     generate_command_not_supported_reply,
     generate_failed_reply,
     generate_succeeded_reply,
-    format_connection_established,
 )
-from .logger import get_logger
-from .models import BindAddress, Request, DetailedAddress
 
 logger = get_logger(__name__)
 
@@ -81,8 +81,9 @@ class ThreadingTCPServer(ThreadingMixIn, TCPServer):
         now = time.monotonic()
         if now >= self._next_limit_warning:
             logger.warning(
-                f"Connection limit of {self.max_connections} reached: rejected "
-                f"{self._rejected_since_warning} connection(s) since the last warning"
+                "Connection limit of %s reached: rejected %s connection(s) since the last warning",
+                self.max_connections,
+                self._rejected_since_warning,
             )
             self._rejected_since_warning = 0
             self._next_limit_warning = now + CONNECTION_LIMIT_WARNING_INTERVAL
@@ -103,7 +104,7 @@ class ThreadingTCPServer(ThreadingMixIn, TCPServer):
             else:
                 self._denied_since_warning += 1
         if not warn:
-            logger.debug(f"Denied {client_ip} -> {dst}")
+            logger.debug("Denied %s -> %s", client_ip, dst)
             return
         message = (
             f"Denied {client_ip} -> {dst}: loopback, link-local and unspecified destinations are blocked; "
@@ -113,17 +114,17 @@ class ThreadingTCPServer(ThreadingMixIn, TCPServer):
             message += f" ({suppressed} more denied since the last warning)"
         logger.warning(message)
 
-    def handle_error(self, request, client_address):
+    def handle_error(self, request, client_address):  # noqa: ARG002 - keeps socketserver.BaseServer's signature
         """
         Logs an exception that escaped a handler. socketserver's default prints the traceback to stderr, ignoring -L.
         """
         e = sys.exc_info()[1]
         if is_routine_disconnect(e):
-            logger.debug(f"Client {client_address[0]} disconnected: {e}")
+            logger.debug("Client %s disconnected: %s", client_address[0], e)
         elif isinstance(e, _EXPECTED_ERRORS):
-            logger.error(f"Error serving {client_address[0]}: {e}")
+            logger.error("Error serving %s: %s", client_address[0], e)
         else:
-            logger.exception(f"Unhandled error serving {client_address[0]}")
+            logger.error("Unhandled error serving %s", client_address[0], exc_info=e)
 
     def process_request_thread(self, request, client_address):
         try:
@@ -197,18 +198,8 @@ class TCPProxyServer(StreamRequestHandler):
             self.server.shutdown_request(self.request)
             return
 
-        try:
-            dst_request: Request = request_handler.parse_request()
-        except HandshakeTimeoutError:
-            # The client never finished its request, so it gets no reply
-            logger.warning("Handshake timed out waiting for the request")
-            return
-        except Exception as e:
-            if is_routine_disconnect(e):
-                logger.debug(f"Client disconnected before finishing its request: {e}")
-            else:
-                logger.error(f"Failed to parse SOCKS5 request: {e}", exc_info=not isinstance(e, _EXPECTED_ERRORS))
-            self._send_error_reply(generate_failed_reply(AddressTypeCodes.IPv4, reply_code_for(e)))
+        dst_request = self._read_request(request_handler)
+        if dst_request is None:
             return
 
         self.connection.settimeout(None)  # Clears the handshake deadline
@@ -221,7 +212,29 @@ class TCPProxyServer(StreamRequestHandler):
             address_type=dst_request.address.address_type,
         )
         self._log_connection(dst_request.address)
+        self._dispatch(dst_request)
 
+    def _read_request(self, request_handler: TCPHandler) -> Request | None:
+        """
+        Returns the client's request, or None once the failure is logged and, unless the client stalled, replied to.
+        """
+        try:
+            return request_handler.parse_request()
+        except HandshakeTimeoutError:
+            # The client never finished its request, so it gets no reply
+            logger.warning("Handshake timed out waiting for the request")
+        except Exception as e:
+            if is_routine_disconnect(e):
+                logger.debug("Client disconnected before finishing its request: %s", e)
+            else:
+                logger.error("Failed to parse SOCKS5 request: %s", e, exc_info=not isinstance(e, _EXPECTED_ERRORS))
+            self._send_error_reply(generate_failed_reply(AddressTypeCodes.IPv4, reply_code_for(e)))
+        return None
+
+    def _dispatch(self, dst_request: Request) -> None:
+        """
+        Runs the requested command. A failure gets an error reply, unless a reply was already sent.
+        """
         atyp = dst_request.address.address_type
         try:
             if dst_request.command == CommandCodes.CONNECT.value:
@@ -240,15 +253,17 @@ class TCPProxyServer(StreamRequestHandler):
             exc_info = not isinstance(e, _EXPECTED_ERRORS)
             if self._reply_sent:
                 if is_routine_disconnect(e):
-                    logger.debug(f"Client disconnected after the reply to the {dst_request.address} request: {e}")
+                    logger.debug("Client disconnected after the reply to the %s request: %s", dst_request.address, e)
                 else:
-                    logger.error(f"Error after replying to the {dst_request.address} request: {e}", exc_info=exc_info)
+                    logger.error(
+                        "Error after replying to the %s request: %s", dst_request.address, e, exc_info=exc_info
+                    )
                 return
             reply_code = reply_code_for(e)
-            if isinstance(e, PolicyDenied):
+            if isinstance(e, PolicyDeniedError):
                 self.server.log_policy_denial(self.client_address.ip, dst_request.address)
             else:
-                logger.error(f"{reply_code.name} for {dst_request.address}: {e}", exc_info=exc_info)
+                logger.error("%s for %s: %s", reply_code.name, dst_request.address, e, exc_info=exc_info)
             self._send_error_reply(generate_failed_reply(atyp, reply_code))
 
     def handle_connect(self, dst_address: DetailedAddress) -> None:
@@ -304,9 +319,9 @@ class TCPProxyServer(StreamRequestHandler):
             self.connection.sendall(reply)
         except OSError as e:
             if is_routine_disconnect(e):
-                logger.debug(f"Client disconnected before the reply: {e}")
+                logger.debug("Client disconnected before the reply: %s", e)
             else:
-                logger.error(f"Error sending reply: {e}")
+                logger.error("Error sending reply: %s", e)
 
     def finish(self):
         """
@@ -316,10 +331,10 @@ class TCPProxyServer(StreamRequestHandler):
         """
         try:
             self.connection.shutdown(socket.SHUT_RDWR)
-        except socket.error:
+        except OSError:
             pass  # Handle already closed socket
         finally:
             self.connection.close()
 
     def _log_connection(self, dst_address: DetailedAddress) -> None:
-        logger.info(format_connection_established(self.client_address.ip, self.client_address.port, dst_address))
+        logger.info(format_connection_established(self.client_address, dst_address))

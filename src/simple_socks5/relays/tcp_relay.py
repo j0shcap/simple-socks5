@@ -1,13 +1,14 @@
-import socket
+import contextlib
 import selectors
+import socket
 
-from .base import BaseRelay
 from ..constants import RELAY_BUFFER_SIZE, RELAY_WRITE_TIMEOUT, TCP_SELECTOR_TIMEOUT, connect_timeout
 from ..errors import is_routine_disconnect
-from ..models import DetailedAddress
 from ..logger import get_logger
+from ..models import DetailedAddress
 from ..policy import check_destination
 from ..utils import generate_tcp_socket
+from .base import BaseRelay
 
 logger = get_logger(__name__)
 
@@ -71,11 +72,7 @@ class TCPRelay(BaseRelay):
 
                 for key, _ in events:
                     sock = key.fileobj
-                    other_sock = (
-                        self.proxy_connection
-                        if sock is self.client_connection
-                        else self.client_connection
-                    )
+                    other_sock = self.proxy_connection if sock is self.client_connection else self.client_connection
 
                     # Handle incoming data
                     data: bytes = self._recv_data(sock)
@@ -92,10 +89,10 @@ class TCPRelay(BaseRelay):
                         self.bytes_down += len(data)
 
         except TimeoutError:
-            logger.warning(f"Relay write timed out after {RELAY_WRITE_TIMEOUT} seconds")
+            logger.warning("Relay write timed out after %s seconds", RELAY_WRITE_TIMEOUT)
         except OSError as e:
             if is_routine_disconnect(e):
-                logger.debug(f"Relay ended: {e}")
+                logger.debug("Relay ended: %s", e)
             else:
                 logger.exception("Socket error during relay")
         finally:
@@ -126,20 +123,12 @@ class TCPRelay(BaseRelay):
         logger.info(self.closed_line())
         # Unregister both sockets from the selector
         for sock in [self.client_connection, self.proxy_connection]:
-            try:
+            with contextlib.suppress(OSError, ValueError, KeyError):
                 self.selector.unregister(sock)
-            except (OSError, ValueError, KeyError):
-                pass
         # Only close proxy_connection — client_connection is owned by the server
-        try:
+        with contextlib.suppress(OSError):
             self.proxy_connection.shutdown(socket.SHUT_RDWR)
-        except OSError:
-            pass
-        try:
+        with contextlib.suppress(OSError):
             self.proxy_connection.close()
-        except OSError:
-            pass
-        try:
+        with contextlib.suppress(OSError):
             self.selector.close()
-        except OSError:
-            pass

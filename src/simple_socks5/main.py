@@ -3,16 +3,16 @@ import sys
 import threading
 import time
 from argparse import Namespace
-from typing import Callable, Optional, Sequence
+from collections.abc import Callable, Sequence
 
-from .server import (
-    ThreadingTCPServer,
-    TCPProxyServer,
-)
 from .argument_parser import parse_arguments
-from .logger import get_logger, update_loggers
 from .config import ProxyConfiguration
 from .constants import SHUTDOWN_FORCE_CLOSE_TIMEOUT, SHUTDOWN_GRACE_PERIOD
+from .logger import get_logger, update_loggers
+from .server import (
+    TCPProxyServer,
+    ThreadingTCPServer,
+)
 from .startup import collect_startup_advisories, validate_environment
 
 logger = get_logger(__name__)
@@ -34,7 +34,7 @@ class GracefulShutdown:
         self._server = server
         self._grace = grace
         self._clock = clock
-        self._deadline: Optional[float] = None
+        self._deadline: float | None = None
         self._previous_handlers: dict = {}
 
     def install(self) -> None:
@@ -46,7 +46,7 @@ class GracefulShutdown:
             signal.signal(signum, handler)
         self._previous_handlers.clear()
 
-    def _handle(self, signum, frame) -> None:
+    def _handle(self, _signum, _frame) -> None:
         if self._deadline is not None:
             return
         self._deadline = self._clock() + self._grace
@@ -61,7 +61,7 @@ class GracefulShutdown:
         deadline = self._deadline if self._deadline is not None else self._clock() + self._grace
         if not self._server.wait_for_connections(self._remaining(deadline - SHUTDOWN_FORCE_CLOSE_TIMEOUT)):
             closed = self._server.close_connections()
-            logger.info(f"Closing {closed} connection(s) still active after the grace period")
+            logger.info("Closing %s connection(s) still active after the grace period", closed)
             self._server.wait_for_connections(self._remaining(deadline))
         logger.info("Server terminated.")
 
@@ -93,7 +93,7 @@ def main(args: Namespace):
         ) as tcp_server:
             graceful_shutdown = GracefulShutdown(tcp_server)
             graceful_shutdown.install()
-            logger.info(f"Server started on {ProxyConfiguration.get_address()}")
+            logger.info("Server started on %s", ProxyConfiguration.get_address())
 
             try:
                 tcp_server.serve_forever()
@@ -103,11 +103,11 @@ def main(args: Namespace):
                 graceful_shutdown.drain()
                 graceful_shutdown.restore()
     except OSError as e:
-        logger.error(f"Error starting server: {e}")
-        exit(1)
+        logger.error("Error starting server: %s", e)
+        sys.exit(1)
 
 
-def cli(argv: Optional[Sequence[str]] = None) -> None:
+def cli(argv: Sequence[str] | None = None) -> None:
     """
     Console entry point: parses argv (default sys.argv[1:]) and runs main().
     """

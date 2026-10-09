@@ -165,10 +165,15 @@ The default credentials (`myusername`/`mypassword`) are public; always set your 
 
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
-pip install -e . pytest pytest-cov flake8
+pip install -e '.[dev]'
 pytest --cov=simple_socks5 --cov-fail-under=85
-flake8 src/ tests/
+ruff check .
+ruff format --check .
 ```
+
+Ruff is pinned in `pyproject.toml`, which also holds its rules. `ruff format .` formats the code. To keep
+`git blame` from showing the commit that first applied the formatter, run
+`git config blame.ignoreRevsFile .git-blame-ignore-revs` once.
 
 ## RFC Compliance
 

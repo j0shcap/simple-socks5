@@ -3,6 +3,8 @@ Graceful shutdown: the server drains or closes in-flight tunnels, and app.py exi
 
 The signal tests run app.py in a subprocess, since only a real process can show the exit code.
 """
+
+import contextlib
 import signal
 import subprocess
 import time
@@ -66,10 +68,8 @@ def test_sigterm_active_download_closes_client_and_exits_zero(app_process, trick
             time.sleep(0.05)
 
         tunnel.settimeout(SHUTDOWN_GRACE_PERIOD + 1)
-        try:
+        with contextlib.suppress(ConnectionResetError):
             sc.recv_until_eof(tunnel)
-        except ConnectionResetError:
-            pass
 
         stderr = _assert_graceful_exit(proc, signalled_at)
     assert "Closing 1 connection(s) still active after the grace period" in stderr

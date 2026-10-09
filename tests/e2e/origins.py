@@ -56,7 +56,7 @@ def serve_in_thread(server: socketserver.BaseServer, poll_interval: float = 0.01
 
 
 def deterministic_payload(n: int) -> bytes:
-    return random.Random(n).randbytes(n)
+    return random.Random(n).randbytes(n)  # noqa: S311 - seeded for reproducible test data, not security
 
 
 @dataclass(frozen=True)
@@ -148,17 +148,17 @@ class PayloadHTTPHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         prefix = "/bytes/"
-        if not (self.path.startswith(prefix) and self.path[len(prefix):].isdigit()):
+        if not (self.path.startswith(prefix) and self.path[len(prefix) :].isdigit()):
             self.send_error(404)
             return
-        body = deterministic_payload(int(self.path[len(prefix):]))
+        body = deterministic_payload(int(self.path[len(prefix) :]))
         self.send_response(200)
         self.send_header("Content-Type", "application/octet-stream")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
 
-    def log_message(self, format, *args):
+    def log_message(self, _format, *_args):
         pass
 
 

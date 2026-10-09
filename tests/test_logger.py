@@ -138,7 +138,8 @@ def test_unwritable_log_file_logs_error_and_continues(configure, monkeypatch, tm
     get_logger("simple_socks5.x").info("still running")
 
     output = stream.getvalue()
-    assert "SOCKS5_LOG_FILE" in output and str(missing) in output
+    assert "SOCKS5_LOG_FILE" in output
+    assert str(missing) in output
     assert "[ERROR]" in output
     assert "still running" in output
     assert len(package_logger().handlers) == 1
@@ -160,12 +161,12 @@ class TestColorFormatter(unittest.TestCase):
 
     def test_colour_wraps_message(self):
         formatted = ColorFormatter(CONSOLE_FORMAT, use_color=True).format(self.record(logging.ERROR))
-        self.assertTrue(formatted.startswith("\x1b[91m"))
-        self.assertTrue(formatted.endswith("\x1b[0m"))
+        assert formatted.startswith("\x1b[91m")
+        assert formatted.endswith("\x1b[0m")
 
     def test_no_colour_is_plain(self):
         formatted = ColorFormatter(CONSOLE_FORMAT, use_color=False).format(self.record(logging.ERROR))
-        self.assertEqual(formatted, "ERROR message")
+        assert formatted == "ERROR message"
 
 
 if __name__ == "__main__":

@@ -1,5 +1,6 @@
 import logging
 from logging.handlers import RotatingFileHandler
+from typing import ClassVar
 
 from .config import ProxyConfiguration
 from .constants import LOG_FILE_BACKUP_COUNT, LOG_FILE_MAX_BYTES, log_file
@@ -24,7 +25,7 @@ class LogColors:
 
 
 class ColorFormatter(logging.Formatter):
-    COLORS = {
+    COLORS: ClassVar[dict[int, str]] = {
         logging.ERROR: LogColors.RED,
         logging.WARNING: LogColors.YELLOW,
         logging.INFO: LogColors.WHITE,
@@ -74,7 +75,7 @@ def update_loggers() -> None:
     try:
         file_handler = RotatingFileHandler(path, maxBytes=LOG_FILE_MAX_BYTES, backupCount=LOG_FILE_BACKUP_COUNT)
     except OSError as e:
-        _package_logger.error(f"Cannot open SOCKS5_LOG_FILE {path}: {e}. Logging to the console only.")
+        _package_logger.error("Cannot open SOCKS5_LOG_FILE %s: %s. Logging to the console only.", path, e)
         return
     file_handler.setLevel(logging.ERROR)
     file_handler.setFormatter(logging.Formatter(FILE_FORMAT))

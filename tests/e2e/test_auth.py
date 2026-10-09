@@ -79,8 +79,9 @@ def _log_text(caplog) -> str:
 
 
 @pytest.mark.parametrize("auth_required", [True, False], ids=["auth-required", "auth-optional"])
-@pytest.mark.parametrize("case, username, password", REJECTED, ids=[case for case, _, _ in REJECTED])
-def test_auth_rejected(make_proxy, caplog, capsys, auth_required, case, username, password):
+@pytest.mark.parametrize("credentials", [pytest.param((user, pw), id=case) for case, user, pw in REJECTED])
+def test_auth_rejected(make_proxy, caplog, capsys, auth_required, credentials):
+    username, password = credentials
     caplog.set_level(logging.DEBUG)
     proxy = make_proxy(auth_required=auth_required)
     with proxy.connect() as sock:

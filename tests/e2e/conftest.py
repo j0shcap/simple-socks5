@@ -57,11 +57,11 @@ from tests.e2e.origins import (
     OriginTCPServer,
     OriginTCPServerV6,
     PayloadHTTPHandler,
-    TrickleHandler,
     RecordingOriginTCPServer,
     ReplyThenReadHandler,
     ResetMidTransferHandler,
     StreamUntilClosedHandler,
+    TrickleHandler,
     UDPEchoHandler,
     serve_in_thread,
 )
@@ -107,6 +107,7 @@ def _e2e_leak_guard():
 @pytest.fixture
 def make_proxy(monkeypatch):
     with ExitStack() as stack:
+
         def _make_proxy(*, auth_required: bool = False, allow_loopback: bool = True) -> ProxyHandle:
             monkeypatch.setenv("SOCKS5_AUTH_REQUIRED", "true" if auth_required else "false")
             monkeypatch.setenv("SOCKS5_ALLOW_LOOPBACK", "true" if allow_loopback else "false")

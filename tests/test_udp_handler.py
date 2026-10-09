@@ -1,6 +1,8 @@
 import random
 import unittest
 
+import pytest
+
 from simple_socks5.constants import AddressTypeCodes
 from simple_socks5.exceptions import InvalidRequestError, MalformedDatagramError
 from simple_socks5.handlers.udp import UDPHandler
@@ -15,23 +17,23 @@ DOMAIN_HEADER = sc.build_udp_header(sc.ATYP_DOMAIN, "example.com", 53)
 class TestParseUDPDatagram(unittest.TestCase):
     def test_parses_valid_ipv4_at_minimum_length(self):
         datagram = UDPHandler.parse_udp_datagram(sc.build_udp_header(sc.ATYP_IPV4, "10.0.0.1", 53, frag=7))
-        self.assertEqual(datagram.frag, 7)
-        self.assertEqual(datagram.address_type, AddressTypeCodes.IPv4)
-        self.assertEqual((datagram.dst_addr, datagram.dst_port, datagram.data), ("10.0.0.1", 53, b""))
+        assert datagram.frag == 7
+        assert datagram.address_type == AddressTypeCodes.IPv4
+        assert (datagram.dst_addr, datagram.dst_port, datagram.data) == ("10.0.0.1", 53, b"")
 
     def test_parses_valid_ipv6_at_minimum_length(self):
         datagram = UDPHandler.parse_udp_datagram(IPV6_HEADER)
-        self.assertEqual(datagram.address_type, AddressTypeCodes.IPv6)
-        self.assertEqual((datagram.dst_addr, datagram.dst_port, datagram.data), ("2001:db8::1", 53, b""))
+        assert datagram.address_type == AddressTypeCodes.IPv6
+        assert (datagram.dst_addr, datagram.dst_port, datagram.data) == ("2001:db8::1", 53, b"")
 
     def test_parses_valid_domain_at_minimum_length(self):
         datagram = UDPHandler.parse_udp_datagram(DOMAIN_HEADER)
-        self.assertEqual(datagram.address_type, AddressTypeCodes.DOMAIN_NAME)
-        self.assertEqual((datagram.dst_addr, datagram.dst_port, datagram.data), ("example.com", 53, b""))
+        assert datagram.address_type == AddressTypeCodes.DOMAIN_NAME
+        assert (datagram.dst_addr, datagram.dst_port, datagram.data) == ("example.com", 53, b"")
 
     def test_payload_after_header_is_preserved(self):
         payload = b"\x00\x00\x00\x01 looks like a header"
-        self.assertEqual(UDPHandler.parse_udp_datagram(IPV4_HEADER + payload).data, payload)
+        assert UDPHandler.parse_udp_datagram(IPV4_HEADER + payload).data == payload
 
     def test_rejects_malformed(self):
         cases = {
@@ -47,17 +49,17 @@ class TestParseUDPDatagram(unittest.TestCase):
             **{f"ATYP={atyp}": b"\x00\x00\x00" + bytes([atyp]) + IPV4_HEADER[4:] for atyp in (0, 2, 5, 9, 255)},
         }
         for name, data in cases.items():
-            with self.subTest(name), self.assertRaises(MalformedDatagramError):
+            with self.subTest(name), pytest.raises(MalformedDatagramError):
                 UDPHandler.parse_udp_datagram(data)
 
     def test_error_is_invalid_request_error_with_reason(self):
-        with self.assertRaises(InvalidRequestError) as ctx:
+        with pytest.raises(InvalidRequestError) as ctx:
             UDPHandler.parse_udp_datagram(b"\x00\x00")
-        self.assertIsInstance(ctx.exception, MalformedDatagramError)
-        self.assertIn("malformed UDP datagram (too short: 2 bytes)", str(ctx.exception))
+        assert isinstance(ctx.value, MalformedDatagramError)
+        assert "malformed UDP datagram (too short: 2 bytes)" in str(ctx.value)
 
     def test_fuzz_only_raises_malformed_datagram_error(self):
-        rng = random.Random(0x5EC5)
+        rng = random.Random(0x5EC5)  # noqa: S311 - seeded for reproducible fuzz input, not security
         parsed = rejected = 0
         for i in range(20_000):
             if i % 3 == 0:
@@ -70,13 +72,13 @@ class TestParseUDPDatagram(unittest.TestCase):
                 result = UDPHandler.parse_udp_datagram(data)
             except MalformedDatagramError:
                 rejected += 1
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 - reports any other exception together with its input
                 self.fail(f"{type(e).__name__} for input {data!r}: {e}")
             else:
-                self.assertIsInstance(result, UDPDatagram)
+                assert isinstance(result, UDPDatagram)
                 parsed += 1
-        self.assertGreater(parsed, 0)
-        self.assertGreater(rejected, 0)
+        assert parsed > 0
+        assert rejected > 0
 
 
 if __name__ == "__main__":

@@ -2,10 +2,11 @@
 Startup checks: environment validation and advisories describing the proxy's exposure (open proxy,
 default credentials).
 """
+
 import ipaddress
 import logging
 import os
-from typing import Mapping
+from collections.abc import Mapping
 
 from . import constants
 from .constants import DEFAULT_PASSWORD, DEFAULT_USERNAME

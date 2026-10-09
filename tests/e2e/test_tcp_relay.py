@@ -1,3 +1,4 @@
+import contextlib
 import hashlib
 import socket
 import threading
@@ -29,10 +30,10 @@ def _slow_tunnel(proxy_addr: tuple[str, int], dst_port: int) -> socket.socket:
         assert sc.greet(sock, [sc.METHOD_NO_AUTH]) == sc.METHOD_NO_AUTH
         sc.send_request(sock, sc.CMD_CONNECT, sc.ATYP_IPV4, "127.0.0.1", dst_port)
         assert sc.read_reply(sock).rep == sc.REP_SUCCEEDED
-        return sock
     except BaseException:
         sock.close()
         raise
+    return sock
 
 
 def _paced_recv_until_eof(sock: socket.socket, rate: int) -> bytes:
@@ -91,6 +92,7 @@ def test_half_close_from_origin(proxy, reply_then_read_origin):
 def test_bidirectional_bulk(proxy, echo_origin):
     upload = deterministic_payload(BULK_SIZE)
     with sc.open_tunnel(proxy.address, "127.0.0.1", echo_origin.port) as tunnel:
+
         def write():
             tunnel.sendall(upload)
             tunnel.shutdown(socket.SHUT_WR)
@@ -134,10 +136,8 @@ def test_client_disconnect_closes_origin(proxy, streaming_origin):
 
 def test_origin_reset_closes_client_promptly(proxy, reset_origin):
     with sc.open_tunnel(proxy.address, "127.0.0.1", reset_origin.port) as tunnel:
-        try:
+        with contextlib.suppress(ConnectionResetError):
             sc.recv_until_eof(tunnel)
-        except ConnectionResetError:
-            pass
         closed_at = time.monotonic()
 
     assert closed_at - reset_origin.results.get(timeout=sc.TIMEOUT) < 1.0

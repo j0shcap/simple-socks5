@@ -1,10 +1,9 @@
-import struct
 import socket
+import struct
 import threading
 import time
-from typing import Optional
 
-from ..constants import SOCKS_VERSION, AddressTypeCodes, DNS_LOOKUP_TIMEOUT
+from ..constants import DNS_LOOKUP_TIMEOUT, SOCKS_VERSION, AddressTypeCodes
 from ..errors import is_routine_disconnect
 from ..exceptions import (
     AddressTypeNotSupportedError,
@@ -22,9 +21,9 @@ logger = get_logger(__name__)
 
 class BaseHandler:
     connection: socket.socket
-    deadline: Optional[float] = None
+    deadline: float | None = None
 
-    def __init__(self, connection: socket.socket, deadline: Optional[float] = None):
+    def __init__(self, connection: socket.socket, deadline: float | None = None):
         """
         Initializes a new instance of the BaseRequestHandler class.
 
@@ -48,7 +47,7 @@ class BaseHandler:
             chunk = self._recv_before_deadline(n - pos)
             if not chunk:
                 raise ConnectionError("Connection closed during recv")
-            buf[pos:pos + len(chunk)] = chunk
+            buf[pos : pos + len(chunk)] = chunk
             pos += len(chunk)
         return bytes(buf)
 
@@ -108,9 +107,9 @@ class BaseHandler:
 
         except HandshakeTimeoutError:
             raise  # Expected for stalled clients; the server logs it without a traceback
-        except socket.error as e:
+        except OSError as e:
             if not is_routine_disconnect(e):  # The server logs a disconnect once, at DEBUG
-                logger.exception(f"Socket error during request parsing: {e}")
+                logger.exception("Socket error during request parsing")
             raise
 
     def _parse_address(self, address_type: int) -> DetailedAddress:
@@ -134,9 +133,7 @@ class BaseHandler:
                     raise InvalidDomainNameError(raw_domain_name) from e
                 address, address_type = self._resolve_hostname(domain_name)
             elif address_type == AddressTypeCodes.IPv6.value:
-                address: str = socket.inet_ntop(
-                    socket.AF_INET6, self._recv_exact(16)
-                )
+                address: str = socket.inet_ntop(socket.AF_INET6, self._recv_exact(16))
                 port = self._recv_port()
                 domain_name: str = address
             else:
@@ -151,9 +148,9 @@ class BaseHandler:
 
         except HandshakeTimeoutError:
             raise
-        except socket.error as e:
+        except OSError as e:
             if not is_routine_disconnect(e):
-                logger.exception(f"Socket error during address and port parsing: {e}")
+                logger.exception("Socket error during address and port parsing")
             raise
 
     def _recv_port(self) -> int:
@@ -167,7 +164,7 @@ class BaseHandler:
         def lookup():
             try:
                 result[0] = fn()
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 - handed back to the caller, which logs it
                 error[0] = e
 
         t = threading.Thread(target=lookup, daemon=True)
@@ -175,11 +172,11 @@ class BaseHandler:
         t.join(timeout=DNS_LOOKUP_TIMEOUT)
 
         if t.is_alive():
-            logger.debug(f"DNS lookup timed out for {label}")
+            logger.debug("DNS lookup timed out for %s", label)
             return None
         if error[0] is not None:
             if not isinstance(error[0], OSError):
-                logger.error(f"DNS lookup error for {label}", exc_info=error[0])
+                logger.error("DNS lookup error for %s", label, exc_info=error[0])
             return None
         return result[0]
 

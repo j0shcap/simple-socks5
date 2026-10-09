@@ -74,7 +74,7 @@ def test_builders_match_rfc_bytes():
 
 
 @pytest.mark.parametrize(
-    "atyp, addr",
+    ("atyp", "addr"),
     [(1, "192.0.2.7"), (3, "example.com"), (4, "2001:db8::1")],
 )
 def test_udp_header_round_trip(atyp, addr):

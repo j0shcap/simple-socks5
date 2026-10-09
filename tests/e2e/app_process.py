@@ -1,14 +1,15 @@
 """
 Runs app.py as a real process, for tests that need what only a process shows: exit codes, signals and its output.
 """
+
 import os
 import socket
 import subprocess
 import sys
 import time
+from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Iterator, Optional
 
 import pytest
 
@@ -34,7 +35,7 @@ def socks_ready(address: tuple[str, int]) -> bool:
 
 @contextmanager
 def run_app(
-    cwd: Path, *, logging_level: str = "info", env: Optional[dict[str, str]] = None
+    cwd: Path, *, logging_level: str = "info", env: dict[str, str] | None = None
 ) -> Iterator[tuple[subprocess.Popen, tuple[str, int]]]:
     """
     Runs app.py on a free loopback port with no SOCKS5_* variables but SOCKS5_ALLOW_LOOPBACK=true (the origins
@@ -45,7 +46,7 @@ def run_app(
         pytest.skip("POSIX signals only")
     address = ("127.0.0.1", free_port())
     clean_env = {k: v for k, v in os.environ.items() if not k.startswith("SOCKS5_") and k != "LOGGING_LEVEL"}
-    proc = subprocess.Popen(
+    proc = subprocess.Popen(  # noqa: S603 - fixed argv built by the test
         [sys.executable, str(APP), "-H", address[0], "-P", str(address[1]), "-L", logging_level],
         cwd=cwd,
         env={**clean_env, "SOCKS5_ALLOW_LOOPBACK": "true", **(env or {})},

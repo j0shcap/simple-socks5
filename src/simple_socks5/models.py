@@ -1,5 +1,5 @@
-from dataclasses import dataclass
 from collections import namedtuple
+from dataclasses import dataclass
 
 from .constants import AddressTypeCodes
 
@@ -36,9 +36,7 @@ class Request:
     address: DetailedAddress
 
     def __str__(self):
-        return (
-            f"Version: {self.version}, Command: {self.command}, Address: {self.address}"
-        )
+        return f"Version: {self.version}, Command: {self.command}, Address: {self.address}"
 
 
 @dataclass

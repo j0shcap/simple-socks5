@@ -1,5 +1,3 @@
-from typing import Union
-
 from .models import format_host_port
 
 
@@ -17,7 +15,7 @@ class InvalidRequestError(Exception):
         request (bytes | int): The invalid request that caused the error.
     """
 
-    def __init__(self, request: Union[bytes, int]) -> None:
+    def __init__(self, request: bytes | int) -> None:
         super().__init__(f"Invalid request: {request}")
 
 
@@ -43,7 +41,7 @@ class HandshakeTimeoutError(TimeoutError):
     """Exception raised when a client doesn't finish the handshake before its deadline."""
 
 
-class PolicyDenied(Exception):
+class PolicyDeniedError(Exception):
     """Exception raised when the destination policy blocks a destination address.
 
     Attributes:

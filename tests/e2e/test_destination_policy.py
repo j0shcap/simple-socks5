@@ -2,6 +2,7 @@
 Destination policy: loopback, link-local and unspecified destinations are refused with REP 0x02 unless
 SOCKS5_ALLOW_LOOPBACK=true. Every test here turns the policy on explicitly, since the fixtures turn it off.
 """
+
 import logging
 
 import pytest
@@ -39,7 +40,7 @@ def test_connect_to_loopback_origin_denied(policy_proxy, echo_origin):
     assert _connect_reply(policy_proxy, sc.ATYP_IPV4, "127.0.0.1", echo_origin.port).rep == sc.REP_NOT_ALLOWED
 
 
-@pytest.mark.parametrize("atyp, addr", DENIED)
+@pytest.mark.parametrize(("atyp", "addr"), DENIED)
 def test_connect_denied(policy_proxy, atyp, addr):
     # Refused before any socket exists, so no IPv6 stack is needed
     assert _connect_reply(policy_proxy, atyp, addr, 80).rep == sc.REP_NOT_ALLOWED
@@ -73,7 +74,7 @@ def test_opt_out_allows_loopback_ipv6(proxy, echo_origin_v6):
         assert sc.recv_exact(tunnel, 4) == b"ping"
 
 
-@pytest.mark.parametrize("atyp, addr", DENIED)
+@pytest.mark.parametrize(("atyp", "addr"), DENIED)
 def test_opt_out_lifts_every_denial(monkeypatch, proxy, atyp, addr):
     # Nothing listens there, so the connect may fail, but not because of the policy
     monkeypatch.setenv("SOCKS5_CONNECT_TIMEOUT", "0.5")
@@ -81,7 +82,7 @@ def test_opt_out_lifts_every_denial(monkeypatch, proxy, atyp, addr):
 
 
 def test_udp_loopback_dropped_then_allowed_on_same_association(monkeypatch, policy_proxy, udp_echo_origin):
-    with _udp_association(policy_proxy) as (control, udp, relay_address):
+    with _udp_association(policy_proxy) as (_control, udp, relay_address):
         udp.sendto(sc.build_udp_header(sc.ATYP_IPV4, "127.0.0.1", udp_echo_origin.port) + b"ping", relay_address)
         _assert_nothing_received(udp)
 

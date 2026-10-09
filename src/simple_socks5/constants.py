@@ -1,12 +1,11 @@
 import math
 import os
 from enum import Enum
-from typing import Optional
 
 SOCKS_VERSION: int = 5
 
 DEFAULT_USERNAME: str = "myusername"
-DEFAULT_PASSWORD: str = "mypassword"
+DEFAULT_PASSWORD: str = "mypassword"  # noqa: S105 - documented default; startup warns while it is in use
 
 
 def credentials() -> tuple[bytes, bytes]:
@@ -75,19 +74,20 @@ def max_connections() -> int:
     return _positive_int_env("SOCKS5_MAX_CONNECTIONS", DEFAULT_MAX_CONNECTIONS)
 
 
-def log_file() -> Optional[str]:
+def log_file() -> str | None:
     """The path errors are also written to, or None to log to the console only."""
     return os.environ.get("SOCKS5_LOG_FILE", "").strip() or None
 
 
 DEFAULT_HEALTHCHECK_PORT: int = 1080
+MAX_PORT: int = 65535
 
 
 def healthcheck_port() -> int:
     """The port the container healthcheck probes; the server itself never reads it."""
     port = _positive_int_env("SOCKS5_HEALTHCHECK_PORT", DEFAULT_HEALTHCHECK_PORT)
-    if port > 65535:
-        raise ValueError(f"SOCKS5_HEALTHCHECK_PORT must be a port number up to 65535, got {port}")
+    if port > MAX_PORT:
+        raise ValueError(f"SOCKS5_HEALTHCHECK_PORT must be a port number up to {MAX_PORT}, got {port}")
     return port
 
 

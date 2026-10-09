@@ -1,13 +1,15 @@
 import errno
 import logging
 import os
-import socket
 import selectors
+import socket
 import unittest
 from unittest.mock import MagicMock, call, patch
 
+import pytest
+
 from simple_socks5.constants import RELAY_BUFFER_SIZE, RELAY_WRITE_TIMEOUT, AddressTypeCodes
-from simple_socks5.exceptions import PolicyDenied
+from simple_socks5.exceptions import PolicyDeniedError
 from simple_socks5.models import DetailedAddress
 from simple_socks5.relays.tcp_relay import TCPRelay
 
@@ -34,7 +36,9 @@ class TestTCPRelay(unittest.TestCase):
         client_conn.getpeername.return_value = ("127.0.0.1", 1234)
 
         dst = DetailedAddress(
-            name="example.com", ip="93.184.216.34", port=80,
+            name="example.com",
+            ip="93.184.216.34",
+            port=80,
             address_type=AddressTypeCodes.IPv4,
         )
 
@@ -42,17 +46,17 @@ class TestTCPRelay(unittest.TestCase):
         return relay, client_conn, mock_proxy_sock, mock_selector
 
     def test_init_creates_selector_and_connects(self):
-        relay, client, proxy, selector = self._create_relay()
-        self.assertIsNotNone(relay.selector)
+        relay, _client, proxy, selector = self._create_relay()
+        assert relay.selector is not None
         proxy.connect.assert_called_once_with(("93.184.216.34", 80))
-        self.assertEqual(relay.get_proxy_address().port, 5000)
+        assert relay.get_proxy_address().port == 5000
         # Both sockets should be registered with the selector
-        self.assertEqual(selector.register.call_count, 2)
+        assert selector.register.call_count == 2
 
     def test_connect_timeout_set_before_connect(self):
         with patch.dict(os.environ, {"SOCKS5_CONNECT_TIMEOUT": "0.5"}):
             _, _, proxy, _ = self._create_relay()
-        self.assertEqual(proxy.mock_calls[:2], [call.settimeout(0.5), call.connect(("93.184.216.34", 80))])
+        assert proxy.mock_calls[:2] == [call.settimeout(0.5), call.connect(("93.184.216.34", 80))]
 
     @patch("simple_socks5.relays.tcp_relay.selectors.DefaultSelector")
     @patch("simple_socks5.relays.tcp_relay.generate_tcp_socket")
@@ -60,7 +64,7 @@ class TestTCPRelay(unittest.TestCase):
         mock_gen_socket.return_value.connect.side_effect = TimeoutError("timed out")
         dst = DetailedAddress(name="test", ip="10.255.255.1", port=80, address_type=AddressTypeCodes.IPv4)
 
-        with self.assertRaises(TimeoutError):
+        with pytest.raises(TimeoutError):
             TCPRelay(MagicMock(), dst)
 
         mock_gen_socket.return_value.close.assert_called_once()
@@ -77,18 +81,20 @@ class TestTCPRelay(unittest.TestCase):
         client_conn = MagicMock()
         client_conn.getpeername.return_value = ("127.0.0.1", 1234)
         dst = DetailedAddress(
-            name="test", ip="1.2.3.4", port=80,
+            name="test",
+            ip="1.2.3.4",
+            port=80,
             address_type=AddressTypeCodes.IPv4,
         )
 
-        with self.assertRaises(ConnectionRefusedError):
+        with pytest.raises(ConnectionRefusedError):
             TCPRelay(client_conn, dst)
 
         mock_selector.close.assert_called_once()
 
-    @patch("simple_socks5.relays.tcp_relay.selectors.DefaultSelector")
+    @patch("simple_socks5.relays.tcp_relay.selectors.DefaultSelector", MagicMock)
     @patch("simple_socks5.relays.tcp_relay.generate_tcp_socket")
-    def test_init_closes_proxy_socket_when_connect_fails(self, mock_gen_socket, mock_sel_cls):
+    def test_init_closes_proxy_socket_when_connect_fails(self, mock_gen_socket):
         mock_proxy_sock = MagicMock()
         mock_proxy_sock.connect.side_effect = ConnectionRefusedError
         mock_gen_socket.return_value = mock_proxy_sock
@@ -96,11 +102,13 @@ class TestTCPRelay(unittest.TestCase):
         client_conn = MagicMock()
         client_conn.getpeername.return_value = ("127.0.0.1", 1234)
         dst = DetailedAddress(
-            name="test", ip="1.2.3.4", port=80,
+            name="test",
+            ip="1.2.3.4",
+            port=80,
             address_type=AddressTypeCodes.IPv4,
         )
 
-        with self.assertRaises(ConnectionRefusedError):
+        with pytest.raises(ConnectionRefusedError):
             TCPRelay(client_conn, dst)
 
         mock_proxy_sock.close.assert_called_once()
@@ -137,7 +145,7 @@ class TestTCPRelay(unittest.TestCase):
         selector.unregister.assert_any_call(client)
         proxy.shutdown.assert_any_call(socket.SHUT_WR)
         client.sendall.assert_called_once_with(b"response")
-        self.assertEqual(selector.select.call_count, 3)
+        assert selector.select.call_count == 3
 
     def test_half_close_shutdown_error_cleans_up(self):
         relay, client, proxy, selector = self._create_relay()
@@ -151,7 +159,7 @@ class TestTCPRelay(unittest.TestCase):
         selector.close.assert_called_once()
 
     def test_relay_handles_broken_pipe(self):
-        relay, client, proxy, selector = self._create_relay()
+        relay, client, _proxy, selector = self._create_relay()
 
         mock_key = MagicMock()
         mock_key.fileobj = client
@@ -162,7 +170,7 @@ class TestTCPRelay(unittest.TestCase):
         selector.close.assert_called()
 
     def test_relay_handles_connection_reset(self):
-        relay, client, proxy, selector = self._create_relay()
+        relay, client, _proxy, selector = self._create_relay()
 
         mock_key = MagicMock()
         mock_key.fileobj = client
@@ -175,22 +183,22 @@ class TestTCPRelay(unittest.TestCase):
     def test_routine_disconnect_logs_debug_without_traceback(self):
         for error in (BrokenPipeError("broken pipe"), ConnectionResetError("reset")):
             with self.subTest(error=repr(error)):
-                relay, client, proxy, selector = self._create_relay()
+                relay, client, _proxy, selector = self._create_relay()
                 selector.select.return_value = [(_event(client), selectors.EVENT_READ)]
                 client.recv.side_effect = error
                 with self.assertLogs("simple_socks5.relays.tcp_relay", level="DEBUG") as logs:
                     relay.listen_and_relay()
                 problems = [r for r in logs.records if r.exc_info or r.levelno > logging.INFO]
-                self.assertEqual(problems, [])
-                self.assertTrue(any(r.levelno == logging.DEBUG for r in logs.records))
+                assert problems == []
+                assert any(r.levelno == logging.DEBUG for r in logs.records)
 
     def test_unexpected_socket_error_logs_traceback(self):
-        relay, client, proxy, selector = self._create_relay()
+        relay, client, _proxy, selector = self._create_relay()
         selector.select.return_value = [(_event(client), selectors.EVENT_READ)]
         client.recv.side_effect = OSError(errno.EBADF, "bad file descriptor")
         with self.assertLogs("simple_socks5.relays.tcp_relay", level="ERROR") as logs:
             relay.listen_and_relay()
-        self.assertTrue(logs.records[0].exc_info)
+        assert logs.records[0].exc_info
         selector.close.assert_called_once()
 
     def test_cleanup_closes_proxy_and_selector_not_client(self):
@@ -211,7 +219,7 @@ class TestTCPRelay(unittest.TestCase):
         selector.close.assert_called_once()
 
     def test_cleanup_tolerates_already_unregistered_socket(self):
-        relay, client, proxy, selector = self._create_relay()
+        relay, _client, proxy, selector = self._create_relay()
         selector.unregister.side_effect = KeyError("not registered")
 
         relay._cleanup()
@@ -220,14 +228,14 @@ class TestTCPRelay(unittest.TestCase):
         selector.close.assert_called_once()
 
     def test_send_data(self):
-        relay, client, proxy, _ = self._create_relay()
+        relay, _client, proxy, _ = self._create_relay()
         result = relay._send_data(proxy, b"hello")
-        self.assertIsNone(result)
+        assert result is None
         proxy.sendall.assert_called_once_with(b"hello")
         proxy.send.assert_not_called()
 
     def test_init_leaves_sockets_blocking(self):
-        relay, client, proxy, _ = self._create_relay()
+        _relay, client, proxy, _ = self._create_relay()
         client.setblocking.assert_not_called()
         proxy.setblocking.assert_not_called()
 
@@ -244,7 +252,7 @@ class TestTCPRelay(unittest.TestCase):
 
         client.settimeout.assert_called_once_with(RELAY_WRITE_TIMEOUT)
         # Replaces the connect timeout set before connect()
-        self.assertEqual(proxy.settimeout.call_args_list[-1], call(RELAY_WRITE_TIMEOUT))
+        assert proxy.settimeout.call_args_list[-1] == call(RELAY_WRITE_TIMEOUT)
         for sock in (client, proxy):
             sock.setsockopt.assert_called_once_with(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
             sock.setblocking.assert_not_called()
@@ -258,22 +266,22 @@ class TestTCPRelay(unittest.TestCase):
         with self.assertLogs("simple_socks5.relays.tcp_relay", level="WARNING") as logs:
             relay.listen_and_relay()
 
-        self.assertTrue(any("timed out" in line for line in logs.output))
+        assert any("timed out" in line for line in logs.output)
         proxy.close.assert_called_once()
         selector.close.assert_called_once()
         client.close.assert_not_called()
 
     def test_recv_data(self):
-        relay, client, proxy, _ = self._create_relay()
+        relay, client, _proxy, _ = self._create_relay()
         client.recv.return_value = b"data"
         result = relay._recv_data(client)
-        self.assertEqual(result, b"data")
+        assert result == b"data"
         client.recv.assert_called_once_with(RELAY_BUFFER_SIZE)
 
     def test_recv_data_raises_on_error(self):
-        relay, client, proxy, _ = self._create_relay()
-        client.recv.side_effect = socket.error("recv failed")
-        with self.assertRaises(socket.error):
+        relay, client, _proxy, _ = self._create_relay()
+        client.recv.side_effect = OSError("recv failed")
+        with pytest.raises(OSError, match="recv failed"):
             relay._recv_data(client)
 
     def _relay_one_exchange(self):
@@ -294,7 +302,7 @@ class TestTCPRelay(unittest.TestCase):
 
         relay.listen_and_relay()
 
-        self.assertEqual((relay.bytes_up, relay.bytes_down), (12, 8))
+        assert (relay.bytes_up, relay.bytes_down) == (12, 8)
 
     def test_cleanup_logs_one_closed_line(self):
         with patch("simple_socks5.relays.base.time.monotonic", side_effect=[100.0, 102.5]):
@@ -302,19 +310,18 @@ class TestTCPRelay(unittest.TestCase):
             with self.assertLogs("simple_socks5.relays.tcp_relay", level="DEBUG") as logs:
                 relay.listen_and_relay()
 
-        self.assertEqual(
-            [(r.levelname, r.getMessage()) for r in logs.records],
-            [("INFO", "CLOSED | 127.0.0.1:1234 -> example.com:80 (93.184.216.34) | up=12 B down=8 B | 2.50 s")],
-        )
+        assert [(r.levelname, r.getMessage()) for r in logs.records] == [
+            ("INFO", "CLOSED | 127.0.0.1:1234 -> example.com:80 (93.184.216.34) | up=12 B down=8 B | 2.50 s")
+        ]
 
     def test_send_and_recv_errors_reraise_without_logging(self):
         relay, client, proxy, _ = self._create_relay()
         client.recv.side_effect = ConnectionResetError("reset")
         proxy.sendall.side_effect = BrokenPipeError("broken pipe")
         with self.assertNoLogs("simple_socks5.relays.tcp_relay"):
-            with self.assertRaises(ConnectionResetError):
+            with pytest.raises(ConnectionResetError):
                 relay._recv_data(client)
-            with self.assertRaises(BrokenPipeError):
+            with pytest.raises(BrokenPipeError):
                 relay._send_data(proxy, b"data")
 
     def test_relay_forwards_data_between_sockets(self):
@@ -335,7 +342,7 @@ class TestTCPRelay(unittest.TestCase):
         proxy.send.assert_not_called()
 
 
-@patch("simple_socks5.relays.tcp_relay.selectors.DefaultSelector")
+@patch("simple_socks5.relays.tcp_relay.selectors.DefaultSelector", MagicMock)
 @patch("simple_socks5.relays.tcp_relay.generate_tcp_socket")
 class TestTCPRelayDestinationPolicy(unittest.TestCase):
     def setUp(self):
@@ -347,18 +354,21 @@ class TestTCPRelayDestinationPolicy(unittest.TestCase):
     def _dst(self, ip: str, address_type=AddressTypeCodes.IPv4) -> DetailedAddress:
         return DetailedAddress(name="test", ip=ip, port=80, address_type=address_type)
 
-    def test_denied_destination_raises_before_socket(self, mock_gen_socket, mock_sel_cls):
-        with self.assertRaises(PolicyDenied):
+    def test_denied_destination_raises_before_socket(self, mock_gen_socket):
+        with (
+            patch("simple_socks5.relays.tcp_relay.selectors.DefaultSelector") as mock_sel_cls,
+            pytest.raises(PolicyDeniedError),
+        ):
             TCPRelay(MagicMock(), self._dst("169.254.169.254"))
         mock_gen_socket.assert_not_called()
         mock_sel_cls.return_value.close.assert_called_once()
 
-    def test_unresolved_hostname_raises_gaierror_without_connect(self, mock_gen_socket, mock_sel_cls):
-        with self.assertRaises(socket.gaierror):
+    def test_unresolved_hostname_raises_gaierror_without_connect(self, mock_gen_socket):
+        with pytest.raises(socket.gaierror):
             TCPRelay(MagicMock(), self._dst("slow-dns.example"))
         mock_gen_socket.assert_not_called()
 
-    def test_opt_out_connects_to_loopback(self, mock_gen_socket, mock_sel_cls):
+    def test_opt_out_connects_to_loopback(self, mock_gen_socket):
         mock_gen_socket.return_value.getsockname.return_value = ("127.0.0.1", 5000)
         with patch.dict(os.environ, {"SOCKS5_ALLOW_LOOPBACK": "true"}):
             TCPRelay(MagicMock(), self._dst("::1", AddressTypeCodes.IPv6))

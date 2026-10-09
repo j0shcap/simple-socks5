@@ -29,9 +29,9 @@ def src_env_vars() -> set[str]:
 class TestReadme(unittest.TestCase):
     def test_readme_env_table_matches_src(self):
         documented, used = readme_env_vars(), src_env_vars()
-        self.assertTrue(documented)
-        self.assertTrue(used)
-        self.assertEqual(documented, used)
+        assert documented
+        assert used
+        assert documented == used
 
 
 class TestChangelog(unittest.TestCase):
@@ -39,11 +39,11 @@ class TestChangelog(unittest.TestCase):
         self.changelog = (ROOT / "CHANGELOG.md").read_text()
 
     def test_has_dated_section_for_current_version(self):
-        self.assertRegex(self.changelog, rf"(?m)^## \[{re.escape(__version__)}\] - \d{{4}}-\d{{2}}-\d{{2}}$")
+        assert re.search(rf"(?m)^## \[{re.escape(__version__)}\] - \d{{4}}-\d{{2}}-\d{{2}}$", self.changelog)
 
     def test_unreleased_is_first_section(self):
         first_section = re.search(r"^## .*$", self.changelog, re.M).group(0)
-        self.assertEqual(first_section, "## [Unreleased]")
+        assert first_section == "## [Unreleased]"
 
 
 if __name__ == "__main__":

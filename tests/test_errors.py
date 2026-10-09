@@ -1,6 +1,7 @@
 """
 Tests the mapping from exceptions to SOCKS5 reply codes (RFC 1928 §6).
 """
+
 import errno
 import socket
 import unittest
@@ -13,7 +14,7 @@ from simple_socks5.exceptions import (
     InvalidDomainNameError,
     InvalidRequestError,
     InvalidVersionError,
-    PolicyDenied,
+    PolicyDeniedError,
 )
 
 CASES = (
@@ -22,11 +23,11 @@ CASES = (
     (OSError(errno.ENETUNREACH, "network unreachable"), ReplyCodes.NETWORK_UNREACHABLE),
     (OSError(errno.EHOSTUNREACH, "host unreachable"), ReplyCodes.HOST_UNREACHABLE),
     (TimeoutError(), ReplyCodes.HOST_UNREACHABLE),
-    (socket.timeout("timed out"), ReplyCodes.HOST_UNREACHABLE),
+    (TimeoutError("timed out"), ReplyCodes.HOST_UNREACHABLE),
     (socket.gaierror(socket.EAI_NONAME, "not known"), ReplyCodes.HOST_UNREACHABLE),
     # EAI_* codes aren't errno values; a numeric collision must not reach the errno table
     (socket.gaierror(errno.ENETUNREACH, "collides"), ReplyCodes.HOST_UNREACHABLE),
-    (PolicyDenied("127.0.0.1", 80), ReplyCodes.CONNECTION_NOT_ALLOWED_BY_RULESET),
+    (PolicyDeniedError("127.0.0.1", 80), ReplyCodes.CONNECTION_NOT_ALLOWED_BY_RULESET),
     (AddressTypeNotSupportedError(5), ReplyCodes.ADDRESS_TYPE_NOT_SUPPORTED),
     (InvalidDomainNameError(b"\xff"), ReplyCodes.HOST_UNREACHABLE),
     (InvalidRequestError(1), ReplyCodes.GENERAL_SOCKS_SERVER_FAILURE),
@@ -41,21 +42,21 @@ class TestReplyCodeFor(unittest.TestCase):
     def test_reply_code_for(self):
         for exc, expected in CASES:
             with self.subTest(exc=repr(exc)):
-                self.assertIs(reply_code_for(exc), expected)
+                assert reply_code_for(exc) is expected
 
     def test_typed_request_errors_are_invalid_request_errors(self):
-        self.assertIsInstance(AddressTypeNotSupportedError(5), InvalidRequestError)
-        self.assertIsInstance(InvalidDomainNameError(b"\xff"), InvalidRequestError)
+        assert isinstance(AddressTypeNotSupportedError(5), InvalidRequestError)
+        assert isinstance(InvalidDomainNameError(b"\xff"), InvalidRequestError)
 
 
-class TestPolicyDenied(unittest.TestCase):
+class TestPolicyDeniedError(unittest.TestCase):
     def test_policy_denied_keeps_host_and_port(self):
-        e = PolicyDenied("169.254.169.254", 80)
-        self.assertEqual((e.host, e.port), ("169.254.169.254", 80))
-        self.assertEqual(str(e), "destination 169.254.169.254:80 is blocked by the destination policy")
+        e = PolicyDeniedError("169.254.169.254", 80)
+        assert (e.host, e.port) == ("169.254.169.254", 80)
+        assert str(e) == "destination 169.254.169.254:80 is blocked by the destination policy"
 
     def test_policy_denied_message_brackets_ipv6(self):
-        self.assertIn("[::1]:443", str(PolicyDenied("::1", 443)))
+        assert "[::1]:443" in str(PolicyDeniedError("::1", 443))
 
 
 ROUTINE_DISCONNECT_CASES = (
@@ -70,7 +71,7 @@ ROUTINE_DISCONNECT_CASES = (
     (OSError(errno.EBADF, "bad file descriptor"), False),
     (OSError(), False),
     (InvalidVersionError(4), False),
-    (PolicyDenied("127.0.0.1", 80), False),
+    (PolicyDeniedError("127.0.0.1", 80), False),
     (RuntimeError("bug"), False),
 )
 
@@ -79,7 +80,7 @@ class TestIsRoutineDisconnect(unittest.TestCase):
     def test_is_routine_disconnect(self):
         for exc, expected in ROUTINE_DISCONNECT_CASES:
             with self.subTest(exc=repr(exc)):
-                self.assertIs(is_routine_disconnect(exc), expected)
+                assert is_routine_disconnect(exc) is expected
 
 
 if __name__ == "__main__":
