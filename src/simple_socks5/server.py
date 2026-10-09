@@ -81,8 +81,9 @@ class ThreadingTCPServer(ThreadingMixIn, TCPServer):
         now = time.monotonic()
         if now >= self._next_limit_warning:
             logger.warning(
-                f"Connection limit of {self.max_connections} reached: rejected "
-                f"{self._rejected_since_warning} connection(s) since the last warning"
+                "Connection limit of %s reached: rejected %s connection(s) since the last warning",
+                self.max_connections,
+                self._rejected_since_warning,
             )
             self._rejected_since_warning = 0
             self._next_limit_warning = now + CONNECTION_LIMIT_WARNING_INTERVAL
@@ -103,7 +104,7 @@ class ThreadingTCPServer(ThreadingMixIn, TCPServer):
             else:
                 self._denied_since_warning += 1
         if not warn:
-            logger.debug(f"Denied {client_ip} -> {dst}")
+            logger.debug("Denied %s -> %s", client_ip, dst)
             return
         message = (
             f"Denied {client_ip} -> {dst}: loopback, link-local and unspecified destinations are blocked; "
@@ -119,11 +120,11 @@ class ThreadingTCPServer(ThreadingMixIn, TCPServer):
         """
         e = sys.exc_info()[1]
         if is_routine_disconnect(e):
-            logger.debug(f"Client {client_address[0]} disconnected: {e}")
+            logger.debug("Client %s disconnected: %s", client_address[0], e)
         elif isinstance(e, _EXPECTED_ERRORS):
-            logger.error(f"Error serving {client_address[0]}: {e}")
+            logger.error("Error serving %s: %s", client_address[0], e)
         else:
-            logger.exception(f"Unhandled error serving {client_address[0]}")
+            logger.error("Unhandled error serving %s", client_address[0], exc_info=e)
 
     def process_request_thread(self, request, client_address):
         try:
@@ -205,9 +206,9 @@ class TCPProxyServer(StreamRequestHandler):
             return
         except Exception as e:
             if is_routine_disconnect(e):
-                logger.debug(f"Client disconnected before finishing its request: {e}")
+                logger.debug("Client disconnected before finishing its request: %s", e)
             else:
-                logger.error(f"Failed to parse SOCKS5 request: {e}", exc_info=not isinstance(e, _EXPECTED_ERRORS))
+                logger.error("Failed to parse SOCKS5 request: %s", e, exc_info=not isinstance(e, _EXPECTED_ERRORS))
             self._send_error_reply(generate_failed_reply(AddressTypeCodes.IPv4, reply_code_for(e)))
             return
 
@@ -240,15 +241,17 @@ class TCPProxyServer(StreamRequestHandler):
             exc_info = not isinstance(e, _EXPECTED_ERRORS)
             if self._reply_sent:
                 if is_routine_disconnect(e):
-                    logger.debug(f"Client disconnected after the reply to the {dst_request.address} request: {e}")
+                    logger.debug("Client disconnected after the reply to the %s request: %s", dst_request.address, e)
                 else:
-                    logger.error(f"Error after replying to the {dst_request.address} request: {e}", exc_info=exc_info)
+                    logger.error(
+                        "Error after replying to the %s request: %s", dst_request.address, e, exc_info=exc_info
+                    )
                 return
             reply_code = reply_code_for(e)
             if isinstance(e, PolicyDenied):
                 self.server.log_policy_denial(self.client_address.ip, dst_request.address)
             else:
-                logger.error(f"{reply_code.name} for {dst_request.address}: {e}", exc_info=exc_info)
+                logger.error("%s for %s: %s", reply_code.name, dst_request.address, e, exc_info=exc_info)
             self._send_error_reply(generate_failed_reply(atyp, reply_code))
 
     def handle_connect(self, dst_address: DetailedAddress) -> None:
@@ -304,9 +307,9 @@ class TCPProxyServer(StreamRequestHandler):
             self.connection.sendall(reply)
         except OSError as e:
             if is_routine_disconnect(e):
-                logger.debug(f"Client disconnected before the reply: {e}")
+                logger.debug("Client disconnected before the reply: %s", e)
             else:
-                logger.error(f"Error sending reply: {e}")
+                logger.error("Error sending reply: %s", e)
 
     def finish(self):
         """

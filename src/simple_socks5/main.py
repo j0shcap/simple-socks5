@@ -61,7 +61,7 @@ class GracefulShutdown:
         deadline = self._deadline if self._deadline is not None else self._clock() + self._grace
         if not self._server.wait_for_connections(self._remaining(deadline - SHUTDOWN_FORCE_CLOSE_TIMEOUT)):
             closed = self._server.close_connections()
-            logger.info(f"Closing {closed} connection(s) still active after the grace period")
+            logger.info("Closing %s connection(s) still active after the grace period", closed)
             self._server.wait_for_connections(self._remaining(deadline))
         logger.info("Server terminated.")
 
@@ -93,7 +93,7 @@ def main(args: Namespace):
         ) as tcp_server:
             graceful_shutdown = GracefulShutdown(tcp_server)
             graceful_shutdown.install()
-            logger.info(f"Server started on {ProxyConfiguration.get_address()}")
+            logger.info("Server started on %s", ProxyConfiguration.get_address())
 
             try:
                 tcp_server.serve_forever()
@@ -103,7 +103,7 @@ def main(args: Namespace):
                 graceful_shutdown.drain()
                 graceful_shutdown.restore()
     except OSError as e:
-        logger.error(f"Error starting server: {e}")
+        logger.error("Error starting server: %s", e)
         sys.exit(1)
 
 

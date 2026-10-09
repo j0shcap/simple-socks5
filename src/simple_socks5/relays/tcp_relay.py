@@ -88,10 +88,10 @@ class TCPRelay(BaseRelay):
                         self.bytes_down += len(data)
 
         except TimeoutError:
-            logger.warning(f"Relay write timed out after {RELAY_WRITE_TIMEOUT} seconds")
+            logger.warning("Relay write timed out after %s seconds", RELAY_WRITE_TIMEOUT)
         except OSError as e:
             if is_routine_disconnect(e):
-                logger.debug(f"Relay ended: {e}")
+                logger.debug("Relay ended: %s", e)
             else:
                 logger.exception("Socket error during relay")
         finally:

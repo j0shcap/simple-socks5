@@ -71,7 +71,7 @@ class UDPRelay(BaseRelay):
                         idle_deadline = time.monotonic() + UDP_RECV_TIMEOUT
 
         except OSError as e:
-            logger.error(f"UDP relay socket error: {e}")
+            logger.error("UDP relay socket error: %s", e)
         finally:
             logger.info(self.closed_line())
             selector.close()
@@ -89,10 +89,10 @@ class UDPRelay(BaseRelay):
         try:
             data = self.client_connection.recv(RELAY_BUFFER_SIZE)
         except OSError as e:
-            logger.debug(f"UDP control connection error: {e}")
+            logger.debug("UDP control connection error: %s", e)
             return False
         if data:
-            logger.debug(f"(UDP) Ignored {len(data)} bytes on the control connection")
+            logger.debug("(UDP) Ignored %s bytes on the control connection", len(data))
         return bool(data)
 
     def _handle_datagram(self, data: bytes, addr: tuple) -> bool:
@@ -102,29 +102,31 @@ class UDPRelay(BaseRelay):
         Returns whether it came from the client, which is what keeps the association alive.
         """
         if addr[0] != self.expected_client_ip:
-            logger.debug(f"(UDP) Dropped datagram from unauthorized source: {addr[0]}")
+            logger.debug("(UDP) Dropped datagram from unauthorized source: %s", addr[0])
             return False
 
         try:
             datagram = UDPHandler.parse_udp_datagram(data)
         except MalformedDatagramError as e:
-            logger.debug(f"(UDP) Dropped datagram from {addr}: {e}")
+            logger.debug("(UDP) Dropped datagram from %s: %s", addr, e)
             return True
 
         if datagram.frag != 0:
             logger.debug(
-                f"(UDP) Dropped fragmented datagram: {addr} -> "
-                f"{datagram.dst_addr}:{datagram.dst_port}, "
-                f"Size: {len(datagram.data)} bytes"
+                "(UDP) Dropped fragmented datagram: %s -> %s:%s, Size: %s bytes",
+                addr,
+                datagram.dst_addr,
+                datagram.dst_port,
+                len(datagram.data),
             )
             return True
 
         try:
             self._forward_packet(datagram, addr)
         except PolicyDenied as e:
-            logger.debug(f"(UDP) Dropped datagram from {addr}: {e}")
+            logger.debug("(UDP) Dropped datagram from %s: %s", addr, e)
         except (ValueError, KeyError, OSError) as e:
-            logger.debug(f"(UDP) Dropped unsupported datagram from {addr}: {e}")
+            logger.debug("(UDP) Dropped unsupported datagram from %s: %s", addr, e)
         return True
 
     def _forward_packet(self, datagram, client_addr: tuple) -> None:
@@ -154,7 +156,9 @@ class UDPRelay(BaseRelay):
                     len(encapsulated),
                 )
             except TimeoutError:
-                logger.debug(f"UDP forward timeout waiting for response from {datagram.dst_addr}:{datagram.dst_port}")
+                logger.debug(
+                    "UDP forward timeout waiting for response from %s:%s", datagram.dst_addr, datagram.dst_port
+                )
 
     def _log_relay(self, src_addr: BaseAddress, dst_addr: BaseAddress, data_len: int):
         logger.debug(

@@ -109,7 +109,7 @@ class BaseHandler:
             raise  # Expected for stalled clients; the server logs it without a traceback
         except OSError as e:
             if not is_routine_disconnect(e):  # The server logs a disconnect once, at DEBUG
-                logger.exception(f"Socket error during request parsing: {e}")
+                logger.exception("Socket error during request parsing")
             raise
 
     def _parse_address(self, address_type: int) -> DetailedAddress:
@@ -150,7 +150,7 @@ class BaseHandler:
             raise
         except OSError as e:
             if not is_routine_disconnect(e):
-                logger.exception(f"Socket error during address and port parsing: {e}")
+                logger.exception("Socket error during address and port parsing")
             raise
 
     def _recv_port(self) -> int:
@@ -172,11 +172,11 @@ class BaseHandler:
         t.join(timeout=DNS_LOOKUP_TIMEOUT)
 
         if t.is_alive():
-            logger.debug(f"DNS lookup timed out for {label}")
+            logger.debug("DNS lookup timed out for %s", label)
             return None
         if error[0] is not None:
             if not isinstance(error[0], OSError):
-                logger.error(f"DNS lookup error for {label}", exc_info=error[0])
+                logger.error("DNS lookup error for %s", label, exc_info=error[0])
             return None
         return result[0]
 

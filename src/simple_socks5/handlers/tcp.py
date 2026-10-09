@@ -140,7 +140,7 @@ class TCPHandler(BaseHandler):
             # Receive and verify the version
             version = self._recv_exact(1)
             if version != b"\x01":
-                logger.error(f"Incorrect subnegotiation version: {version}")
+                logger.error("Incorrect subnegotiation version: %s", version)
                 self.connection.sendall(b"\x01\x01")
                 return False
 
@@ -150,10 +150,10 @@ class TCPHandler(BaseHandler):
 
             expected = credentials()
             if self._credentials_match(username, password, expected):
-                logger.info(f"Authenticated user: {expected[0].decode('utf-8', 'backslashreplace')}")
+                logger.info("Authenticated user: %s", expected[0].decode("utf-8", "backslashreplace"))
                 self.connection.sendall(b"\x01\x00")  # version 1, status 0 (success)
                 return True
-            logger.warning(f"Authentication failed for client {self._peer_ip()}")
+            logger.warning("Authentication failed for client %s", self._peer_ip())
             self.connection.sendall(b"\x01\x01")  # version 1, status 1 (failure)
             return False
         except TimeoutError:
@@ -190,6 +190,6 @@ class TCPHandler(BaseHandler):
 
 def _log_socket_error(stage: str, e: OSError) -> None:
     if is_routine_disconnect(e):
-        logger.debug(f"Client disconnected during {stage}: {e}")
+        logger.debug("Client disconnected during %s: %s", stage, e)
     else:
-        logger.exception(f"Socket error during {stage}: {e}")
+        logger.error("Socket error during %s: %s", stage, e, exc_info=e)
