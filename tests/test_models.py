@@ -1,7 +1,15 @@
 import unittest
 
 from simple_socks5.constants import AddressTypeCodes
-from simple_socks5.models import DetailedAddress
+from simple_socks5.models import BaseAddress, DetailedAddress
+
+
+class TestBaseAddressStr(unittest.TestCase):
+    def test_ipv4(self):
+        assert str(BaseAddress("0.0.0.0", 1080)) == "0.0.0.0:1080"
+
+    def test_base_address_brackets_ipv6(self):
+        assert str(BaseAddress("::", 1080)) == "[::]:1080"
 
 
 class TestDetailedAddressStr(unittest.TestCase):

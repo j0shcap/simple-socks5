@@ -15,7 +15,7 @@ class BaseAddress:
     port: int
 
     def __str__(self):
-        return f"{self.ip}:{self.port}"
+        return format_host_port(self.ip, self.port)
 
 
 @dataclass

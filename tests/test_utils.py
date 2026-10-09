@@ -8,6 +8,7 @@ from simple_socks5.models import BaseAddress, DetailedAddress
 from simple_socks5.utils import (
     format_connection_closed,
     format_connection_established,
+    format_relay,
     generate_address_type_not_supported_reply,
     generate_command_not_supported_reply,
     generate_connection_method_response,
@@ -319,6 +320,18 @@ class TestConnectionLogLines(unittest.TestCase):
                 BaseAddress("172.17.0.1", 51234), self.dst, bytes_up=517, bytes_down=10485943, duration=2.314
             )
             == "CLOSED | 172.17.0.1:51234 -> example.com:443 (93.184.216.34) | up=517 B down=10485943 B | 2.31 s"
+        )
+
+    def test_format_relay_ipv4_unchanged(self):
+        assert (
+            format_relay("UDP", BaseAddress("172.17.0.1", 51234), BaseAddress("8.8.8.8", 53), 42)
+            == "RELAY | UDP | 172.17.0.1:51234 -> 8.8.8.8:53 | 42 bytes"
+        )
+
+    def test_format_relay_brackets_ipv6(self):
+        assert (
+            format_relay("UDP", BaseAddress("::1", 5000), BaseAddress("2001:db8::1", 53), 42)
+            == "RELAY | UDP | [::1]:5000 -> [2001:db8::1]:53 | 42 bytes"
         )
 
 

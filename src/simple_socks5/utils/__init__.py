@@ -6,9 +6,9 @@ from .addresses import (
     map_address_to_bytes,
 )
 from .logs import (
-    base_relay_template,
     format_connection_closed,
     format_connection_established,
+    format_relay,
 )
 from .replies import (
     generate_address_type_not_supported_reply,
@@ -30,9 +30,9 @@ from .sockets import (
 )
 
 __all__ = [
-    "base_relay_template",
     "format_connection_closed",
     "format_connection_established",
+    "format_relay",
     "generate_address_type_not_supported_reply",
     "generate_command_not_supported_reply",
     "generate_connection_method_response",

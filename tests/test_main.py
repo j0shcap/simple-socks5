@@ -75,6 +75,9 @@ class TestMainStartupAdvisories(unittest.TestCase):
         assert "OPEN PROXY" not in output
         assert DEFAULT_CREDENTIALS_MESSAGE in output
 
+    def test_server_started_line_brackets_ipv6_host(self):
+        assert "Server started on [::]:1080" in self.run_main(host="::")
+
     def test_password_never_logged(self):
         credentials = (("myusername", "mypassword"), ("admin", "p@ss:w0rd/%s\"'{}\\ü"))
         for (username, password), auth_required in [(c, a) for c in credentials for a in ("true", "false")]:

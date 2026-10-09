@@ -10,7 +10,7 @@ from ..logger import get_logger
 from ..models import BaseAddress, DetailedAddress
 from ..policy import check_destination
 from ..utils import (
-    base_relay_template,
+    format_relay,
     generate_udp_socket,
     map_address_enum_to_socket_family,
 )
@@ -160,13 +160,4 @@ class UDPRelay(BaseRelay):
                 )
 
     def _log_relay(self, src_addr: BaseAddress, dst_addr: BaseAddress, data_len: int):
-        logger.debug(
-            base_relay_template.substitute(
-                protocol="UDP",
-                src_ip=src_addr.ip,
-                src_port=src_addr.port,
-                dst_ip=dst_addr.ip,
-                dst_port=dst_addr.port,
-                data_size=data_len,
-            )
-        )
+        logger.debug(format_relay("UDP", src_addr, dst_addr, data_len))

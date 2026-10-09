@@ -2,11 +2,7 @@
 Standardized log messages.
 """
 
-import string
-
 from ..models import BaseAddress, DetailedAddress, format_host_port
-
-base_relay_template = string.Template("RELAY | $protocol | $src_ip:$src_port -> $dst_ip:$dst_port | $data_size bytes")
 
 
 def format_connection_established(client: BaseAddress, dst: DetailedAddress) -> str:
@@ -21,3 +17,7 @@ def format_connection_closed(
         f"CLOSED | {format_host_port(client.ip, client.port)} -> {dst} "
         f"| up={bytes_up} B down={bytes_down} B | {duration:.2f} s"
     )
+
+
+def format_relay(protocol: str, src: BaseAddress, dst: BaseAddress, data_size: int) -> str:
+    return f"RELAY | {protocol} | {src} -> {dst} | {data_size} bytes"

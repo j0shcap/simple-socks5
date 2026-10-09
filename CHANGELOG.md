@@ -31,6 +31,8 @@ to make the proxy safer; each such change is marked **Behaviour change** and is 
 ### Fixed
 - When the server can't start (for example, the port is already in use), it now exits with code 1
   under `python -S` too. Before, it crashed with `NameError: name 'exit' is not defined`.
+- IPv6 addresses are shown in brackets in the `Server started on` line and the UDP `RELAY` debug
+  lines, for example `[::]:1080` instead of `:::1080`.
 
 ## [2.1.0] - 2026-10-06
 
