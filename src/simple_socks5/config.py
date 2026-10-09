@@ -23,11 +23,10 @@ class ProxyConfiguration:
     }
 
     @classmethod
-    def initialize(cls, host: str, port: int, logging_level: int, use_tor: bool = False) -> None:
+    def initialize(cls, host: str, port: int, logging_level: int) -> None:
         cls._host = host
         cls._port = port
         cls._logging_level = logging_level
-        cls._use_tor = use_tor
 
     @classmethod
     def is_initialized(cls) -> bool:
