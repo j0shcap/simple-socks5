@@ -107,5 +107,5 @@ class UDPHandler(BaseHandler):
                 addr_bytes = socket.inet_pton(socket.AF_INET6, addr)
                 atyp = 0x04
             except OSError:
-                raise ValueError(f"Invalid IP address: {addr}")
+                raise ValueError(f"Invalid IP address: {addr}") from None
         return struct.pack("!HBB", 0, 0, atyp) + addr_bytes + struct.pack("!H", port)

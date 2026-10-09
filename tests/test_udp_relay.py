@@ -47,6 +47,12 @@ class TestBuildUDPResponseHeader(unittest.TestCase):
         with pytest.raises(ValueError):
             UDPHandler.build_udp_response_header("not-an-ip", 80)
 
+    def test_invalid_address_error_hides_internal_oserror(self):
+        # The OSErrors are how the address family is probed, not the cause of the failure.
+        with pytest.raises(ValueError, match="Invalid IP address: not-an-ip") as caught:
+            UDPHandler.build_udp_response_header("not-an-ip", 80)
+        assert caught.value.__suppress_context__
+
 
 CLIENT_ADDR = ("127.0.0.1", 1234)
 
