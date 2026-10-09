@@ -5,7 +5,7 @@ tests and the container smoke test pass. Replace `X.Y.Z` below with the version.
 
 ## 1. Prepare the release PR
 
-- Bump `version` in `pyproject.toml` and `__version__` in `src/argument_parser.py`. `tests/test_version.py`
+- Bump `version` in `pyproject.toml` and `__version__` in `src/simple_socks5/argument_parser.py`. `tests/test_version.py`
   fails if they differ.
 - In `CHANGELOG.md`, move the `[Unreleased]` entries into `## [X.Y.Z] - YYYY-MM-DD`, leave `## [Unreleased]`
   empty above it, and update the link references at the bottom. List every **Behaviour change** and its opt-out

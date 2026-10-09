@@ -45,7 +45,7 @@ def test_udp_associate_echo(proxy, udp_echo_origin):
 
 
 def test_udp_relay_lines_logged_at_debug_only(proxy, udp_echo_origin, caplog):
-    caplog.set_level(logging.DEBUG, logger="src")
+    caplog.set_level(logging.DEBUG, logger="simple_socks5")
     with _udp_association(proxy) as (control, udp, relay_address):
         _assert_echo(udp, relay_address, udp_echo_origin.port)
 
@@ -55,14 +55,14 @@ def test_udp_relay_lines_logged_at_debug_only(proxy, udp_echo_origin, caplog):
 
 
 def test_association_logs_one_connection_and_one_closed_line(proxy, udp_echo_origin, caplog):
-    caplog.set_level(logging.INFO, logger="src")
+    caplog.set_level(logging.INFO, logger="simple_socks5")
     with _udp_association(proxy) as (control, udp, relay_address):
         _assert_echo(udp, relay_address, udp_echo_origin.port, payload=b"ping")
         _assert_echo(udp, relay_address, udp_echo_origin.port, payload=b"hello")
         control.close()
         assert proxy.server.wait_for_connections(sc.TIMEOUT)
 
-    messages = [r.getMessage() for r in caplog.records if r.name.startswith("src")]
+    messages = [r.getMessage() for r in caplog.records if r.name.startswith("simple_socks5")]
     assert [m.split(" |")[0] for m in messages] == ["CONNECTION", "CLOSED"]
     assert "| up=9 B down=9 B |" in messages[1]
 
@@ -138,7 +138,7 @@ def test_close_connections_ends_udp_association(proxy):
 
 
 def test_idle_timeout_ends_association(monkeypatch, proxy):
-    monkeypatch.setattr("src.relays.udp_relay.UDP_RECV_TIMEOUT", 0.3)
+    monkeypatch.setattr("simple_socks5.relays.udp_relay.UDP_RECV_TIMEOUT", 0.3)
 
     with _udp_association(proxy) as (control, _, _):
         assert proxy.server.wait_for_connections(2)

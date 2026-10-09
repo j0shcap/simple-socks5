@@ -1,5 +1,5 @@
 """
-End-to-end fixtures: the real proxy (src.server) and local origins, all in-process on loopback.
+End-to-end fixtures: the real proxy (simple_socks5.server) and local origins, all in-process on loopback.
 
 Every e2e test gets a fresh proxy and fresh origins on port 0; nothing is shared between tests.
 Use tests/e2e/socks_client.py to talk to the proxy.
@@ -49,7 +49,7 @@ from dataclasses import dataclass
 
 import pytest
 
-from src.server import TCPProxyServer, ThreadingTCPServer
+from simple_socks5.server import TCPProxyServer, ThreadingTCPServer
 from tests.e2e.origins import (
     EchoHandler,
     HalfCloseHandler,

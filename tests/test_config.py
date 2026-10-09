@@ -1,7 +1,7 @@
 import logging
 import unittest
 
-from src.config import ProxyConfiguration
+from simple_socks5.config import ProxyConfiguration
 
 
 class TestProxyConfiguration(unittest.TestCase):

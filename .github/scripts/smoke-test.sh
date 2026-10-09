@@ -181,8 +181,8 @@ wait_for "the HTTP server on port $http_port" http_ready
 start_container "$@"
 
 healthcheck=$(docker inspect -f '{{json .Config.Healthcheck.Test}}' "$container")
-if [[ $healthcheck != *src.healthcheck* ]]; then
-    echo "Expected the HEALTHCHECK to run src.healthcheck, got $healthcheck" >&2
+if [[ $healthcheck != *simple_socks5.healthcheck* ]]; then
+    echo "Expected the HEALTHCHECK to run simple_socks5.healthcheck, got $healthcheck" >&2
     exit 1
 fi
 

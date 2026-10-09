@@ -8,6 +8,14 @@ to make the proxy safer; each such change is marked **Behaviour change** and is 
 
 ## [Unreleased]
 
+### Changed
+- The code is now the `simple_socks5` package under `src/`, and `pip install .` installs it.
+  `python3 app.py` keeps working from a clone and in the image.
+- **Behaviour change:** the image healthcheck runs `python -m simple_socks5.healthcheck`. If
+  you copied `python -m src.healthcheck` into a compose file or Kubernetes probe, update it.
+- **Behaviour change:** logger names in `SOCKS5_LOG_FILE` lines change from `[src.…]` to
+  `[simple_socks5.…]`, which matters if you parse that file. Console lines are unchanged.
+
 ## [2.1.0] - 2026-10-06
 
 ### Upgrading from 2.0 (behaviour changes)

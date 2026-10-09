@@ -1,5 +1,6 @@
 """
-python -m src.healthcheck: healthy (exit 0) when a SOCKS5 server answers the greeting, else unhealthy (exit 1).
+python -m simple_socks5.healthcheck: healthy (exit 0) when a SOCKS5 server answers the greeting, else unhealthy
+(exit 1).
 """
 import logging
 import socket
@@ -11,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from src import healthcheck
+from simple_socks5 import healthcheck
 from tests.e2e.app_process import free_port
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -38,7 +39,12 @@ def one_shot_server(reply: bytes):
 def run_module(port: int) -> subprocess.CompletedProcess:
     env = {"PATH": "", "SOCKS5_HEALTHCHECK_PORT": str(port)}
     return subprocess.run(
-        [sys.executable, "-m", "src.healthcheck"], cwd=REPO_ROOT, env=env, capture_output=True, text=True, timeout=15
+        [sys.executable, "-m", "simple_socks5.healthcheck"],
+        cwd=REPO_ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=15,
     )
 
 
@@ -46,7 +52,7 @@ def run_module(port: int) -> subprocess.CompletedProcess:
 def test_ten_probes_log_nothing_above_debug(make_proxy, monkeypatch, caplog, auth_required):
     proxy = make_proxy(auth_required=auth_required)
     monkeypatch.setenv("SOCKS5_HEALTHCHECK_PORT", str(proxy.address[1]))
-    caplog.set_level(logging.DEBUG, logger="src")
+    caplog.set_level(logging.DEBUG, logger="simple_socks5")
 
     assert [healthcheck.main() for _ in range(10)] == [0] * 10
     assert proxy.server.wait_for_connections(5)

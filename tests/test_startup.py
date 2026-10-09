@@ -8,7 +8,7 @@ import re
 import unittest
 from unittest.mock import patch
 
-from src.startup import (
+from simple_socks5.startup import (
     AUTH_EXPLICITLY_DISABLED_MESSAGE,
     DEFAULT_CREDENTIALS_MESSAGE,
     OPEN_PROXY_BANNER,

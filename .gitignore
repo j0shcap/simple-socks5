@@ -4,3 +4,7 @@
 .venv
 # Rotated error logs from SOCKS5_LOG_FILE or versions before 2.1
 errors.log*
+
+# Build output from pip install
+*.egg-info/
+build/

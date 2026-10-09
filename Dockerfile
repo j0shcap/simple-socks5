@@ -8,7 +8,10 @@ ENV LOGGING_LEVEL=${LOGGING_LEVEL} \
 
 WORKDIR /app
 
+COPY pyproject.toml ./
 COPY src/ ./src/
+RUN pip install --no-cache-dir --no-deps --root-user-action=ignore . \
+    && rm -rf src build pyproject.toml
 COPY app.py .
 
 # Switch User (non-root)
@@ -19,6 +22,6 @@ USER appuser
 EXPOSE 1080
 # Speaks SOCKS5, so the server logs the probe at DEBUG only. Set SOCKS5_HEALTHCHECK_PORT if you change --port.
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
-    CMD ["python", "-m", "src.healthcheck"]
+    CMD ["python", "-m", "simple_socks5.healthcheck"]
 # Exec form so python is PID 1 and receives SIGTERM from docker stop; app.py reads LOGGING_LEVEL itself.
 CMD ["python", "app.py", "--host", "0.0.0.0", "--port", "1080"]

@@ -8,7 +8,7 @@ import sys
 import unittest
 from pathlib import Path
 
-from src.argument_parser import __version__
+from simple_socks5.argument_parser import __version__
 
 ROOT = Path(__file__).resolve().parents[1]
 

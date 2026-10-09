@@ -5,7 +5,7 @@ import io
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 
-from src.argument_parser import parse_arguments
+from simple_socks5.argument_parser import parse_arguments
 
 
 class TestLoggingLevelPrecedence(unittest.TestCase):

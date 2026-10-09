@@ -9,7 +9,7 @@ import time
 
 import pytest
 
-from src.constants import SHUTDOWN_GRACE_PERIOD
+from simple_socks5.constants import SHUTDOWN_GRACE_PERIOD
 from tests.e2e import socks_client as sc
 from tests.e2e.app_process import run_app, socks_ready
 

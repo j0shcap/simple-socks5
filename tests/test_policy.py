@@ -6,8 +6,8 @@ import socket
 import unittest
 from unittest.mock import patch
 
-from src.exceptions import PolicyDenied
-from src.policy import check_destination, is_destination_allowed
+from simple_socks5.exceptions import PolicyDenied
+from simple_socks5.policy import check_destination, is_destination_allowed
 
 DENIED = (
     "127.0.0.1",

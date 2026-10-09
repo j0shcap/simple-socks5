@@ -1,10 +1,10 @@
 import random
 import unittest
 
-from src.constants import AddressTypeCodes
-from src.exceptions import InvalidRequestError, MalformedDatagramError
-from src.handlers.udp import UDPHandler
-from src.models import UDPDatagram
+from simple_socks5.constants import AddressTypeCodes
+from simple_socks5.exceptions import InvalidRequestError, MalformedDatagramError
+from simple_socks5.handlers.udp import UDPHandler
+from simple_socks5.models import UDPDatagram
 from tests.e2e import socks_client as sc
 
 IPV4_HEADER = sc.build_udp_header(sc.ATYP_IPV4, "10.0.0.1", 53)

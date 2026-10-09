@@ -38,7 +38,7 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        python -m pip install flake8 pytest pytest-cov
+        python -m pip install -e . flake8 pytest pytest-cov
 
     - name: Lint with flake8
       run: |
@@ -46,7 +46,7 @@ jobs:
 
     - name: Test with pytest
       run: |
-        pytest --cov=src --cov-fail-under=85
+        pytest --cov=simple_socks5 --cov-fail-under=85
 
   smoke:
     name: smoke (${{ matrix.variant.name }})

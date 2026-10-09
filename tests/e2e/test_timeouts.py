@@ -10,7 +10,7 @@ from contextlib import ExitStack, contextmanager
 
 import pytest
 
-from src.constants import DEFAULT_MAX_CONNECTIONS
+from simple_socks5.constants import DEFAULT_MAX_CONNECTIONS
 from tests.e2e import socks_client as sc
 from tests.e2e.conftest import E2E_PASSWORD, E2E_USERNAME
 

@@ -134,7 +134,7 @@ docker pull jcaponigro20/simple-socks5:2       # 2.x minor and patch releases
 | `X.Y.Z-logging-disabled`, `logging-disabled` | The same, with logging disabled. |
 | `2.0.0`, `2.0.0-logging-disabled` | The pre-2.1 behaviour. |
 
-The image's `HEALTHCHECK` runs `python -m src.healthcheck` every 30 seconds. It sends a SOCKS5 greeting to `127.0.0.1` on `SOCKS5_HEALTHCHECK_PORT` (default `1080`) and passes on any SOCKS5 reply, so it works with and without authentication, and the proxy logs it at `debug` only. If you override the command with a different `--port`, set `SOCKS5_HEALTHCHECK_PORT` to match. If you bind a specific non-loopback address instead of `0.0.0.0` or `::`, the healthcheck can't reach it.
+The image's `HEALTHCHECK` runs `python -m simple_socks5.healthcheck` every 30 seconds. It sends a SOCKS5 greeting to `127.0.0.1` on `SOCKS5_HEALTHCHECK_PORT` (default `1080`) and passes on any SOCKS5 reply, so it works with and without authentication, and the proxy logs it at `debug` only. If you override the command with a different `--port`, set `SOCKS5_HEALTHCHECK_PORT` to match. If you bind a specific non-loopback address instead of `0.0.0.0` or `::`, the healthcheck can't reach it.
 
 `docker stop` (SIGTERM) shuts the proxy down gracefully: it stops accepting connections, gives open connections up to 5 seconds to finish, then closes them and exits with code 0. Ctrl-C (SIGINT) does the same. Docker kills the container if it hasn't exited by the stop timeout, so keep that above 5 seconds: Docker Engine's default is 10, but some Docker Desktop versions use less. Run with `--stop-timeout 10` or stop with `docker stop -t 10` to be sure.
 
@@ -155,8 +155,8 @@ The default credentials (`myusername`/`mypassword`) are public; always set your 
 
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
-pip install pytest pytest-cov flake8
-pytest --cov=src --cov-fail-under=85
+pip install -e . pytest pytest-cov flake8
+pytest --cov=simple_socks5 --cov-fail-under=85
 flake8 src/ tests/
 ```
 

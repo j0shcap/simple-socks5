@@ -6,7 +6,7 @@ import time
 
 import pytest
 
-from src.server import TCPProxyServer, ThreadingTCPServer
+from simple_socks5.server import TCPProxyServer, ThreadingTCPServer
 from tests.e2e import socks_client as sc
 from tests.e2e.origins import serve_in_thread
 
