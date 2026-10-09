@@ -303,6 +303,14 @@ class TestTCPRequestHandlerIPv4(unittest.TestCase):
         assert atyp == AddressTypeCodes.IPv4.value
 
     @patch("simple_socks5.handlers.base.socket.getaddrinfo")
+    def test_resolve_hostname_non_str_sockaddr_is_unresolved(self, mock_getaddrinfo):
+        """A Python built without IPv6 support reports AF_INET6 results as (int, bytes) sockaddrs."""
+        mock_getaddrinfo.return_value = [(socket.AF_INET6, socket.SOCK_STREAM, 0, "", (10, b"\x00" * 16))]
+        ip, atyp = self.handler._resolve_hostname("example.com")
+        assert ip == "example.com"
+        assert atyp == AddressTypeCodes.IPv4.value
+
+    @patch("simple_socks5.handlers.base.socket.getaddrinfo")
     def test_resolve_hostname_empty_result_returns_name(self, mock_getaddrinfo):
         """getaddrinfo returning empty list should fall back to name with IPv4."""
         mock_getaddrinfo.return_value = []
