@@ -9,8 +9,34 @@ description = "A Python SOCKS Protocol Version 5 proxy server"
 requires-python = ">=3.10"
 license = "MIT"
 
+[project.optional-dependencies]
+# Ruff is pinned exactly so local runs and CI lint and format identically; bump it on purpose.
+dev = ["ruff==0.16.10", "pytest", "pytest-cov"]
+
 [project.scripts]
 simple-socks5 = "simple_socks5.main:cli"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 120
+
+[tool.ruff.lint]
+select = [
+    "E", "W", "F", "I", "B", "UP", "SIM", "C4", "RUF", "BLE", "S", "PT", "RET", "ARG", "N", "PL",
+    "TRY", "PERF", "PIE", "T20", "T10", "ERA", "LOG", "G", "PGH", "A",
+]
+ignore = [
+    "TRY003",  # a ValueError carrying its message is the idiomatic way to report bad configuration
+    "TRY400",  # expected errors are logged without a traceback on purpose (exc_info=False)
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = [
+    "S101",                  # pytest asserts
+    "PLR2004",               # expected values in assertions are the point of a test
+    "S104",                  # tests exercise bind-all ("0.0.0.0") handling
+    "S105", "S106", "S107",  # fixed fake credentials
+]
