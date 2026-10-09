@@ -1,11 +1,12 @@
 import logging
+from collections.abc import Mapping
 from logging.handlers import RotatingFileHandler
-from typing import ClassVar
+from typing import Final
 
 from .constants import LOG_FILE_BACKUP_COUNT, LOG_FILE_MAX_BYTES, log_file
 
-CONSOLE_FORMAT = "[%(asctime)s] - [%(levelname)s] - %(message)s"
-FILE_FORMAT = "[%(asctime)s] - [%(name)s] - [%(levelname)s] - [%(message)s]"
+CONSOLE_FORMAT: Final = "[%(asctime)s] - [%(levelname)s] - %(message)s"
+FILE_FORMAT: Final = "[%(asctime)s] - [%(name)s] - [%(levelname)s] - [%(message)s]"
 
 # Every module logger ("simple_socks5.server", "simple_socks5.relays.tcp_relay", ...) propagates to this one, which
 # holds the only handlers. Until update_loggers() runs it just propagates, so library use and tests see records via
@@ -15,27 +16,27 @@ _package_logger.addHandler(logging.NullHandler())
 
 
 class LogColors:
-    RED = "\033[91m"
-    GREEN = "\033[92m"
-    YELLOW = "\033[93m"
-    WHITE = "\033[97m"
-    GREY = "\033[90m"
-    RESET = "\033[0m"
+    RED: Final = "\033[91m"
+    GREEN: Final = "\033[92m"
+    YELLOW: Final = "\033[93m"
+    WHITE: Final = "\033[97m"
+    GREY: Final = "\033[90m"
+    RESET: Final = "\033[0m"
 
 
 class ColorFormatter(logging.Formatter):
-    COLORS: ClassVar[dict[int, str]] = {
+    COLORS: Final[Mapping[int, str]] = {
         logging.ERROR: LogColors.RED,
         logging.WARNING: LogColors.YELLOW,
         logging.INFO: LogColors.WHITE,
         logging.DEBUG: LogColors.GREY,
     }
 
-    def __init__(self, fmt: str, use_color: bool):
+    def __init__(self, fmt: str, use_color: bool) -> None:
         super().__init__(fmt)
         self.use_color = use_color
 
-    def format(self, record):
+    def format(self, record: logging.LogRecord) -> str:
         message = super().format(record)
         color = self.COLORS.get(record.levelno) if self.use_color else None
         if color:

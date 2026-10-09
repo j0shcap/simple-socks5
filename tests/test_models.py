@@ -1,7 +1,7 @@
 import unittest
 
 from simple_socks5.constants import AddressTypeCodes
-from simple_socks5.models import BaseAddress, DetailedAddress
+from simple_socks5.models import BaseAddress, DetailedAddress, UDPDatagram
 
 
 class TestBaseAddressStr(unittest.TestCase):
@@ -24,3 +24,14 @@ class TestDetailedAddressStr(unittest.TestCase):
     def test_ipv6_literal_in_brackets(self):
         address = DetailedAddress(ip="2001:db8::1", port=443, name="2001:db8::1", address_type=AddressTypeCodes.IPv6)
         assert str(address) == "[2001:db8::1]:443"
+
+
+class TestUDPDatagramStr(unittest.TestCase):
+    def test_data_shown_as_bytes_literal(self):
+        datagram = UDPDatagram(
+            frag=0, address_type=AddressTypeCodes.IPv4, dst_addr="8.8.8.8", dst_port=53, data=b"\x00hi"
+        )
+        assert str(datagram) == (
+            "Fragment: 0, Address Type: AddressTypeCodes.IPv4, Destination Address: 8.8.8.8, "
+            "Destination Port: 53, Data: b'\\x00hi'"
+        )

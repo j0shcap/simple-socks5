@@ -7,13 +7,14 @@ passes whether or not SOCKS5_AUTH_REQUIRED is set. The server logs such a probe 
 
 import socket
 import sys
+from typing import Final
 
 from .constants import SOCKS_VERSION, MethodCodes, healthcheck_port
 
-HOST = "127.0.0.1"
-TIMEOUT = 3.0  # seconds, for the connect and for each send and receive
-REPLY_LENGTH = 2  # VER and METHOD
-GREETING = bytes([SOCKS_VERSION, 1, MethodCodes.NO_AUTHENTICATION_REQUIRED.value])
+HOST: Final = "127.0.0.1"
+TIMEOUT: Final = 3.0  # seconds, for the connect and for each send and receive
+REPLY_LENGTH: Final = 2  # VER and METHOD
+GREETING: Final = bytes([SOCKS_VERSION, 1, MethodCodes.NO_AUTHENTICATION_REQUIRED.value])
 
 
 def probe(host: str, port: int, timeout: float = TIMEOUT) -> bool:

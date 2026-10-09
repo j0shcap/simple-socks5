@@ -12,11 +12,12 @@ class InvalidRequestError(Exception):
     """Exception raised for invalid requests.
 
     Attributes:
-        request (bytes | int): The invalid request that caused the error.
+        request (bytes | int | str): The invalid field, or a description of what is wrong.
     """
 
-    def __init__(self, request: bytes | int) -> None:
-        super().__init__(f"Invalid request: {request}")
+    def __init__(self, request: bytes | int | str) -> None:
+        shown = repr(request) if isinstance(request, bytes) else request
+        super().__init__(f"Invalid request: {shown}")
 
 
 class AddressTypeNotSupportedError(InvalidRequestError):

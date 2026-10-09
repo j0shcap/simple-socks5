@@ -7,13 +7,14 @@ import ipaddress
 import logging
 import os
 from collections.abc import Mapping
+from typing import Final, TypeAlias
 
 from . import constants
 from .constants import DEFAULT_PASSWORD, DEFAULT_USERNAME
 
-Advisory = tuple[int, str]  # (logging level, message)
+Advisory: TypeAlias = tuple[int, str]  # (logging level, message)
 
-OPEN_PROXY_BANNER: tuple[str, ...] = (
+OPEN_PROXY_BANNER: Final[tuple[str, ...]] = (
     "=" * 72,
     "OPEN PROXY: authentication is not required and the server listens on {host}.",
     "Anyone who can reach this port can use this proxy, and your IP address, for their traffic.",
@@ -22,8 +23,8 @@ OPEN_PROXY_BANNER: tuple[str, ...] = (
     "See https://github.com/j0shcap/simple-socks5#security",
     "=" * 72,
 )
-AUTH_EXPLICITLY_DISABLED_MESSAGE = "Authentication disabled by SOCKS5_AUTH_REQUIRED=false."
-DEFAULT_CREDENTIALS_MESSAGE = (
+AUTH_EXPLICITLY_DISABLED_MESSAGE: Final = "Authentication disabled by SOCKS5_AUTH_REQUIRED=false."
+DEFAULT_CREDENTIALS_MESSAGE: Final = (
     "The built-in default credentials are in use and are publicly known. "
     "Set SOCKS5_USERNAME and SOCKS5_PASSWORD to private values."
 )
@@ -37,8 +38,9 @@ def is_loopback_host(host: str) -> bool:
         address = ipaddress.ip_address(host)
     except ValueError:
         return False
-    mapped = getattr(address, "ipv4_mapped", None)
-    return (mapped or address).is_loopback
+    if isinstance(address, ipaddress.IPv6Address) and address.ipv4_mapped is not None:
+        return address.ipv4_mapped.is_loopback
+    return address.is_loopback
 
 
 def auth_explicitly_disabled(environ: Mapping[str, str] = os.environ) -> bool:
