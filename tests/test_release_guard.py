@@ -18,27 +18,27 @@ class TestReleaseGuard(unittest.TestCase):
         for ref in ("v2.1.0", "v2.10.3", "v3.0.0"):
             with self.subTest(ref=ref):
                 result = run_guard(ref)
-                self.assertEqual(result.returncode, 0, result.stderr)
-                self.assertEqual(result.stdout, "prerelease=false\n")
+                assert result.returncode == 0, result.stderr
+                assert result.stdout == "prerelease=false\n"
 
     def test_prerelease_is_accepted_without_moving_floating_tags(self):
         for ref in ("v2.1.0-rc.1", "v3.0.0-beta"):
             with self.subTest(ref=ref):
                 result = run_guard(ref)
-                self.assertEqual(result.returncode, 0, result.stderr)
-                self.assertEqual(result.stdout, "prerelease=true\n")
+                assert result.returncode == 0, result.stderr
+                assert result.stdout == "prerelease=true\n"
 
     def test_versions_below_2_1_are_rejected(self):
         for ref in ("v2.0.0", "v2.0.1", "v2.0.0-rc.1", "v1.9.9", "v0.1.0"):
             with self.subTest(ref=ref):
                 result = run_guard(ref)
-                self.assertEqual(result.returncode, 1)
-                self.assertEqual(result.stdout, "")
-                self.assertIn("2.0.0", result.stderr)
+                assert result.returncode == 1
+                assert result.stdout == ""
+                assert "2.0.0" in result.stderr
 
     def test_non_semver_refs_are_rejected(self):
         for ref in ("v2.1", "vfoo", "2.1.0", "v02.1.0", "v2.1.0+build", ""):
             with self.subTest(ref=ref):
                 result = run_guard(ref)
-                self.assertEqual(result.returncode, 1)
-                self.assertEqual(result.stdout, "")
+                assert result.returncode == 1
+                assert result.stdout == ""

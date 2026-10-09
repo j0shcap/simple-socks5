@@ -42,21 +42,21 @@ class TestReplyCodeFor(unittest.TestCase):
     def test_reply_code_for(self):
         for exc, expected in CASES:
             with self.subTest(exc=repr(exc)):
-                self.assertIs(reply_code_for(exc), expected)
+                assert reply_code_for(exc) is expected
 
     def test_typed_request_errors_are_invalid_request_errors(self):
-        self.assertIsInstance(AddressTypeNotSupportedError(5), InvalidRequestError)
-        self.assertIsInstance(InvalidDomainNameError(b"\xff"), InvalidRequestError)
+        assert isinstance(AddressTypeNotSupportedError(5), InvalidRequestError)
+        assert isinstance(InvalidDomainNameError(b"\xff"), InvalidRequestError)
 
 
 class TestPolicyDenied(unittest.TestCase):
     def test_policy_denied_keeps_host_and_port(self):
         e = PolicyDenied("169.254.169.254", 80)
-        self.assertEqual((e.host, e.port), ("169.254.169.254", 80))
-        self.assertEqual(str(e), "destination 169.254.169.254:80 is blocked by the destination policy")
+        assert (e.host, e.port) == ("169.254.169.254", 80)
+        assert str(e) == "destination 169.254.169.254:80 is blocked by the destination policy"
 
     def test_policy_denied_message_brackets_ipv6(self):
-        self.assertIn("[::1]:443", str(PolicyDenied("::1", 443)))
+        assert "[::1]:443" in str(PolicyDenied("::1", 443))
 
 
 ROUTINE_DISCONNECT_CASES = (
@@ -80,7 +80,7 @@ class TestIsRoutineDisconnect(unittest.TestCase):
     def test_is_routine_disconnect(self):
         for exc, expected in ROUTINE_DISCONNECT_CASES:
             with self.subTest(exc=repr(exc)):
-                self.assertIs(is_routine_disconnect(exc), expected)
+                assert is_routine_disconnect(exc) is expected
 
 
 if __name__ == "__main__":

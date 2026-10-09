@@ -12,7 +12,7 @@ class TestProxyConfiguration(unittest.TestCase):
         class FreshConfig(ProxyConfiguration):
             pass
 
-        self.assertFalse(FreshConfig.is_initialized())
+        assert not FreshConfig.is_initialized()
 
     def test_is_initialized_returns_true_after_init(self):
         """After initialize() is called, is_initialized() should return True."""
@@ -21,7 +21,7 @@ class TestProxyConfiguration(unittest.TestCase):
             pass
 
         FreshConfig.initialize("localhost", 1080, "debug")
-        self.assertTrue(FreshConfig.is_initialized())
+        assert FreshConfig.is_initialized()
 
     def test_get_logging_level_returns_correct_level(self):
 
@@ -29,7 +29,7 @@ class TestProxyConfiguration(unittest.TestCase):
             pass
 
         FreshConfig.initialize("localhost", 1080, "info")
-        self.assertEqual(FreshConfig.get_logging_level(), logging.INFO)
+        assert FreshConfig.get_logging_level() == logging.INFO
 
     def test_get_logging_level_disabled_returns_notset(self):
 
@@ -37,15 +37,15 @@ class TestProxyConfiguration(unittest.TestCase):
             pass
 
         FreshConfig.initialize("localhost", 1080, "disabled")
-        self.assertEqual(FreshConfig.get_logging_level(), logging.NOTSET)
+        assert FreshConfig.get_logging_level() == logging.NOTSET
 
     def test_get_host_and_port(self):
         class FreshConfig(ProxyConfiguration):
             pass
 
         FreshConfig.initialize("0.0.0.0", 9999, "debug")
-        self.assertEqual(FreshConfig.get_host(), "0.0.0.0")
-        self.assertEqual(FreshConfig.get_port(), 9999)
+        assert FreshConfig.get_host() == "0.0.0.0"
+        assert FreshConfig.get_port() == 9999
 
 
 if __name__ == "__main__":

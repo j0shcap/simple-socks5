@@ -7,6 +7,8 @@ import socket
 import unittest
 from unittest.mock import patch
 
+import pytest
+
 from simple_socks5.exceptions import PolicyDenied
 from simple_socks5.policy import check_destination, is_destination_allowed
 
@@ -69,28 +71,28 @@ class TestDefaultPolicy(unittest.TestCase):
     def test_denied(self):
         for ip in DENIED:
             with self.subTest(ip=ip):
-                self.assertFalse(is_destination_allowed(ip))
-                with self.assertRaises(PolicyDenied):
+                assert not is_destination_allowed(ip)
+                with pytest.raises(PolicyDenied):
                     check_destination(ip, 80)
 
     def test_allowed(self):
         for ip in ALLOWED:
             with self.subTest(ip=ip):
-                self.assertTrue(is_destination_allowed(ip))
+                assert is_destination_allowed(ip)
                 check_destination(ip, 80)
 
     def test_malformed_not_allowed(self):
         for host in MALFORMED:
             with self.subTest(host=host):
-                self.assertFalse(is_destination_allowed(host))
-                with self.assertRaises(socket.gaierror) as ctx:
+                assert not is_destination_allowed(host)
+                with pytest.raises(socket.gaierror) as ctx:
                     check_destination(host, 80)
-                self.assertEqual(ctx.exception.errno, socket.EAI_NONAME)
+                assert ctx.value.errno == socket.EAI_NONAME
 
     def test_check_destination_raises_policy_denied_with_host_and_port(self):
-        with self.assertRaises(PolicyDenied) as ctx:
+        with pytest.raises(PolicyDenied) as ctx:
             check_destination("::1", 8080)
-        self.assertEqual((ctx.exception.host, ctx.exception.port), ("::1", 8080))
+        assert (ctx.value.host, ctx.value.port) == ("::1", 8080)
 
 
 class TestAllowLoopbackOptOut(unittest.TestCase):
@@ -102,17 +104,17 @@ class TestAllowLoopbackOptOut(unittest.TestCase):
     def test_opt_out_allows_every_denied_entry(self):
         for ip in DENIED:
             with self.subTest(ip=ip):
-                self.assertTrue(is_destination_allowed(ip))
+                assert is_destination_allowed(ip)
                 check_destination(ip, 80)
 
     def test_opt_out_skips_literal_check(self):
         # connect() resolves an unresolved name itself, as before the policy existed
-        self.assertIsNone(check_destination("example.invalid", 80))
+        assert check_destination("example.invalid", 80) is None
 
     def test_opt_out_read_at_call_time(self):
         with patch.dict(os.environ, {"SOCKS5_ALLOW_LOOPBACK": "false"}):
-            self.assertFalse(is_destination_allowed("127.0.0.1"))
-        self.assertTrue(is_destination_allowed("127.0.0.1"))
+            assert not is_destination_allowed("127.0.0.1")
+        assert is_destination_allowed("127.0.0.1")
 
 
 if __name__ == "__main__":

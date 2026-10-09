@@ -160,12 +160,12 @@ class TestColorFormatter(unittest.TestCase):
 
     def test_colour_wraps_message(self):
         formatted = ColorFormatter(CONSOLE_FORMAT, use_color=True).format(self.record(logging.ERROR))
-        self.assertTrue(formatted.startswith("\x1b[91m"))
-        self.assertTrue(formatted.endswith("\x1b[0m"))
+        assert formatted.startswith("\x1b[91m")
+        assert formatted.endswith("\x1b[0m")
 
     def test_no_colour_is_plain(self):
         formatted = ColorFormatter(CONSOLE_FORMAT, use_color=False).format(self.record(logging.ERROR))
-        self.assertEqual(formatted, "ERROR message")
+        assert formatted == "ERROR message"
 
 
 if __name__ == "__main__":
