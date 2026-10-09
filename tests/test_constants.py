@@ -3,6 +3,7 @@ Ensures that the constants are correct and that hex values are correctly mapped 
 """
 
 import os
+import re
 import unittest
 from unittest.mock import patch
 
@@ -170,7 +171,9 @@ class TestMaxConnectionsEnv(unittest.TestCase):
             with (
                 self.subTest(raw=raw),
                 patch.dict(os.environ, {"SOCKS5_MAX_CONNECTIONS": raw}),
-                pytest.raises(ValueError, match=f"SOCKS5_MAX_CONNECTIONS must be a positive integer, got '{raw}'"),
+                pytest.raises(
+                    ValueError, match=re.escape(f"SOCKS5_MAX_CONNECTIONS must be a positive integer, got '{raw}'")
+                ),
             ):
                 max_connections()
 

@@ -114,7 +114,7 @@ class ThreadingTCPServer(ThreadingMixIn, TCPServer):
             message += f" ({suppressed} more denied since the last warning)"
         logger.warning(message)
 
-    def handle_error(self, _request, client_address):
+    def handle_error(self, request, client_address):  # noqa: ARG002 - keeps socketserver.BaseServer's signature
         """
         Logs an exception that escaped a handler. socketserver's default prints the traceback to stderr, ignoring -L.
         """

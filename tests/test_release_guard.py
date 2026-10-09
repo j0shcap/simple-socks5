@@ -7,15 +7,17 @@ import subprocess
 import unittest
 from pathlib import Path
 
+BASH = shutil.which("bash")
 GUARD = Path(__file__).resolve().parents[1] / ".github" / "scripts" / "release-guard.sh"
 
 
 def run_guard(ref_name: str) -> subprocess.CompletedProcess:
     return subprocess.run(  # noqa: S603 - fixed argv built by the test
-        [shutil.which("bash"), str(GUARD), ref_name], capture_output=True, text=True, check=False
+        [BASH, str(GUARD), ref_name], capture_output=True, text=True, check=False
     )
 
 
+@unittest.skipIf(BASH is None, "bash is not on PATH")
 class TestReleaseGuard(unittest.TestCase):
     def test_stable_release_is_accepted(self):
         for ref in ("v2.1.0", "v2.10.3", "v3.0.0"):
