@@ -9,5 +9,8 @@ description = "A Python SOCKS Protocol Version 5 proxy server"
 requires-python = ">=3.10"
 license = "MIT"
 
+[project.scripts]
+simple-socks5 = "simple_socks5.main:cli"
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]

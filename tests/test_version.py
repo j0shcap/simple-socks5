@@ -6,9 +6,11 @@ import re
 import subprocess
 import sys
 import unittest
+from importlib.metadata import entry_points
 from pathlib import Path
 
 from simple_socks5.argument_parser import __version__
+from simple_socks5.main import cli
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -31,6 +33,18 @@ class TestVersion(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout, f"app.py {__version__}\n")
+
+    def test_module_prints_version(self):
+        result = subprocess.run(
+            [sys.executable, "-m", "simple_socks5", "--version"], cwd=ROOT, capture_output=True, text=True
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        # argparse's prog for -m differs across Python versions, so only the version is checked.
+        self.assertTrue(result.stdout.endswith(f" {__version__}\n"), result.stdout)
+
+    def test_console_script_points_at_cli(self):
+        (script,) = entry_points(group="console_scripts", name="simple-socks5")
+        self.assertIs(script.load(), cli)
 
 
 if __name__ == "__main__":

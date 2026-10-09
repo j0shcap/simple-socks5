@@ -12,7 +12,7 @@ from unittest.mock import MagicMock, patch
 
 from simple_socks5.config import ProxyConfiguration
 from simple_socks5.constants import SHUTDOWN_FORCE_CLOSE_TIMEOUT, SHUTDOWN_GRACE_PERIOD
-from simple_socks5.main import GracefulShutdown, main
+from simple_socks5.main import GracefulShutdown, cli, main
 from simple_socks5.startup import DEFAULT_CREDENTIALS_MESSAGE, OPEN_PROXY_BANNER
 
 BANNER_HEADLINE = OPEN_PROXY_BANNER[1].format(host="0.0.0.0")
@@ -209,6 +209,13 @@ class TestGracefulShutdown(unittest.TestCase):
         finally:
             self.shutdown.restore()
         self.assertEqual({signum: signal.getsignal(signum) for signum in previous}, previous)
+
+
+class TestCli(unittest.TestCase):
+    def test_cli_passes_parsed_arguments_to_main(self):
+        with patch("simple_socks5.main.main") as main_mock:
+            cli(["-H", "0.0.0.0", "-P", "1081", "-L", "info"])
+        main_mock.assert_called_once_with(Namespace(host="0.0.0.0", port=1081, logging_level="info"))
 
 
 if __name__ == "__main__":

@@ -66,6 +66,15 @@ python3 app.py [--host HOST | -H HOST] [--port PORT | -P PORT] [--logging-level 
 | `-P`, `--port` | `1080` | Bind port. |
 | `-L`, `--logging-level` | `$LOGGING_LEVEL`, else `debug` | `disabled`, `debug`, `info`, `warning`, `error`, `critical`. Startup warnings are hidden at `error`, `critical` and `disabled`. |
 
+### Install from source
+
+`python3 app.py` runs straight from a clone. To install the `simple-socks5` command instead, which takes the same flags:
+
+```bash
+pip install .
+simple-socks5 -H 0.0.0.0 -P 1080   # or: python -m simple_socks5 -H 0.0.0.0 -P 1080
+```
+
 ### Environment variables
 
 | Variable | Default | Description |

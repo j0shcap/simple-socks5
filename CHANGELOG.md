@@ -8,6 +8,10 @@ to make the proxy safer; each such change is marked **Behaviour change** and is 
 
 ## [Unreleased]
 
+### Added
+- `pip install .` installs a `simple-socks5` command, which takes the same flags as
+  `python3 app.py`. `python -m simple_socks5` works too.
+
 ### Changed
 - The code is now the `simple_socks5` package under `src/`, and `pip install .` installs it.
   `python3 app.py` keeps working from a clone and in the image.

@@ -3,12 +3,13 @@ import sys
 import threading
 import time
 from argparse import Namespace
-from typing import Callable, Optional
+from typing import Callable, Optional, Sequence
 
 from .server import (
     ThreadingTCPServer,
     TCPProxyServer,
 )
+from .argument_parser import parse_arguments
 from .logger import get_logger, update_loggers
 from .config import ProxyConfiguration
 from .constants import SHUTDOWN_FORCE_CLOSE_TIMEOUT, SHUTDOWN_GRACE_PERIOD
@@ -104,3 +105,10 @@ def main(args: Namespace):
     except OSError as e:
         logger.error(f"Error starting server: {e}")
         exit(1)
+
+
+def cli(argv: Optional[Sequence[str]] = None) -> None:
+    """
+    Console entry point: parses argv (default sys.argv[1:]) and runs main().
+    """
+    main(parse_arguments(argv))
