@@ -62,6 +62,10 @@ jobs:
         python -m pip install --upgrade pip
         python -m pip install -e '.[dev]'
 
+    # Checked against each matrix version's stubs, not just the python_version in pyproject.toml
+    - name: Type-check with mypy
+      run: mypy --python-version ${{ matrix.python-version }}
+
     - name: Test with pytest
       run: |
         pytest --cov=simple_socks5 --cov-fail-under=85

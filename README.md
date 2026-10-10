@@ -169,11 +169,12 @@ pip install -e '.[dev]'
 pytest --cov=simple_socks5 --cov-fail-under=85
 ruff check .
 ruff format --check .
+mypy
 ```
 
-Ruff is pinned in `pyproject.toml`, which also holds its rules. `ruff format .` formats the code. To keep
-`git blame` from showing the commit that first applied the formatter, run
-`git config blame.ignoreRevsFile .git-blame-ignore-revs` once.
+Ruff and mypy are pinned in `pyproject.toml`, which also holds their configuration; mypy checks `src/` and
+`tests/` in strict mode. `ruff format .` formats the code. To keep `git blame` from showing the commit that first
+applied the formatter, run `git config blame.ignoreRevsFile .git-blame-ignore-revs` once.
 
 ## RFC Compliance
 
