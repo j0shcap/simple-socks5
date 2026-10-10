@@ -103,7 +103,7 @@ class UDPHeader(NamedTuple):
 
 
 class Socks5Error(Exception):
-    def __init__(self, message: str, reply: Reply | None = None):
+    def __init__(self, message: str, reply: Reply | None = None) -> None:
         super().__init__(message)
         self.reply = reply
 
@@ -169,7 +169,7 @@ def recv_exact(sock: socket.socket, n: int) -> bytes:
 
 
 def recv_until_eof(sock: socket.socket) -> bytes:
-    chunks = []
+    chunks: list[bytes] = []
     while True:
         chunk = sock.recv(65536)
         if not chunk:
@@ -198,8 +198,10 @@ def authenticate(sock: socket.socket, username: Address, password: Address, *, v
     return status
 
 
-def send_request(sock: socket.socket, cmd: int, atyp: int, addr: Address, port: int, **kwargs) -> None:
-    sock.sendall(build_request(cmd, atyp, addr, port, **kwargs))
+def send_request(  # noqa: PLR0913 - one parameter per RFC 1928 request field
+    sock: socket.socket, cmd: int, atyp: int, addr: Address, port: int, *, ver: int = SOCKS_VERSION, rsv: int = 0
+) -> None:
+    sock.sendall(build_request(cmd, atyp, addr, port, ver=ver, rsv=rsv))
 
 
 def read_reply(sock: socket.socket) -> Reply:

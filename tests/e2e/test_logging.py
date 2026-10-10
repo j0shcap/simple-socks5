@@ -8,9 +8,11 @@ import re
 import signal
 import socket
 import struct
+import subprocess
 import threading
 import time
-from types import SimpleNamespace
+from collections.abc import Callable
+from pathlib import Path
 
 import pytest
 
@@ -18,12 +20,14 @@ from simple_socks5 import healthcheck
 from simple_socks5.server import TCPProxyServer
 from tests.e2e import socks_client as sc
 from tests.e2e.app_process import run_app
+from tests.e2e.conftest import MakeProxy, ProxyHandle
+from tests.e2e.origins import Origin
 
 DOWNLOAD_SIZE = 10 * 1024 * 1024
 REQUEST = b"GET /bytes/%d HTTP/1.0\r\n\r\n" % DOWNLOAD_SIZE
 
 
-def _wait_for_closed_line(caplog, proxy) -> None:
+def _wait_for_closed_line(caplog: pytest.LogCaptureFixture, proxy: ProxyHandle) -> None:
     """CLOSED is logged on the handler thread after the client has already read EOF."""
     deadline = time.monotonic() + 5
     while not any(r.getMessage().startswith("CLOSED |") for r in caplog.records):
@@ -32,13 +36,15 @@ def _wait_for_closed_line(caplog, proxy) -> None:
     assert proxy.server.wait_for_connections(5)
 
 
-def _download(proxy, http_origin) -> bytes:
+def _download(proxy: ProxyHandle, http_origin: Origin) -> bytes:
     with sc.open_tunnel(proxy.address, "127.0.0.1", http_origin.port) as tunnel:
         tunnel.sendall(REQUEST)
         return sc.recv_until_eof(tunnel)
 
 
-def test_10mb_download_logs_one_connection_and_one_closed_line(proxy, http_origin, caplog):
+def test_10mb_download_logs_one_connection_and_one_closed_line(
+    proxy: ProxyHandle, http_origin: Origin, caplog: pytest.LogCaptureFixture
+) -> None:
     caplog.set_level(logging.INFO, logger="simple_socks5")
 
     response = _download(proxy, http_origin)
@@ -46,13 +52,17 @@ def test_10mb_download_logs_one_connection_and_one_closed_line(proxy, http_origi
 
     messages = [r.getMessage() for r in caplog.records if r.name.startswith("simple_socks5")]
     assert [m.split(" |")[0] for m in messages] == ["CONNECTION", "CLOSED"]
-    up, down = map(int, re.search(r"up=(\d+) B down=(\d+) B", messages[1]).groups())
+    counts = re.search(r"up=(\d+) B down=(\d+) B", messages[1])
+    assert counts is not None, messages[1]
+    up, down = map(int, counts.groups())
     assert up == len(REQUEST)
     assert down == len(response) > DOWNLOAD_SIZE
 
 
 @pytest.mark.parametrize("level", [logging.DEBUG, logging.INFO])
-def test_no_per_chunk_lines_at_any_level(proxy, http_origin, caplog, level):
+def test_no_per_chunk_lines_at_any_level(
+    proxy: ProxyHandle, http_origin: Origin, caplog: pytest.LogCaptureFixture, level: int
+) -> None:
     caplog.set_level(level, logger="simple_socks5")
 
     _download(proxy, http_origin)
@@ -65,12 +75,12 @@ def test_no_per_chunk_lines_at_any_level(proxy, http_origin, caplog, level):
 
 
 @pytest.fixture
-def handled(monkeypatch):
-    """wait(): blocks until the proxy has finished with one connection and logged everything for it."""
+def wait_handled(monkeypatch: pytest.MonkeyPatch) -> Callable[[ProxyHandle], None]:
+    """Returns wait(proxy): blocks until the proxy has finished with one connection and logged everything for it."""
     finished = threading.Semaphore(0)
     original_finish = TCPProxyServer.finish
 
-    def finish(self):
+    def finish(self: TCPProxyServer) -> None:
         try:
             original_finish(self)
         finally:
@@ -78,63 +88,76 @@ def handled(monkeypatch):
 
     monkeypatch.setattr(TCPProxyServer, "finish", finish)
 
-    def wait(proxy) -> None:
+    def wait(proxy: ProxyHandle) -> None:
         assert finished.acquire(timeout=5), "the proxy never finished the connection"
         # handle_error() and untracking run after finish()
         assert proxy.server.wait_for_connections(5)
 
-    return SimpleNamespace(wait=wait)
+    return wait
 
 
 def _reset_on_close(sock: socket.socket) -> None:
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))
 
 
-MID_HANDSHAKE_CASES = {
+def _greet_then_reset(sock: socket.socket) -> None:
+    sc.greet(sock, [sc.METHOD_NO_AUTH])
+    _reset_on_close(sock)
+
+
+def _greet_then_partial_auth(sock: socket.socket) -> None:
+    sc.greet(sock, [sc.METHOD_USERPASS])
+    sock.sendall(b"\x01\x05us")
+
+
+def _partial_request_then_reset(sock: socket.socket) -> None:
+    sc.greet(sock, [sc.METHOD_NO_AUTH])
+    sock.sendall(b"\x05\x01\x00\x01\x7f")
+    _reset_on_close(sock)
+
+
+MID_HANDSHAKE_CASES: dict[str, tuple[bool, Callable[[socket.socket], object]]] = {
     "after connect": (False, lambda _sock: None),
     "partial greeting": (False, lambda sock: sock.sendall(b"\x05")),
     "after method reply": (False, lambda sock: sc.greet(sock, [sc.METHOD_NO_AUTH])),
-    "after method reply, RST": (False, lambda sock: (sc.greet(sock, [sc.METHOD_NO_AUTH]), _reset_on_close(sock))),
+    "after method reply, RST": (False, _greet_then_reset),
     "no acceptable method, auth required": (True, lambda sock: sc.greet(sock, [sc.METHOD_NO_AUTH])),
-    "mid auth": (True, lambda sock: (sc.greet(sock, [sc.METHOD_USERPASS]), sock.sendall(b"\x01\x05us"))),
-    "mid request, RST": (
-        False,
-        lambda sock: (
-            sc.greet(sock, [sc.METHOD_NO_AUTH]),
-            sock.sendall(b"\x05\x01\x00\x01\x7f"),
-            _reset_on_close(sock),
-        ),
-    ),
+    "mid auth": (True, _greet_then_partial_auth),
+    "mid request, RST": (False, _partial_request_then_reset),
 }
 
 
 @pytest.mark.parametrize("case", MID_HANDSHAKE_CASES)
-def test_client_closing_mid_handshake_logs_nothing_above_debug(make_proxy, handled, caplog, case):
+def test_client_closing_mid_handshake_logs_nothing_above_debug(
+    make_proxy: MakeProxy, wait_handled: Callable[[ProxyHandle], None], caplog: pytest.LogCaptureFixture, case: str
+) -> None:
     auth_required, client_steps = MID_HANDSHAKE_CASES[case]
     proxy = make_proxy(auth_required=auth_required)
     caplog.set_level(logging.DEBUG, logger="simple_socks5")
 
     with proxy.connect() as sock:
         client_steps(sock)
-    handled.wait(proxy)
+    wait_handled(proxy)
 
     problems = [r for r in caplog.records if r.levelno > logging.DEBUG or r.exc_info]
     assert problems == []
 
 
-def _stop(proc) -> tuple[str, str]:
+def _stop(proc: subprocess.Popen[str]) -> tuple[str, str]:
     proc.send_signal(signal.SIGTERM)
     stdout, stderr = proc.communicate(timeout=10)
     assert proc.returncode == 0, stderr
     return stdout, stderr
 
 
-def _probe_healthcheck(monkeypatch, address, times: int) -> None:
+def _probe_healthcheck(monkeypatch: pytest.MonkeyPatch, address: tuple[str, int], times: int) -> None:
     monkeypatch.setenv("SOCKS5_HEALTHCHECK_PORT", str(address[1]))
     assert [healthcheck.main() for _ in range(times)] == [0] * times
 
 
-def test_info_process_healthchecks_silent_no_ansi_no_errors_log(tmp_path, monkeypatch):
+def test_info_process_healthchecks_silent_no_ansi_no_errors_log(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     env = {"SOCKS5_USERNAME": "process-user", "SOCKS5_PASSWORD": "process-password"}
     with run_app(tmp_path, logging_level="info", env=env) as (proc, address):
         _probe_healthcheck(monkeypatch, address, 10)
@@ -151,7 +174,7 @@ def test_info_process_healthchecks_silent_no_ansi_no_errors_log(tmp_path, monkey
     assert list(tmp_path.iterdir()) == []
 
 
-def test_disabled_process_prints_nothing(tmp_path, monkeypatch, echo_origin):
+def test_disabled_process_prints_nothing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, echo_origin: Origin) -> None:
     with run_app(tmp_path, logging_level="disabled") as (proc, address):
         _probe_healthcheck(monkeypatch, address, 3)
         with sc.open_tunnel(address, "127.0.0.1", echo_origin.port) as tunnel:
@@ -163,7 +186,7 @@ def test_disabled_process_prints_nothing(tmp_path, monkeypatch, echo_origin):
     assert list(tmp_path.iterdir()) == []
 
 
-def test_log_file_receives_errors(tmp_path):
+def test_log_file_receives_errors(tmp_path: Path) -> None:
     log_path = tmp_path / "logs" / "proxy.log"
     log_path.parent.mkdir()
     with run_app(tmp_path, env={"SOCKS5_LOG_FILE": str(log_path)}) as (proc, address):

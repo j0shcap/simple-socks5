@@ -8,6 +8,8 @@ import logging
 import pytest
 
 from tests.e2e import socks_client as sc
+from tests.e2e.conftest import MakeProxy, ProxyHandle
+from tests.e2e.origins import Origin
 from tests.e2e.test_udp import _assert_echo, _assert_nothing_received, _udp_association
 
 DENIED = [
@@ -21,7 +23,7 @@ DENIED = [
 PRIVATE = ("10.255.255.1", 80)
 
 
-def _connect_reply(proxy, atyp: int, addr, port: int) -> sc.Reply:
+def _connect_reply(proxy: ProxyHandle, atyp: int, addr: sc.Address, port: int) -> sc.Reply:
     with proxy.connect() as sock:
         assert sc.greet(sock, [sc.METHOD_NO_AUTH]) == sc.METHOD_NO_AUTH
         sc.send_request(sock, sc.CMD_CONNECT, atyp, addr, port)
@@ -32,56 +34,60 @@ def _connect_reply(proxy, atyp: int, addr, port: int) -> sc.Reply:
 
 
 @pytest.fixture
-def policy_proxy(make_proxy):
+def policy_proxy(make_proxy: MakeProxy) -> ProxyHandle:
     return make_proxy(allow_loopback=False)
 
 
-def test_connect_to_loopback_origin_denied(policy_proxy, echo_origin):
+def test_connect_to_loopback_origin_denied(policy_proxy: ProxyHandle, echo_origin: Origin) -> None:
     assert _connect_reply(policy_proxy, sc.ATYP_IPV4, "127.0.0.1", echo_origin.port).rep == sc.REP_NOT_ALLOWED
 
 
 @pytest.mark.parametrize(("atyp", "addr"), DENIED)
-def test_connect_denied(policy_proxy, atyp, addr):
+def test_connect_denied(policy_proxy: ProxyHandle, atyp: int, addr: sc.Address) -> None:
     # Refused before any socket exists, so no IPv6 stack is needed
     assert _connect_reply(policy_proxy, atyp, addr, 80).rep == sc.REP_NOT_ALLOWED
 
 
-def test_connect_localhost_by_name_denied(policy_proxy, echo_origin):
+def test_connect_localhost_by_name_denied(policy_proxy: ProxyHandle, echo_origin: Origin) -> None:
     # The resolved address is checked, whichever of 127.0.0.1 and ::1 comes first
     assert _connect_reply(policy_proxy, sc.ATYP_DOMAIN, "localhost", echo_origin.port).rep == sc.REP_NOT_ALLOWED
 
 
 @pytest.mark.parametrize("allow_loopback", [False, True], ids=["policy-on", "opt-out"])
-def test_empty_domain_host_unreachable(make_proxy, allow_loopback):
+def test_empty_domain_host_unreachable(make_proxy: MakeProxy, allow_loopback: bool) -> None:
     proxy = make_proxy(allow_loopback=allow_loopback)
     assert _connect_reply(proxy, sc.ATYP_DOMAIN, b"\x00", 80).rep == sc.REP_HOST_UNREACHABLE
 
 
-def test_private_destination_not_denied(monkeypatch, policy_proxy):
+def test_private_destination_not_denied(monkeypatch: pytest.MonkeyPatch, policy_proxy: ProxyHandle) -> None:
     monkeypatch.setenv("SOCKS5_CONNECT_TIMEOUT", "0.5")
     assert _connect_reply(policy_proxy, sc.ATYP_IPV4, *PRIVATE).rep != sc.REP_NOT_ALLOWED
 
 
-def test_opt_out_allows_loopback_ipv4(proxy, echo_origin):
+def test_opt_out_allows_loopback_ipv4(proxy: ProxyHandle, echo_origin: Origin) -> None:
     with sc.open_tunnel(proxy.address, "127.0.0.1", echo_origin.port) as tunnel:
         tunnel.sendall(b"ping")
         assert sc.recv_exact(tunnel, 4) == b"ping"
 
 
-def test_opt_out_allows_loopback_ipv6(proxy, echo_origin_v6):
+def test_opt_out_allows_loopback_ipv6(proxy: ProxyHandle, echo_origin_v6: Origin) -> None:
     with sc.open_tunnel(proxy.address, "::1", echo_origin_v6.port) as tunnel:
         tunnel.sendall(b"ping")
         assert sc.recv_exact(tunnel, 4) == b"ping"
 
 
 @pytest.mark.parametrize(("atyp", "addr"), DENIED)
-def test_opt_out_lifts_every_denial(monkeypatch, proxy, atyp, addr):
+def test_opt_out_lifts_every_denial(
+    monkeypatch: pytest.MonkeyPatch, proxy: ProxyHandle, atyp: int, addr: sc.Address
+) -> None:
     # Nothing listens there, so the connect may fail, but not because of the policy
     monkeypatch.setenv("SOCKS5_CONNECT_TIMEOUT", "0.5")
     assert _connect_reply(proxy, atyp, addr, 9).rep != sc.REP_NOT_ALLOWED
 
 
-def test_udp_loopback_dropped_then_allowed_on_same_association(monkeypatch, policy_proxy, udp_echo_origin):
+def test_udp_loopback_dropped_then_allowed_on_same_association(
+    monkeypatch: pytest.MonkeyPatch, policy_proxy: ProxyHandle, udp_echo_origin: Origin
+) -> None:
     with _udp_association(policy_proxy) as (_control, udp, relay_address):
         udp.sendto(sc.build_udp_header(sc.ATYP_IPV4, "127.0.0.1", udp_echo_origin.port) + b"ping", relay_address)
         _assert_nothing_received(udp)
@@ -90,7 +96,9 @@ def test_udp_loopback_dropped_then_allowed_on_same_association(monkeypatch, poli
         _assert_echo(udp, relay_address, udp_echo_origin.port)
 
 
-def test_denial_warning_rate_limited(policy_proxy, echo_origin, caplog):
+def test_denial_warning_rate_limited(
+    policy_proxy: ProxyHandle, echo_origin: Origin, caplog: pytest.LogCaptureFixture
+) -> None:
     caplog.set_level(logging.INFO, logger="simple_socks5")
     for _ in range(100):
         assert _connect_reply(policy_proxy, sc.ATYP_IPV4, "127.0.0.1", echo_origin.port).rep == sc.REP_NOT_ALLOWED

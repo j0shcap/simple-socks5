@@ -8,15 +8,19 @@ import contextlib
 import signal
 import subprocess
 import time
+from collections.abc import Iterator
+from pathlib import Path
 
 import pytest
 
 from simple_socks5.constants import SHUTDOWN_GRACE_PERIOD
 from tests.e2e import socks_client as sc
-from tests.e2e.app_process import run_app, socks_ready
+from tests.e2e.app_process import RunningApp, run_app, socks_ready
+from tests.e2e.conftest import ProxyHandle
+from tests.e2e.origins import Origin
 
 
-def test_close_connections_ends_open_tunnel(proxy, echo_origin):
+def test_close_connections_ends_open_tunnel(proxy: ProxyHandle, echo_origin: Origin) -> None:
     with sc.open_tunnel(proxy.address, "127.0.0.1", echo_origin.port) as tunnel:
         tunnel.sendall(b"ping")
         assert sc.recv_exact(tunnel, 4) == b"ping"
@@ -29,15 +33,16 @@ def test_close_connections_ends_open_tunnel(proxy, echo_origin):
 
 
 @pytest.fixture
-def app_process(tmp_path):
+def app_process(tmp_path: Path) -> Iterator[RunningApp]:
     """Runs app.py on a free loopback port; yields (process, address)."""
     with run_app(tmp_path) as running:
         yield running
 
 
-def _assert_graceful_exit(proc: subprocess.Popen, signalled_at: float) -> str:
+def _assert_graceful_exit(proc: subprocess.Popen[str], signalled_at: float) -> str:
     returncode = proc.wait(timeout=SHUTDOWN_GRACE_PERIOD + 1)
     elapsed = time.monotonic() - signalled_at
+    assert proc.stderr is not None
     stderr = proc.stderr.read()
     assert returncode == 0, stderr
     assert elapsed < SHUTDOWN_GRACE_PERIOD + 1
@@ -48,13 +53,13 @@ def _assert_graceful_exit(proc: subprocess.Popen, signalled_at: float) -> str:
 
 
 @pytest.mark.parametrize("signum", [signal.SIGTERM, signal.SIGINT], ids=["SIGTERM", "SIGINT"])
-def test_signal_idle_exits_zero(app_process, signum):
+def test_signal_idle_exits_zero(app_process: RunningApp, signum: signal.Signals) -> None:
     proc, _ = app_process
     proc.send_signal(signum)
     _assert_graceful_exit(proc, time.monotonic())
 
 
-def test_sigterm_active_download_closes_client_and_exits_zero(app_process, trickle_origin):
+def test_sigterm_active_download_closes_client_and_exits_zero(app_process: RunningApp, trickle_origin: Origin) -> None:
     proc, address = app_process
     with sc.open_tunnel(address, "127.0.0.1", trickle_origin.port) as tunnel:
         assert tunnel.recv(1024)  # The relay is flowing

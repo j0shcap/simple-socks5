@@ -4,25 +4,32 @@ and a freed slot is reusable.
 """
 
 import logging
+import socket
 import time
 from contextlib import ExitStack
 
+import pytest
+
 from tests.e2e import socks_client as sc
+from tests.e2e.conftest import MakeProxy
+from tests.e2e.origins import Origin
 
 RECOVERY_DEADLINE = 2.0  # seconds for a closed tunnel's slot to be released
 
 
-def _echo(tunnel) -> None:
+def _echo(tunnel: socket.socket) -> None:
     tunnel.sendall(b"ping")
     assert sc.recv_exact(tunnel, 4) == b"ping"
 
 
-def test_limit_rejects_warns_once_and_recovers(monkeypatch, make_proxy, echo_origin, caplog):
+def test_limit_rejects_warns_once_and_recovers(
+    monkeypatch: pytest.MonkeyPatch, make_proxy: MakeProxy, echo_origin: Origin, caplog: pytest.LogCaptureFixture
+) -> None:
     caplog.set_level(logging.WARNING, logger="simple_socks5.server")
     monkeypatch.setenv("SOCKS5_MAX_CONNECTIONS", "2")
     proxy = make_proxy()
 
-    def open_tunnel():
+    def open_tunnel() -> socket.socket:
         return sc.open_tunnel(proxy.address, "127.0.0.1", echo_origin.port)
 
     with ExitStack() as stack:

@@ -1,12 +1,14 @@
 import logging
+import socket
 
 import pytest
 
 from tests.e2e import socks_client as sc
-from tests.e2e.conftest import E2E_PASSWORD, E2E_USERNAME
+from tests.e2e.conftest import E2E_PASSWORD, E2E_USERNAME, MakeProxy, ProxyHandle
+from tests.e2e.origins import Origin
 
 
-def test_no_acceptable_methods(proxy):
+def test_no_acceptable_methods(proxy: ProxyHandle) -> None:
     with proxy.connect() as sock:
         sock.sendall(sc.build_greeting([sc.METHOD_GSSAPI]))
 
@@ -14,7 +16,7 @@ def test_no_acceptable_methods(proxy):
         sc.assert_closed(sock)
 
 
-def test_auth_required_rejects_no_auth(auth_proxy):
+def test_auth_required_rejects_no_auth(auth_proxy: ProxyHandle) -> None:
     with auth_proxy.connect() as sock:
         sock.sendall(sc.build_greeting([sc.METHOD_NO_AUTH]))
 
@@ -22,19 +24,19 @@ def test_auth_required_rejects_no_auth(auth_proxy):
         sc.assert_closed(sock)
 
 
-def test_auth_preferred_when_offered(auth_proxy):
+def test_auth_preferred_when_offered(auth_proxy: ProxyHandle) -> None:
     with auth_proxy.connect() as sock:
         assert sc.greet(sock, [sc.METHOD_NO_AUTH, sc.METHOD_USERPASS]) == sc.METHOD_USERPASS
 
 
-def test_auth_success_then_connect(auth_proxy, echo_origin):
+def test_auth_success_then_connect(auth_proxy: ProxyHandle, echo_origin: Origin) -> None:
     credentials = (E2E_USERNAME, E2E_PASSWORD)
     with sc.open_tunnel(auth_proxy.address, "127.0.0.1", echo_origin.port, credentials=credentials) as tunnel:
         tunnel.sendall(b"ping")
         assert sc.recv_exact(tunnel, 4) == b"ping"
 
 
-def test_auth_wrong_password(auth_proxy):
+def test_auth_wrong_password(auth_proxy: ProxyHandle) -> None:
     with auth_proxy.connect() as sock:
         assert sc.greet(sock, [sc.METHOD_USERPASS]) == sc.METHOD_USERPASS
 
@@ -42,7 +44,7 @@ def test_auth_wrong_password(auth_proxy):
         sc.assert_closed(sock)
 
 
-def test_auth_wrong_subnegotiation_version(auth_proxy):
+def test_auth_wrong_subnegotiation_version(auth_proxy: ProxyHandle) -> None:
     with auth_proxy.connect() as sock:
         assert sc.greet(sock, [sc.METHOD_USERPASS]) == sc.METHOD_USERPASS
         # Only VER: the server rejects after one byte, and unread bytes would turn its close into an RST.
@@ -67,20 +69,26 @@ REJECTED = [
 ]
 
 
-def _assert_tunnel_works(sock, echo_origin):
+def _assert_tunnel_works(sock: socket.socket, echo_origin: Origin) -> None:
     sc.send_request(sock, sc.CMD_CONNECT, sc.ATYP_IPV4, "127.0.0.1", echo_origin.port)
     assert sc.read_reply(sock).rep == sc.REP_SUCCEEDED
     sock.sendall(b"ping")
     assert sc.recv_exact(sock, 4) == b"ping"
 
 
-def _log_text(caplog) -> str:
+def _log_text(caplog: pytest.LogCaptureFixture) -> str:
     return "\n".join(record.getMessage() for record in caplog.records)
 
 
 @pytest.mark.parametrize("auth_required", [True, False], ids=["auth-required", "auth-optional"])
 @pytest.mark.parametrize("credentials", [pytest.param((user, pw), id=case) for case, user, pw in REJECTED])
-def test_auth_rejected(make_proxy, caplog, capsys, auth_required, credentials):
+def test_auth_rejected(
+    make_proxy: MakeProxy,
+    caplog: pytest.LogCaptureFixture,
+    capsys: pytest.CaptureFixture[str],
+    auth_required: bool,
+    credentials: tuple[bytes, bytes],
+) -> None:
     username, password = credentials
     caplog.set_level(logging.DEBUG)
     proxy = make_proxy(auth_required=auth_required)
@@ -101,7 +109,9 @@ def test_auth_rejected(make_proxy, caplog, capsys, auth_required, credentials):
 
 
 @pytest.mark.parametrize("auth_required", [True, False], ids=["auth-required", "auth-optional"])
-def test_auth_correct_credentials(make_proxy, caplog, echo_origin, auth_required):
+def test_auth_correct_credentials(
+    make_proxy: MakeProxy, caplog: pytest.LogCaptureFixture, echo_origin: Origin, auth_required: bool
+) -> None:
     caplog.set_level(logging.DEBUG)
     proxy = make_proxy(auth_required=auth_required)
     with proxy.connect() as sock:
@@ -113,7 +123,9 @@ def test_auth_correct_credentials(make_proxy, caplog, echo_origin, auth_required
 
 
 @pytest.mark.parametrize("auth_required", [True, False], ids=["auth-required", "auth-optional"])
-def test_auth_255_byte_credentials(make_proxy, monkeypatch, echo_origin, auth_required):
+def test_auth_255_byte_credentials(
+    make_proxy: MakeProxy, monkeypatch: pytest.MonkeyPatch, echo_origin: Origin, auth_required: bool
+) -> None:
     proxy = make_proxy(auth_required=auth_required)
     monkeypatch.setenv("SOCKS5_USERNAME", LONG_USERNAME)
     monkeypatch.setenv("SOCKS5_PASSWORD", LONG_PASSWORD)
@@ -124,7 +136,9 @@ def test_auth_255_byte_credentials(make_proxy, monkeypatch, echo_origin, auth_re
         _assert_tunnel_works(sock, echo_origin)
 
 
-def test_utf8_password_authenticates(auth_proxy, monkeypatch, echo_origin):
+def test_utf8_password_authenticates(
+    auth_proxy: ProxyHandle, monkeypatch: pytest.MonkeyPatch, echo_origin: Origin
+) -> None:
     monkeypatch.setenv("SOCKS5_PASSWORD", "pässwörd")
     credentials = (E2E_USERNAME, "pässwörd".encode())
     with sc.open_tunnel(auth_proxy.address, "127.0.0.1", echo_origin.port, credentials=credentials) as tunnel:
@@ -132,7 +146,9 @@ def test_utf8_password_authenticates(auth_proxy, monkeypatch, echo_origin):
         assert sc.recv_exact(tunnel, 4) == b"ping"
 
 
-def test_password_change_after_start_honoured(auth_proxy, monkeypatch, echo_origin):
+def test_password_change_after_start_honoured(
+    auth_proxy: ProxyHandle, monkeypatch: pytest.MonkeyPatch, echo_origin: Origin
+) -> None:
     monkeypatch.setenv("SOCKS5_PASSWORD", "rotated")
     with auth_proxy.connect() as sock:
         assert sc.greet(sock, [sc.METHOD_USERPASS]) == sc.METHOD_USERPASS
