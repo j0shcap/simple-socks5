@@ -37,17 +37,17 @@ EXPOSED_HOSTS = (
 
 
 class TestIsLoopbackHost(unittest.TestCase):
-    def test_loopback_hosts(self):
+    def test_loopback_hosts(self) -> None:
         for host in LOOPBACK_HOSTS:
             with self.subTest(host=host):
                 assert is_loopback_host(host)
 
-    def test_exposed_hosts(self):
+    def test_exposed_hosts(self) -> None:
         for host in EXPOSED_HOSTS:
             with self.subTest(host=host):
                 assert not is_loopback_host(host)
 
-    def test_no_dns_lookup(self):
+    def test_no_dns_lookup(self) -> None:
         """Hostnames are classified without resolving them."""
         with (
             patch("socket.getaddrinfo", side_effect=AssertionError("DNS lookup")),
@@ -70,12 +70,12 @@ TABLE_HOSTS = {
 }
 
 
-def banner_for(host):
+def banner_for(host: str) -> list[tuple[int, str]]:
     return [(logging.WARNING, line.format(host=host)) for line in OPEN_PROXY_BANNER]
 
 
 class TestStartupAdvisories(unittest.TestCase):
-    def test_decision_table(self):
+    def test_decision_table(self) -> None:
         for host, auth, explicit, default_creds in itertools.product(
             TABLE_HOSTS, (True, False), (True, False), (True, False)
         ):
@@ -91,7 +91,7 @@ class TestStartupAdvisories(unittest.TestCase):
 
                 assert startup_advisories(host, auth, explicit, default_creds) == expected
 
-    def test_banner_content(self):
+    def test_banner_content(self) -> None:
         text = "\n".join(message for _, message in banner_for("0.0.0.0"))
         assert "0.0.0.0" in text
         assert "anyone who can reach this port" in text.lower()
@@ -100,23 +100,23 @@ class TestStartupAdvisories(unittest.TestCase):
         assert "#security" in text
         assert re.search(r"deprecat|future|will become", text, re.IGNORECASE) is None
 
-    def test_empty_host_named_as_all_interfaces(self):
+    def test_empty_host_named_as_all_interfaces(self) -> None:
         text = "\n".join(message for _, message in startup_advisories("", False, False, False))
         assert "listens on all interfaces." in text
 
-    def test_info_message_text(self):
+    def test_info_message_text(self) -> None:
         assert AUTH_EXPLICITLY_DISABLED_MESSAGE == "Authentication disabled by SOCKS5_AUTH_REQUIRED=false."
 
-    def test_default_credentials_message_has_no_password(self):
+    def test_default_credentials_message_has_no_password(self) -> None:
         assert "mypassword" not in DEFAULT_CREDENTIALS_MESSAGE
 
-    def test_no_dns_lookup(self):
+    def test_no_dns_lookup(self) -> None:
         with patch("socket.getaddrinfo", side_effect=AssertionError("DNS lookup")):
             assert len(startup_advisories("example.org", False, False, False)) == len(OPEN_PROXY_BANNER)
 
 
 class TestAuthExplicitlyDisabled(unittest.TestCase):
-    def test_not_explicitly_disabled(self):
+    def test_not_explicitly_disabled(self) -> None:
         for environ in (
             {},
             {"SOCKS5_AUTH_REQUIRED": ""},
@@ -126,55 +126,57 @@ class TestAuthExplicitlyDisabled(unittest.TestCase):
             with self.subTest(environ=environ):
                 assert not auth_explicitly_disabled(environ)
 
-    def test_explicitly_disabled(self):
+    def test_explicitly_disabled(self) -> None:
         for value in ("false", "FALSE", "False"):
             with self.subTest(value=value):
                 assert auth_explicitly_disabled({"SOCKS5_AUTH_REQUIRED": value})
 
-    def test_reads_process_environment_by_default(self):
+    def test_reads_process_environment_by_default(self) -> None:
         with patch.dict(os.environ, {"SOCKS5_AUTH_REQUIRED": "false"}):
             assert auth_explicitly_disabled()
 
 
 class TestUsesDefaultCredentials(unittest.TestCase):
-    def test_both_default(self):
+    def test_both_default(self) -> None:
         assert uses_default_credentials(b"myusername", b"mypassword")
 
-    def test_any_custom(self):
+    def test_any_custom(self) -> None:
         for username, password in ((b"admin", b"mypassword"), (b"myusername", b"s3cret"), (b"admin", b"s3cret")):
             with self.subTest(username=username, password=password):
                 assert not uses_default_credentials(username, password)
 
 
 class TestCollectStartupAdvisories(unittest.TestCase):
-    def collect(self, host, environ, username="myusername", password="mypassword"):
+    def collect(
+        self, host: str, environ: dict[str, str], username: str = "myusername", password: str = "mypassword"
+    ) -> list[tuple[int, str]]:
         clean = {k: v for k, v in os.environ.items() if not k.startswith("SOCKS5_")}
         credentials = {"SOCKS5_USERNAME": username, "SOCKS5_PASSWORD": password}
         with patch.dict(os.environ, {**clean, **credentials, **environ}, clear=True):
             return collect_startup_advisories(host)
 
-    def test_no_env_on_all_interfaces_warns_banner_and_default_credentials(self):
+    def test_no_env_on_all_interfaces_warns_banner_and_default_credentials(self) -> None:
         assert self.collect("0.0.0.0", {}) == [*banner_for("0.0.0.0"), (logging.WARNING, DEFAULT_CREDENTIALS_MESSAGE)]
 
-    def test_loopback_logs_no_banner(self):
+    def test_loopback_logs_no_banner(self) -> None:
         assert self.collect("127.0.0.1", {}) == [(logging.WARNING, DEFAULT_CREDENTIALS_MESSAGE)]
 
-    def test_auth_required_with_custom_credentials_logs_nothing(self):
+    def test_auth_required_with_custom_credentials_logs_nothing(self) -> None:
         assert self.collect("0.0.0.0", {"SOCKS5_AUTH_REQUIRED": "true"}, "admin", "s3cret") == []
 
-    def test_explicitly_disabled_logs_single_info(self):
+    def test_explicitly_disabled_logs_single_info(self) -> None:
         assert self.collect("0.0.0.0", {"SOCKS5_AUTH_REQUIRED": "false"}, "admin", "s3cret") == [
             (logging.INFO, AUTH_EXPLICITLY_DISABLED_MESSAGE)
         ]
 
 
 class TestValidateEnvironment(unittest.TestCase):
-    def test_validate_environment_ok_with_defaults(self):
+    def test_validate_environment_ok_with_defaults(self) -> None:
         environ = {k: v for k, v in os.environ.items() if not k.startswith("SOCKS5_")}
         with patch.dict(os.environ, environ, clear=True):
             validate_environment()
 
-    def test_validate_environment_rejects_invalid_timeout(self):
+    def test_validate_environment_rejects_invalid_timeout(self) -> None:
         for name in ("SOCKS5_HANDSHAKE_TIMEOUT", "SOCKS5_CONNECT_TIMEOUT"):
             with (
                 self.subTest(name=name),
@@ -183,7 +185,7 @@ class TestValidateEnvironment(unittest.TestCase):
             ):
                 validate_environment()
 
-    def test_rejects_invalid_max_connections(self):
+    def test_rejects_invalid_max_connections(self) -> None:
         for raw in ("0", "abc"):
             with (
                 self.subTest(raw=raw),

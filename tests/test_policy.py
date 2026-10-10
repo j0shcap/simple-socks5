@@ -11,6 +11,7 @@ import pytest
 
 from simple_socks5.exceptions import PolicyDeniedError
 from simple_socks5.policy import check_destination, is_destination_allowed
+from tests.env import strip_socks5_env
 
 DENIED = (
     "127.0.0.1",
@@ -56,32 +57,24 @@ ALLOWED = (
 MALFORMED = ("", "localhost", "0x7f.1", "127.1", "256.0.0.1", "::ffff:999.0.0.1")
 
 
-def _env(**values: str):
-    environ = {k: v for k, v in os.environ.items() if not k.startswith("SOCKS5_")}
-    environ.update(values)
-    return patch.dict(os.environ, environ, clear=True)
-
-
 class TestDefaultPolicy(unittest.TestCase):
-    def setUp(self):
-        patcher = _env()
-        patcher.start()
-        self.addCleanup(patcher.stop)
+    def setUp(self) -> None:
+        strip_socks5_env(self)
 
-    def test_denied(self):
+    def test_denied(self) -> None:
         for ip in DENIED:
             with self.subTest(ip=ip):
                 assert not is_destination_allowed(ip)
                 with pytest.raises(PolicyDeniedError):
                     check_destination(ip, 80)
 
-    def test_allowed(self):
+    def test_allowed(self) -> None:
         for ip in ALLOWED:
             with self.subTest(ip=ip):
                 assert is_destination_allowed(ip)
                 check_destination(ip, 80)
 
-    def test_malformed_not_allowed(self):
+    def test_malformed_not_allowed(self) -> None:
         for host in MALFORMED:
             with self.subTest(host=host):
                 assert not is_destination_allowed(host)
@@ -89,29 +82,27 @@ class TestDefaultPolicy(unittest.TestCase):
                     check_destination(host, 80)
                 assert ctx.value.errno == socket.EAI_NONAME
 
-    def test_check_destination_raises_policy_denied_with_host_and_port(self):
+    def test_check_destination_raises_policy_denied_with_host_and_port(self) -> None:
         with pytest.raises(PolicyDeniedError) as ctx:
             check_destination("::1", 8080)
         assert (ctx.value.host, ctx.value.port) == ("::1", 8080)
 
 
 class TestAllowLoopbackOptOut(unittest.TestCase):
-    def setUp(self):
-        patcher = _env(SOCKS5_ALLOW_LOOPBACK="true")
-        patcher.start()
-        self.addCleanup(patcher.stop)
+    def setUp(self) -> None:
+        strip_socks5_env(self, SOCKS5_ALLOW_LOOPBACK="true")
 
-    def test_opt_out_allows_every_denied_entry(self):
+    def test_opt_out_allows_every_denied_entry(self) -> None:
         for ip in DENIED:
             with self.subTest(ip=ip):
                 assert is_destination_allowed(ip)
                 check_destination(ip, 80)
 
-    def test_opt_out_skips_literal_check(self):
+    def test_opt_out_skips_literal_check(self) -> None:
         # connect() resolves an unresolved name itself, as before the policy existed
-        assert check_destination("example.invalid", 80) is None
+        check_destination("example.invalid", 80)
 
-    def test_opt_out_read_at_call_time(self):
+    def test_opt_out_read_at_call_time(self) -> None:
         with patch.dict(os.environ, {"SOCKS5_ALLOW_LOOPBACK": "false"}):
             assert not is_destination_allowed("127.0.0.1")
         assert is_destination_allowed("127.0.0.1")
