@@ -33,7 +33,7 @@ class TestMainStartupAdvisories(unittest.TestCase):
         environ_patcher.start()
         self.addCleanup(environ_patcher.stop)
 
-        server_patcher = patch("simple_socks5.main.ThreadingTCPServer")
+        server_patcher = patch("simple_socks5.main.ThreadingTCPServer", autospec=True)
         self.server_class = server_patcher.start()
         self.addCleanup(server_patcher.stop)
         self.serve_forever = self.server_class.return_value.__enter__.return_value.serve_forever
@@ -221,7 +221,7 @@ class TestGracefulShutdown(unittest.TestCase):
 
     def test_restore_skips_handler_python_did_not_install(self) -> None:
         # signal.signal() returns None for a handler installed outside Python, and rejects None when given it back
-        with patch("signal.signal", return_value=None) as set_handler:
+        with patch("signal.signal", autospec=True, return_value=None) as set_handler:
             self.shutdown.install()
             set_handler.reset_mock()
             self.shutdown.restore()
@@ -230,7 +230,7 @@ class TestGracefulShutdown(unittest.TestCase):
 
 class TestCli(unittest.TestCase):
     def test_cli_passes_parsed_arguments_to_main(self) -> None:
-        with patch("simple_socks5.main.main") as main_mock:
+        with patch("simple_socks5.main.main", autospec=True) as main_mock:
             cli(["-H", "0.0.0.0", "-P", "1081", "-L", "info"])
         main_mock.assert_called_once_with(ProxyConfiguration(host="0.0.0.0", port=1081, logging_level="info"))
 

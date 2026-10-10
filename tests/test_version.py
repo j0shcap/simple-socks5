@@ -37,7 +37,7 @@ class TestVersion(unittest.TestCase):
 
     def test_version_falls_back_when_not_installed(self) -> None:
         try:
-            with patch("importlib.metadata.version", side_effect=PackageNotFoundError("simple-socks5")):
+            with patch("importlib.metadata.version", autospec=True, side_effect=PackageNotFoundError("simple-socks5")):
                 importlib.reload(argument_parser)
             assert argument_parser.__version__ == "0+unknown"
         finally:

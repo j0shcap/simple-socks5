@@ -45,7 +45,7 @@ def connect_request(address_type: AddressTypeCodes = AddressTypeCodes.IPv4) -> R
 class TestHandleParseRequestErrors(unittest.TestCase):
     """Verify parse_request() exceptions produce SOCKS5 error replies."""
 
-    @patch("simple_socks5.server.TCPHandler")
+    @patch("simple_socks5.server.TCPHandler", autospec=True)
     def test_invalid_version_sends_general_failure(self, mock_tcp_handler_cls: MagicMock) -> None:
         handler, connection = make_proxy_handler()
         mock_instance = mock_tcp_handler_cls.return_value
@@ -59,7 +59,7 @@ class TestHandleParseRequestErrors(unittest.TestCase):
         # VER=05, REP=01 (general failure), RSV=00, ATYP=01 (IPv4), zeroed addr+port
         assert reply == b"\x05\x01\x00\x01\x00\x00\x00\x00\x00\x00"
 
-    @patch("simple_socks5.server.TCPHandler")
+    @patch("simple_socks5.server.TCPHandler", autospec=True)
     def test_invalid_request_sends_general_failure(self, mock_tcp_handler_cls: MagicMock) -> None:
         handler, connection = make_proxy_handler()
         mock_instance = mock_tcp_handler_cls.return_value
@@ -72,7 +72,7 @@ class TestHandleParseRequestErrors(unittest.TestCase):
         reply = connection.sendall.call_args[0][0]
         assert reply == b"\x05\x01\x00\x01\x00\x00\x00\x00\x00\x00"
 
-    @patch("simple_socks5.server.TCPHandler")
+    @patch("simple_socks5.server.TCPHandler", autospec=True)
     def test_connection_error_sends_general_failure(self, mock_tcp_handler_cls: MagicMock) -> None:
         handler, connection = make_proxy_handler()
         mock_instance = mock_tcp_handler_cls.return_value
@@ -85,7 +85,7 @@ class TestHandleParseRequestErrors(unittest.TestCase):
         reply = connection.sendall.call_args[0][0]
         assert reply == b"\x05\x01\x00\x01\x00\x00\x00\x00\x00\x00"
 
-    @patch("simple_socks5.server.TCPHandler")
+    @patch("simple_socks5.server.TCPHandler", autospec=True)
     def test_socket_error_sends_general_failure(self, mock_tcp_handler_cls: MagicMock) -> None:
         handler, connection = make_proxy_handler()
         mock_instance = mock_tcp_handler_cls.return_value
@@ -99,13 +99,13 @@ class TestHandleParseRequestErrors(unittest.TestCase):
         assert reply == b"\x05\x01\x00\x01\x00\x00\x00\x00\x00\x00"
 
 
-@patch("simple_socks5.server.TCPHandler")
+@patch("simple_socks5.server.TCPHandler", autospec=True)
 class TestHandshakeDeadline(unittest.TestCase):
     def test_handle_passes_deadline(self, mock_tcp_handler_cls: MagicMock) -> None:
         mock_tcp_handler_cls.return_value.handle_request.return_value = False
         with (
             patch.dict(os.environ, {"SOCKS5_HANDSHAKE_TIMEOUT": "2.5"}),
-            patch("simple_socks5.server.time.monotonic", return_value=100.0),
+            patch("simple_socks5.server.time.monotonic", autospec=True, return_value=100.0),
         ):
             make_proxy_handler()[0].handle()
         assert mock_tcp_handler_cls.call_args.kwargs["deadline"] == 102.5
@@ -136,7 +136,7 @@ class TestHandshakeDeadline(unittest.TestCase):
         connection.sendall.assert_not_called()
 
 
-@patch("simple_socks5.server.TCPHandler")
+@patch("simple_socks5.server.TCPHandler", autospec=True)
 class TestReplyCodes(unittest.TestCase):
     """Each failure sends exactly one reply, with the code reply_code_for() picks."""
 
@@ -172,14 +172,14 @@ class TestReplyCodes(unittest.TestCase):
             for address_type in (AddressTypeCodes.IPv4, AddressTypeCodes.IPv6):
                 with (
                     self.subTest(exc=repr(exc), address_type=address_type.name),
-                    patch("simple_socks5.server.TCPRelay", side_effect=exc),
+                    patch("simple_socks5.server.TCPRelay", autospec=True, side_effect=exc),
                 ):
                     reply = self.run_handle(mock_tcp_handler_cls, connect_request(address_type))
                     zero_address = b"\x00" * (16 if address_type == AddressTypeCodes.IPv6 else 4)
                     assert reply == bytes([5, code, 0, address_type.value]) + zero_address + b"\x00\x00"
 
 
-@patch("simple_socks5.server.TCPHandler")
+@patch("simple_socks5.server.TCPHandler", autospec=True)
 class TestOneReply(unittest.TestCase):
     """Once a reply has been sent, a later failure writes nothing more to the client."""
 
@@ -193,7 +193,7 @@ class TestOneReply(unittest.TestCase):
         mock_instance.handle_request.return_value = True
         mock_instance.parse_request.return_value = Request(5, command.value, connect_request().address)
         handler, connection = make_proxy_handler()
-        with patch(relay_class) as relay_cls:
+        with patch(relay_class, autospec=True) as relay_cls:
             relay_cls.return_value.get_proxy_address.return_value = BindAddress("127.0.0.1", 5000)
             relay_cls.return_value.listen_and_relay.side_effect = relay_error
             handler.handle()
@@ -220,7 +220,7 @@ class TestOneReply(unittest.TestCase):
         mock_instance.parse_request.return_value = connect_request()
         handler, connection = make_proxy_handler()
         connection.sendall.side_effect = BrokenPipeError
-        with patch("simple_socks5.server.TCPRelay") as relay_cls:
+        with patch("simple_socks5.server.TCPRelay", autospec=True) as relay_cls:
             relay_cls.return_value.get_proxy_address.return_value = BindAddress("127.0.0.1", 5000)
             handler.handle()
         connection.sendall.assert_called_once_with(self.SUCCESS_REPLY)
@@ -265,7 +265,7 @@ class TestSendErrorReply(unittest.TestCase):
             handler._send_error_reply(b"\x05\x01\x00\x01\x00\x00\x00\x00\x00\x00")
 
 
-@patch("simple_socks5.server.TCPHandler")
+@patch("simple_socks5.server.TCPHandler", autospec=True)
 class TestDisconnectLogging(unittest.TestCase):
     """A client hanging up is DEBUG without a traceback; an unexpected exception is ERROR with one."""
 
@@ -313,7 +313,7 @@ class TestDisconnectLogging(unittest.TestCase):
 
     def test_connect_unexpected_error_logs_traceback(self, mock_tcp_handler_cls: MagicMock) -> None:
         with (
-            patch("simple_socks5.server.TCPRelay", side_effect=RuntimeError("bug")),
+            patch("simple_socks5.server.TCPRelay", autospec=True, side_effect=RuntimeError("bug")),
             self.assertLogs("simple_socks5.server", level="ERROR") as logs,
         ):
             self.run_handle(mock_tcp_handler_cls, connect_request())
@@ -321,7 +321,7 @@ class TestDisconnectLogging(unittest.TestCase):
 
     def test_connect_refused_logs_error_without_traceback(self, mock_tcp_handler_cls: MagicMock) -> None:
         with (
-            patch("simple_socks5.server.TCPRelay", side_effect=ConnectionRefusedError("refused")),
+            patch("simple_socks5.server.TCPRelay", autospec=True, side_effect=ConnectionRefusedError("refused")),
             self.assertLogs("simple_socks5.server", level="ERROR") as logs,
         ):
             self.run_handle(mock_tcp_handler_cls, connect_request())
@@ -334,7 +334,7 @@ class TestDisconnectLogging(unittest.TestCase):
         handler, connection = make_proxy_handler()
         connection.sendall.side_effect = BrokenPipeError("broken pipe")
         with (
-            patch("simple_socks5.server.TCPRelay") as relay_cls,
+            patch("simple_socks5.server.TCPRelay", autospec=True) as relay_cls,
             self.assertLogs("simple_socks5.server", level="DEBUG") as logs,
         ):
             relay_cls.return_value.get_proxy_address.return_value = BindAddress("127.0.0.1", 5000)
@@ -423,7 +423,7 @@ class TestConnectionLimit(unittest.TestCase):
     def test_invalid_limit_raises_before_binding(self) -> None:
         with (
             _without_socks5_env(SOCKS5_MAX_CONNECTIONS="0"),
-            patch("socketserver.socket.socket") as socket_class,
+            patch("socketserver.socket.socket", autospec=True) as socket_class,
             pytest.raises(ValueError, match="SOCKS5_MAX_CONNECTIONS"),
         ):
             ThreadingTCPServer(("127.0.0.1", 0), TCPProxyServer)
@@ -440,7 +440,7 @@ class TestConnectionLimit(unittest.TestCase):
 
         with (
             patch("simple_socks5.server.time.monotonic", lambda: now[0]),
-            patch.object(server, "shutdown_request") as shutdown_request,
+            patch.object(server, "shutdown_request", autospec=True) as shutdown_request,
             self.assertLogs("simple_socks5.server", level="WARNING") as logs,
         ):
             reject(50)
@@ -466,14 +466,14 @@ class TestPolicyDenial(unittest.TestCase):
         self.addCleanup(self.server.server_close)
         self.dst = DetailedAddress(name="localhost", ip="127.0.0.1", port=80, address_type=AddressTypeCodes.IPv4)
 
-    @patch("simple_socks5.server.TCPHandler")
+    @patch("simple_socks5.server.TCPHandler", autospec=True)
     def test_policy_denied_sends_rep_02_without_error_log(self, mock_tcp_handler_cls: MagicMock) -> None:
         mock_tcp_handler_cls.return_value.handle_request.return_value = True
         mock_tcp_handler_cls.return_value.parse_request.return_value = Request(5, CommandCodes.CONNECT.value, self.dst)
         handler, connection = make_proxy_handler()
         handler.server = self.server
         with (
-            patch("simple_socks5.server.TCPRelay", side_effect=PolicyDeniedError("127.0.0.1", 80)),
+            patch("simple_socks5.server.TCPRelay", autospec=True, side_effect=PolicyDeniedError("127.0.0.1", 80)),
             self.assertLogs("simple_socks5", level="DEBUG") as logs,
         ):
             handler.handle()
@@ -537,7 +537,7 @@ class TestConnectionTracking(unittest.TestCase):
     def test_process_request_rejects_non_socket_request(self) -> None:
         datagram_request = (b"data", create_autospec(socket.socket, instance=True))
         with (
-            patch("socketserver.ThreadingMixIn.process_request") as start_handler,
+            patch("socketserver.ThreadingMixIn.process_request", autospec=True) as start_handler,
             pytest.raises(TypeError, match="expected a connected TCP socket"),
         ):
             self.server.process_request(datagram_request, ("127.0.0.1", 9999))
@@ -548,13 +548,17 @@ class TestConnectionTracking(unittest.TestCase):
     def test_request_tracked_before_handler_thread_runs(self) -> None:
         # A shutdown that drains right after serve_forever() returns must see a request whose handler
         # thread has started but not yet run.
-        with patch("socketserver.ThreadingMixIn.process_request"):
+        with patch("socketserver.ThreadingMixIn.process_request", autospec=True):
             self.server.process_request(create_autospec(socket.socket, instance=True), ("127.0.0.1", 9999))
         assert not self.server.wait_for_connections(0)
 
     def test_request_untracked_when_handler_thread_fails_to_start(self) -> None:
         with (
-            patch("socketserver.ThreadingMixIn.process_request", side_effect=RuntimeError("can't start thread")),
+            patch(
+                "socketserver.ThreadingMixIn.process_request",
+                autospec=True,
+                side_effect=RuntimeError("can't start thread"),
+            ),
             pytest.raises(RuntimeError),
         ):
             self.server.process_request(create_autospec(socket.socket, instance=True), ("127.0.0.1", 9999))
@@ -574,10 +578,14 @@ class TestConnectionTracking(unittest.TestCase):
 
     def test_request_removed_when_handling_raises(self) -> None:
         request = create_autospec(socket.socket, instance=True)
-        with patch("socketserver.ThreadingMixIn.process_request"):
+        with patch("socketserver.ThreadingMixIn.process_request", autospec=True):
             self.server.process_request(request, ("127.0.0.1", 9999))
         with (
-            patch("socketserver.ThreadingMixIn.process_request_thread", side_effect=RuntimeError("handler failed")),
+            patch(
+                "socketserver.ThreadingMixIn.process_request_thread",
+                autospec=True,
+                side_effect=RuntimeError("handler failed"),
+            ),
             pytest.raises(RuntimeError),
         ):
             self.server.process_request_thread(request, ("127.0.0.1", 9999))

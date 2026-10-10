@@ -23,9 +23,14 @@ def _socket() -> NonCallableMagicMock:
     return sock
 
 
+def _selector() -> NonCallableMagicMock:
+    selector: NonCallableMagicMock = create_autospec(selectors.BaseSelector, instance=True)
+    return selector
+
+
 class TestTCPRelay(unittest.TestCase):
-    @patch("simple_socks5.relays.tcp_relay.selectors.DefaultSelector")
-    @patch("simple_socks5.relays.tcp_relay.generate_tcp_socket")
+    @patch("simple_socks5.relays.tcp_relay.selectors.DefaultSelector", autospec=True)
+    @patch("simple_socks5.relays.tcp_relay.generate_tcp_socket", autospec=True)
     def _create_relay(
         self, mock_gen_socket: MagicMock, mock_selector_cls: MagicMock
     ) -> tuple[TCPRelay, NonCallableMagicMock, NonCallableMagicMock, NonCallableMagicMock]:
@@ -63,8 +68,8 @@ class TestTCPRelay(unittest.TestCase):
             _, _, proxy, _ = self._create_relay()
         assert proxy.mock_calls[:2] == [call.settimeout(0.5), call.connect(("93.184.216.34", 80))]
 
-    @patch("simple_socks5.relays.tcp_relay.selectors.DefaultSelector")
-    @patch("simple_socks5.relays.tcp_relay.generate_tcp_socket")
+    @patch("simple_socks5.relays.tcp_relay.selectors.DefaultSelector", autospec=True)
+    @patch("simple_socks5.relays.tcp_relay.generate_tcp_socket", autospec=True)
     def test_connect_timeout_closes_socket_and_selector(
         self, mock_gen_socket: MagicMock, mock_sel_cls: MagicMock
     ) -> None:
@@ -77,8 +82,8 @@ class TestTCPRelay(unittest.TestCase):
         mock_gen_socket.return_value.close.assert_called_once()
         mock_sel_cls.return_value.close.assert_called_once()
 
-    @patch("simple_socks5.relays.tcp_relay.selectors.DefaultSelector")
-    @patch("simple_socks5.relays.tcp_relay.generate_tcp_socket")
+    @patch("simple_socks5.relays.tcp_relay.selectors.DefaultSelector", autospec=True)
+    @patch("simple_socks5.relays.tcp_relay.generate_tcp_socket", autospec=True)
     def test_init_closes_selector_on_connection_failure(
         self, mock_gen_socket: MagicMock, mock_sel_cls: MagicMock
     ) -> None:
@@ -101,8 +106,8 @@ class TestTCPRelay(unittest.TestCase):
 
         mock_selector.close.assert_called_once()
 
-    @patch("simple_socks5.relays.tcp_relay.selectors.DefaultSelector", MagicMock)
-    @patch("simple_socks5.relays.tcp_relay.generate_tcp_socket")
+    @patch("simple_socks5.relays.tcp_relay.selectors.DefaultSelector", _selector)
+    @patch("simple_socks5.relays.tcp_relay.generate_tcp_socket", autospec=True)
     def test_init_closes_proxy_socket_when_connect_fails(self, mock_gen_socket: MagicMock) -> None:
         mock_proxy_sock = _socket()
         mock_proxy_sock.connect.side_effect = ConnectionRefusedError
@@ -122,8 +127,8 @@ class TestTCPRelay(unittest.TestCase):
 
         mock_proxy_sock.close.assert_called_once()
 
-    @patch("simple_socks5.relays.tcp_relay.selectors.DefaultSelector")
-    @patch("simple_socks5.relays.tcp_relay.generate_tcp_socket")
+    @patch("simple_socks5.relays.tcp_relay.selectors.DefaultSelector", autospec=True)
+    @patch("simple_socks5.relays.tcp_relay.generate_tcp_socket", autospec=True)
     def test_init_closes_proxy_socket_when_register_fails(
         self, mock_gen_socket: MagicMock, mock_sel_cls: MagicMock
     ) -> None:
@@ -316,7 +321,7 @@ class TestTCPRelay(unittest.TestCase):
         assert (relay.bytes_up, relay.bytes_down) == (12, 8)
 
     def test_cleanup_logs_one_closed_line(self) -> None:
-        with patch("simple_socks5.relays.base.time.monotonic", side_effect=[100.0, 102.5]):
+        with patch("simple_socks5.relays.base.time.monotonic", autospec=True, side_effect=[100.0, 102.5]):
             relay, _, _ = self._relay_one_exchange()
             with self.assertLogs("simple_socks5.relays.tcp_relay", level="DEBUG") as logs:
                 relay.listen_and_relay()
@@ -343,8 +348,8 @@ class TestTCPRelay(unittest.TestCase):
         proxy.send.assert_not_called()
 
 
-@patch("simple_socks5.relays.tcp_relay.selectors.DefaultSelector", MagicMock)
-@patch("simple_socks5.relays.tcp_relay.generate_tcp_socket")
+@patch("simple_socks5.relays.tcp_relay.selectors.DefaultSelector", _selector)
+@patch("simple_socks5.relays.tcp_relay.generate_tcp_socket", autospec=True)
 class TestTCPRelayDestinationPolicy(unittest.TestCase):
     def setUp(self) -> None:
         environ = {k: v for k, v in os.environ.items() if not k.startswith("SOCKS5_")}
@@ -357,7 +362,9 @@ class TestTCPRelayDestinationPolicy(unittest.TestCase):
 
     def test_denied_destination_raises_before_socket(self, mock_gen_socket: MagicMock) -> None:
         with (
-            patch("simple_socks5.relays.tcp_relay.selectors.DefaultSelector") as mock_sel_cls,
+            patch(
+                "simple_socks5.relays.tcp_relay.selectors.DefaultSelector", autospec=selectors.BaseSelector
+            ) as mock_sel_cls,
             pytest.raises(PolicyDeniedError),
         ):
             TCPRelay(_socket(), self._dst("169.254.169.254"))

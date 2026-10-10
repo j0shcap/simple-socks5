@@ -55,21 +55,21 @@ class TestTCPRequestHandlerIPv4(unittest.TestCase):
     def tearDown(self) -> None:
         self.connection.close()
 
-    @patch("socket.socket.recv")
+    @patch("socket.socket.recv", autospec=True)
     def test_handle_handshake__incorrect_version(self, mock_recv: MagicMock) -> None:
         mock_recv.side_effect = [REQ_INCORRECT_VERSION]
         with pytest.raises(InvalidVersionError):
             self.handler.handle_request()
 
-    @patch("socket.socket.recv")
-    @patch("socket.socket.sendall")
+    @patch("socket.socket.recv", autospec=True)
+    @patch("socket.socket.sendall", autospec=True)
     def test_handle_handshake__no_authentication_required(self, mock_sendall: MagicMock, mock_recv: MagicMock) -> None:
         mock_recv.side_effect = CORRECT_VERSION_NO_AUTH_REQUIRED
         self.handler.handle_request()
         mock_sendall.assert_called_with(RESP_CORRECT_VERSION_NO_AUTH_REQUIRED)
 
-    @patch("socket.socket.recv")
-    @patch("socket.socket.sendall")
+    @patch("socket.socket.recv", autospec=True)
+    @patch("socket.socket.sendall", autospec=True)
     def test_handle_handshake__correct_version__authentication_required_success(
         self, mock_sendall: MagicMock, mock_recv: MagicMock
     ) -> None:
@@ -86,8 +86,8 @@ class TestTCPRequestHandlerIPv4(unittest.TestCase):
         self.handler.handle_request()
         mock_sendall.assert_called_with(RESP_LOGIN_SUCCESS)
 
-    @patch("socket.socket.recv")
-    @patch("socket.socket.sendall")
+    @patch("socket.socket.recv", autospec=True)
+    @patch("socket.socket.sendall", autospec=True)
     def test_handle_handshake__correct_version__authentication_required_subnegotiation_failure(
         self, mock_sendall: MagicMock, mock_recv: MagicMock
     ) -> None:
@@ -104,8 +104,8 @@ class TestTCPRequestHandlerIPv4(unittest.TestCase):
         self.handler.handle_request()
         mock_sendall.assert_called_with(RESP_LOGIN_FAILURE)
 
-    @patch("socket.socket.recv")
-    @patch("socket.socket.sendall")
+    @patch("socket.socket.recv", autospec=True)
+    @patch("socket.socket.sendall", autospec=True)
     def test_handle_handshake__correct_version__authentication_required_incorrect_password(
         self, mock_sendall: MagicMock, mock_recv: MagicMock
     ) -> None:
@@ -137,8 +137,8 @@ class TestTCPRequestHandlerIPv4(unittest.TestCase):
         result = self.handler._negotiate_authentication_method(methods)
         assert result == MethodCodes.NO_ACCEPTABLE_METHODS
 
-    @patch("socket.socket.recv")
-    @patch("socket.socket.sendall")
+    @patch("socket.socket.recv", autospec=True)
+    @patch("socket.socket.sendall", autospec=True)
     def test_handle_username_password_auth__valid(self, mock_sendall: MagicMock, mock_recv: MagicMock) -> None:
         mock_recv.side_effect = [
             b"\x01",
@@ -151,8 +151,8 @@ class TestTCPRequestHandlerIPv4(unittest.TestCase):
         mock_sendall.assert_called_with(RESP_LOGIN_SUCCESS)
         assert result
 
-    @patch("socket.socket.recv")
-    @patch("socket.socket.sendall")
+    @patch("socket.socket.recv", autospec=True)
+    @patch("socket.socket.sendall", autospec=True)
     def test_handle_username_password_auth__invalid(self, mock_sendall: MagicMock, mock_recv: MagicMock) -> None:
         mock_recv.side_effect = [
             b"\x01",
@@ -165,8 +165,12 @@ class TestTCPRequestHandlerIPv4(unittest.TestCase):
         mock_sendall.assert_called_with(RESP_LOGIN_FAILURE)
         assert not result
 
-    @patch("socket.socket.recv")
-    @patch("simple_socks5.handlers.base.socket.gethostbyaddr", side_effect=AssertionError("reverse DNS lookup"))
+    @patch("socket.socket.recv", autospec=True)
+    @patch(
+        "simple_socks5.handlers.base.socket.gethostbyaddr",
+        autospec=True,
+        side_effect=AssertionError("reverse DNS lookup"),
+    )
     def test_parse_request(self, mock_gethostbyaddr: MagicMock, mock_recv: MagicMock) -> None:
         mock_recv.side_effect = [
             struct.pack("!BBBB", 0x05, 0x01, 0x00, 0x01),
@@ -183,8 +187,12 @@ class TestTCPRequestHandlerIPv4(unittest.TestCase):
         assert result.address.address_type == AddressTypeCodes.IPv4
         mock_gethostbyaddr.assert_not_called()
 
-    @patch("socket.socket.recv")
-    @patch("simple_socks5.handlers.base.socket.gethostbyaddr", side_effect=AssertionError("reverse DNS lookup"))
+    @patch("socket.socket.recv", autospec=True)
+    @patch(
+        "simple_socks5.handlers.base.socket.gethostbyaddr",
+        autospec=True,
+        side_effect=AssertionError("reverse DNS lookup"),
+    )
     def test_parse_address_ipv4_never_reverse_resolves(
         self, mock_gethostbyaddr: MagicMock, mock_recv: MagicMock
     ) -> None:
@@ -199,8 +207,8 @@ class TestTCPRequestHandlerIPv4(unittest.TestCase):
         assert result.address_type == AddressTypeCodes.IPv4
         mock_gethostbyaddr.assert_not_called()
 
-    @patch("socket.socket.recv")
-    @patch("simple_socks5.handlers.base.socket.getaddrinfo")
+    @patch("socket.socket.recv", autospec=True)
+    @patch("simple_socks5.handlers.base.socket.getaddrinfo", autospec=True)
     def test_parse_address_domain_name_ipv4(self, mock_getaddrinfo: MagicMock, mock_recv: MagicMock) -> None:
         mock_getaddrinfo.return_value = [
             (socket.AF_INET, socket.SOCK_STREAM, 0, "", ("93.184.216.34", 0)),
@@ -217,8 +225,8 @@ class TestTCPRequestHandlerIPv4(unittest.TestCase):
         assert result.name == domain
         assert result.address_type == AddressTypeCodes.IPv4
 
-    @patch("socket.socket.recv")
-    @patch("simple_socks5.handlers.base.socket.getaddrinfo")
+    @patch("socket.socket.recv", autospec=True)
+    @patch("simple_socks5.handlers.base.socket.getaddrinfo", autospec=True)
     def test_parse_address_domain_name_ipv6(self, mock_getaddrinfo: MagicMock, mock_recv: MagicMock) -> None:
         mock_getaddrinfo.return_value = [
             (socket.AF_INET6, socket.SOCK_STREAM, 0, "", ("2606:4700::6812:1a78", 0, 0, 0)),
@@ -235,8 +243,12 @@ class TestTCPRequestHandlerIPv4(unittest.TestCase):
         assert result.name == domain
         assert result.address_type == AddressTypeCodes.IPv6
 
-    @patch("socket.socket.recv")
-    @patch("simple_socks5.handlers.base.socket.gethostbyaddr", side_effect=AssertionError("reverse DNS lookup"))
+    @patch("socket.socket.recv", autospec=True)
+    @patch(
+        "simple_socks5.handlers.base.socket.gethostbyaddr",
+        autospec=True,
+        side_effect=AssertionError("reverse DNS lookup"),
+    )
     def test_parse_address_ipv6_never_reverse_resolves(
         self, mock_gethostbyaddr: MagicMock, mock_recv: MagicMock
     ) -> None:
@@ -252,7 +264,7 @@ class TestTCPRequestHandlerIPv4(unittest.TestCase):
         assert result.address_type == AddressTypeCodes.IPv6
         mock_gethostbyaddr.assert_not_called()
 
-    @patch("socket.socket.recv")
+    @patch("socket.socket.recv", autospec=True)
     def test_parse_request_rejects_nonzero_rsv(self, mock_recv: MagicMock) -> None:
         """RFC 1928 requires RSV field to be 0x00."""
         mock_recv.side_effect = [
@@ -266,7 +278,7 @@ class TestTCPRequestHandlerIPv4(unittest.TestCase):
             self.handler._parse_address(0xFF)
 
     @patch("simple_socks5.handlers.base.DNS_LOOKUP_TIMEOUT", 0.1)
-    @patch("simple_socks5.handlers.base.socket.getaddrinfo")
+    @patch("simple_socks5.handlers.base.socket.getaddrinfo", autospec=True)
     def test_resolve_hostname_timeout_returns_name(self, mock_getaddrinfo: MagicMock) -> None:
         """Forward DNS should return the name with IPv4 default if the lookup takes too long."""
         done = threading.Event()
@@ -281,7 +293,7 @@ class TestTCPRequestHandlerIPv4(unittest.TestCase):
         assert atyp == AddressTypeCodes.IPv4.value
         done.set()
 
-    @patch("simple_socks5.handlers.base.socket.getaddrinfo")
+    @patch("simple_socks5.handlers.base.socket.getaddrinfo", autospec=True)
     def test_resolve_hostname_ipv4(self, mock_getaddrinfo: MagicMock) -> None:
         mock_getaddrinfo.return_value = [
             (socket.AF_INET, socket.SOCK_STREAM, 0, "", ("93.184.216.34", 0)),
@@ -290,7 +302,7 @@ class TestTCPRequestHandlerIPv4(unittest.TestCase):
         assert ip == "93.184.216.34"
         assert atyp == AddressTypeCodes.IPv4.value
 
-    @patch("simple_socks5.handlers.base.socket.getaddrinfo")
+    @patch("simple_socks5.handlers.base.socket.getaddrinfo", autospec=True)
     def test_resolve_hostname_ipv6(self, mock_getaddrinfo: MagicMock) -> None:
         mock_getaddrinfo.return_value = [
             (socket.AF_INET6, socket.SOCK_STREAM, 0, "", ("2606:4700::6812:1a78", 0, 0, 0)),
@@ -299,14 +311,14 @@ class TestTCPRequestHandlerIPv4(unittest.TestCase):
         assert ip == "2606:4700::6812:1a78"
         assert atyp == AddressTypeCodes.IPv6.value
 
-    @patch("simple_socks5.handlers.base.socket.getaddrinfo")
+    @patch("simple_socks5.handlers.base.socket.getaddrinfo", autospec=True)
     def test_resolve_hostname_failure_returns_name(self, mock_getaddrinfo: MagicMock) -> None:
         mock_getaddrinfo.side_effect = OSError("no DNS")
         ip, atyp = self.handler._resolve_hostname("example.com")
         assert ip == "example.com"
         assert atyp == AddressTypeCodes.IPv4.value
 
-    @patch("simple_socks5.handlers.base.socket.getaddrinfo")
+    @patch("simple_socks5.handlers.base.socket.getaddrinfo", autospec=True)
     def test_resolve_hostname_non_str_sockaddr_is_unresolved(self, mock_getaddrinfo: MagicMock) -> None:
         """A Python built without IPv6 support reports AF_INET6 results as (int, bytes) sockaddrs."""
         mock_getaddrinfo.return_value = [(socket.AF_INET6, socket.SOCK_STREAM, 0, "", (10, b"\x00" * 16))]
@@ -314,7 +326,7 @@ class TestTCPRequestHandlerIPv4(unittest.TestCase):
         assert ip == "example.com"
         assert atyp == AddressTypeCodes.IPv4.value
 
-    @patch("simple_socks5.handlers.base.socket.getaddrinfo")
+    @patch("simple_socks5.handlers.base.socket.getaddrinfo", autospec=True)
     def test_resolve_hostname_empty_result_returns_name(self, mock_getaddrinfo: MagicMock) -> None:
         """getaddrinfo returning empty list should fall back to name with IPv4."""
         mock_getaddrinfo.return_value = []

@@ -50,9 +50,9 @@ class TestIsLoopbackHost(unittest.TestCase):
     def test_no_dns_lookup(self) -> None:
         """Hostnames are classified without resolving them."""
         with (
-            patch("socket.getaddrinfo", side_effect=AssertionError("DNS lookup")),
-            patch("socket.gethostbyname", side_effect=AssertionError("DNS lookup")),
-            patch("socket.gethostbyname_ex", side_effect=AssertionError("DNS lookup")),
+            patch("socket.getaddrinfo", autospec=True, side_effect=AssertionError("DNS lookup")),
+            patch("socket.gethostbyname", autospec=True, side_effect=AssertionError("DNS lookup")),
+            patch("socket.gethostbyname_ex", autospec=True, side_effect=AssertionError("DNS lookup")),
         ):
             assert not is_loopback_host("example.org")
 
@@ -111,7 +111,7 @@ class TestStartupAdvisories(unittest.TestCase):
         assert "mypassword" not in DEFAULT_CREDENTIALS_MESSAGE
 
     def test_no_dns_lookup(self) -> None:
-        with patch("socket.getaddrinfo", side_effect=AssertionError("DNS lookup")):
+        with patch("socket.getaddrinfo", autospec=True, side_effect=AssertionError("DNS lookup")):
             assert len(startup_advisories("example.org", False, False, False)) == len(OPEN_PROXY_BANNER)
 
 
