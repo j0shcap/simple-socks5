@@ -9,7 +9,7 @@ pip install -e '.[dev]'
 
 ## Checks
 
-CI runs these on Python 3.10 to 3.14:
+CI runs the tests and mypy on Python 3.10 to 3.14, and Ruff on 3.13:
 
 ```bash
 pytest --cov=simple_socks5 --cov-fail-under=85
@@ -46,8 +46,8 @@ docker build -t simple-socks5:dev . && bash .github/scripts/smoke-test.sh simple
    git fetch origin && git tag -a vX.Y.Z -m vX.Y.Z origin/main && git push origin vX.Y.Z
    ```
 4. CI publishes the multi-arch images. `vX.Y.Z` moves `X.Y.Z`, `X.Y`, `X`, `latest`, `X.Y.Z-logging-disabled` and
-   `logging-disabled`; `vX.Y.Z-rc.N` publishes only its own two tags. `release-guard.sh` rejects any other tag
-   and anything below 2.1.0.
+   `logging-disabled`; a prerelease such as `vX.Y.Z-rc.N` publishes only its own two tags. `release-guard.sh`
+   rejects tags of any other form and anything below 2.1.0.
 5. Check that the tags share a digest (one line with a count of 4):
    ```bash
    for t in latest X X.Y X.Y.Z; do
