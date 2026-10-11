@@ -8,3 +8,6 @@ errors.log*
 # Build output from pip install
 *.egg-info/
 build/
+
+# Coverage data from pytest --cov
+.coverage
