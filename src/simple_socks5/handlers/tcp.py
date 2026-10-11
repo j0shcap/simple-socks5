@@ -1,11 +1,10 @@
 import hmac
-import socket
-import struct
 
 from ..constants import SOCKS_VERSION, MethodCodes, auth_required, credentials
 from ..errors import is_routine_disconnect
 from ..exceptions import InvalidVersionError
 from ..logger import get_logger
+from ..models import SocketAddress
 from ..utils import generate_connection_method_response
 from .base import BaseHandler
 
@@ -13,13 +12,11 @@ logger = get_logger(__name__)
 
 
 class TCPHandler(BaseHandler):
-    connection: socket.socket
-
     def handle_request(self) -> bool:
         """
         Procedure for TCP-based clients per RFC 1928.
 
-        Handles authentication negotation.
+        Handles authentication negotiation.
 
         Client request:
             +----+----------+----------+
@@ -49,7 +46,7 @@ class TCPHandler(BaseHandler):
             # Parses client VER, NMETHODS, METHODS
             header = self._recv_exact(2)
 
-            version, nmethods = struct.unpack("!BB", header)
+            version, nmethods = header
 
             if version != SOCKS_VERSION:
                 raise InvalidVersionError(version)
@@ -83,7 +80,7 @@ class TCPHandler(BaseHandler):
 
     def _negotiate_authentication_method(self, methods: bytes) -> MethodCodes:
         """
-        Finds the a mutually supported authentication method.
+        Finds a mutually supported authentication method.
         USERNAME/PASSWORD is the preferred method.
 
         Args:
@@ -177,9 +174,10 @@ class TCPHandler(BaseHandler):
 
     def _peer_ip(self) -> str:
         try:
-            return self.connection.getpeername()[0]
+            peer: SocketAddress = self.connection.getpeername()
         except OSError:
             return "unknown"  # The client has already disconnected
+        return peer[0]
 
     def _handle_gssapi_auth(self) -> bool:
         """

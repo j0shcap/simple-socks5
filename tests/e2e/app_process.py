@@ -10,6 +10,7 @@ import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
+from typing import TypeAlias
 
 import pytest
 
@@ -18,11 +19,14 @@ from tests.e2e import socks_client as sc
 APP = Path(__file__).resolve().parents[2] / "app.py"
 STARTUP_TIMEOUT = 10.0  # seconds
 
+RunningApp: TypeAlias = tuple[subprocess.Popen[str], tuple[str, int]]  # (process, address)
+
 
 def free_port() -> int:
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))
-        return sock.getsockname()[1]
+        port: int = sock.getsockname()[1]
+        return port
 
 
 def socks_ready(address: tuple[str, int]) -> bool:
@@ -34,9 +38,7 @@ def socks_ready(address: tuple[str, int]) -> bool:
 
 
 @contextmanager
-def run_app(
-    cwd: Path, *, logging_level: str = "info", env: dict[str, str] | None = None
-) -> Iterator[tuple[subprocess.Popen, tuple[str, int]]]:
+def run_app(cwd: Path, *, logging_level: str = "info", env: dict[str, str] | None = None) -> Iterator[RunningApp]:
     """
     Runs app.py on a free loopback port with no SOCKS5_* variables but SOCKS5_ALLOW_LOOPBACK=true (the origins
     listen on loopback) and those in env, and yields (process, address) once it accepts SOCKS5 connections. stdout
@@ -65,5 +67,7 @@ def run_app(
     finally:
         proc.kill()
         proc.wait()
-        proc.stdout.close()
-        proc.stderr.close()
+        # Both are pipes: Popen was given stdout=PIPE and stderr=PIPE
+        for pipe in (proc.stdout, proc.stderr):
+            if pipe is not None:
+                pipe.close()

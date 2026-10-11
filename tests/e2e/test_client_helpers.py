@@ -1,6 +1,7 @@
 """Self-tests for the raw SOCKS5 client, run over a socketpair (no proxy)."""
 
 import socket
+from collections.abc import Iterator
 
 import pytest
 
@@ -8,7 +9,7 @@ from tests.e2e import socks_client as sc
 
 
 @pytest.fixture
-def pair():
+def pair() -> Iterator[tuple[socket.socket, socket.socket]]:
     a, b = socket.socketpair()
     a.settimeout(5.0)
     b.settimeout(5.0)
@@ -17,7 +18,7 @@ def pair():
     b.close()
 
 
-def test_read_reply_ipv4_does_not_over_read(pair):
+def test_read_reply_ipv4_does_not_over_read(pair: tuple[socket.socket, socket.socket]) -> None:
     server, client = pair
     server.sendall(b"\x05\x00\x00\x01" + bytes([10, 0, 0, 1]) + b"\x1f\x90" + b"NEXT")
 
@@ -27,7 +28,7 @@ def test_read_reply_ipv4_does_not_over_read(pair):
     assert sc.recv_exact(client, 4) == b"NEXT"
 
 
-def test_read_reply_ipv6_does_not_over_read(pair):
+def test_read_reply_ipv6_does_not_over_read(pair: tuple[socket.socket, socket.socket]) -> None:
     server, client = pair
     server.sendall(b"\x05\x00\x00\x04" + socket.inet_pton(socket.AF_INET6, "::1") + b"\x00\x50" + b"NEXT")
 
@@ -39,7 +40,7 @@ def test_read_reply_ipv6_does_not_over_read(pair):
     assert sc.recv_exact(client, 4) == b"NEXT"
 
 
-def test_read_reply_domain(pair):
+def test_read_reply_domain(pair: tuple[socket.socket, socket.socket]) -> None:
     server, client = pair
     server.sendall(b"\x05\x00\x00\x03\x0bexample.com\x01\xbb" + b"NEXT")
 
@@ -49,7 +50,7 @@ def test_read_reply_domain(pair):
     assert sc.recv_exact(client, 4) == b"NEXT"
 
 
-def test_read_reply_eof_mid_reply_raises(pair):
+def test_read_reply_eof_mid_reply_raises(pair: tuple[socket.socket, socket.socket]) -> None:
     server, client = pair
     server.sendall(b"\x05\x00\x00\x01\x7f")
     server.shutdown(socket.SHUT_WR)
@@ -58,7 +59,7 @@ def test_read_reply_eof_mid_reply_raises(pair):
         sc.read_reply(client)
 
 
-def test_builders_match_rfc_bytes():
+def test_builders_match_rfc_bytes() -> None:
     assert sc.build_greeting([sc.METHOD_NO_AUTH, sc.METHOD_USERPASS]) == b"\x05\x02\x00\x02"
     assert sc.build_userpass("user", "pw") == b"\x01\x04user\x02pw"
     assert sc.build_userpass(b"\xff", b"", ver=5) == b"\x05\x01\xff\x00"
@@ -77,7 +78,7 @@ def test_builders_match_rfc_bytes():
     ("atyp", "addr"),
     [(1, "192.0.2.7"), (3, "example.com"), (4, "2001:db8::1")],
 )
-def test_udp_header_round_trip(atyp, addr):
+def test_udp_header_round_trip(atyp: int, addr: str) -> None:
     datagram = sc.build_udp_header(atyp, addr, 4242) + b"payload"
 
     assert sc.parse_udp_header(datagram) == sc.UDPHeader(

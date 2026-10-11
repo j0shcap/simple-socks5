@@ -10,14 +10,29 @@ requires-python = ">=3.10"
 license = "MIT"
 
 [project.optional-dependencies]
-# Ruff is pinned exactly so local runs and CI lint and format identically; bump it on purpose.
-dev = ["ruff==0.16.10", "pytest", "pytest-cov"]
+# Ruff and mypy are pinned exactly so local runs and CI lint, format and type-check identically; bump them on purpose.
+dev = ["ruff==0.16.10", "mypy==2.4.0", "pytest", "pytest-cov"]
 
 [project.scripts]
 simple-socks5 = "simple_socks5.main:cli"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.mypy]
+files = ["src", "tests"]
+mypy_path = "src"
+python_version = "3.10"
+strict = true
+warn_unreachable = true
+extra_checks = true
+enable_error_code = [
+    "ignore-without-code", "redundant-expr", "truthy-bool", "possibly-undefined", "redundant-self", "unused-awaitable",
+]
+
+[[tool.mypy.overrides]]
+module = "simple_socks5.*"
+disallow_any_explicit = true
 
 [tool.ruff]
 target-version = "py310"

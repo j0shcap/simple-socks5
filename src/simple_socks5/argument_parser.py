@@ -2,18 +2,34 @@ import argparse
 import os
 from collections.abc import Mapping, Sequence
 from importlib.metadata import PackageNotFoundError, version
+from typing import Final
+
+from .config import LOGGING_LEVELS, LoggingLevelName, ProxyConfiguration
 
 try:
     __version__ = version("simple-socks5")
 except PackageNotFoundError:  # a clone run as `python3 app.py` without `pip install -e .`
     __version__ = "0+unknown"
 
-LOGGING_LEVEL_CHOICES: tuple[str, ...] = ("disabled", "debug", "info", "warning", "error", "critical")
-LOGGING_LEVEL_ENV: str = "LOGGING_LEVEL"
-DEFAULT_LOGGING_LEVEL: str = "debug"
+LOGGING_LEVEL_CHOICES: Final[tuple[LoggingLevelName, ...]] = tuple(LOGGING_LEVELS)
+LOGGING_LEVEL_ENV: Final = "LOGGING_LEVEL"
+DEFAULT_LOGGING_LEVEL: Final[LoggingLevelName] = "debug"
 
 
-def parse_arguments(argv: Sequence[str] | None = None, environ: Mapping[str, str] = os.environ) -> argparse.Namespace:
+class _Arguments(argparse.Namespace):
+    host: str
+    port: int
+    logging_level: str
+
+
+def _logging_level_name(value: str) -> LoggingLevelName | None:
+    for name in LOGGING_LEVEL_CHOICES:
+        if name == value:
+            return name
+    return None
+
+
+def parse_arguments(argv: Sequence[str] | None = None, environ: Mapping[str, str] = os.environ) -> ProxyConfiguration:
     """
     Parses command line arguments for the SOCKS5 Proxy Server.
 
@@ -50,12 +66,13 @@ def parse_arguments(argv: Sequence[str] | None = None, environ: Mapping[str, str
     # Version Information
     parser.add_argument("-V", "--version", action="version", version=f"%(prog)s {__version__}")
 
-    args = parser.parse_args(argv)
+    args = parser.parse_args(argv, namespace=_Arguments())
     # argparse validates choices only for values given on the command line, so an invalid value
     # here can only have come from the environment.
-    if args.logging_level not in LOGGING_LEVEL_CHOICES:
+    logging_level = _logging_level_name(args.logging_level)
+    if logging_level is None:
         parser.error(
             f"{LOGGING_LEVEL_ENV}: invalid choice: {args.logging_level!r} "
             f"(choose from {', '.join(LOGGING_LEVEL_CHOICES)})"
         )
-    return args
+    return ProxyConfiguration(host=args.host, port=args.port, logging_level=logging_level)

@@ -18,40 +18,31 @@ class TCPRelay(BaseRelay):
     Class responsible for relaying data between a client socket and a remote socket via TCP.
     """
 
-    def __init__(self, client_connection: socket.socket, dst_address: DetailedAddress):
+    def __init__(self, client_connection: socket.socket, dst_address: DetailedAddress) -> None:
         """
         Initializes a new instance of the TCPRelay class.
 
         Args:
-            connection (socket.socket): The client socket.
+            client_connection (socket.socket): The client socket.
             dst_address (DetailedAddress): The address to connect to.
         """
         super().__init__(client_connection, dst_address)
-        self.selector = selectors.DefaultSelector()
+        self.selector: selectors.BaseSelector = selectors.DefaultSelector()
+        sock: socket.socket | None = None
         try:
-            self.generate_proxy_connection()
+            check_destination(dst_address.ip, dst_address.port)
+            sock = generate_tcp_socket(dst_address.address_type)
+            # Replaced by the relay's write timeout in _prepare_sockets()
+            sock.settimeout(connect_timeout())
+            sock.connect((dst_address.ip, dst_address.port))
+            self.selector.register(client_connection, selectors.EVENT_READ)
+            self.selector.register(sock, selectors.EVENT_READ)
         except Exception:
-            # proxy_connection is unset if generate_tcp_socket itself raised
-            proxy_connection = getattr(self, "proxy_connection", None)
-            if proxy_connection is not None:
-                proxy_connection.close()
+            if sock is not None:
+                sock.close()
             self.selector.close()
             raise
-
-    def generate_proxy_connection(self) -> None:
-        """
-        Generates a new proxy connection.
-        """
-        check_destination(self.dst_address.ip, self.dst_address.port)
-        # Generate proxy connection
-        self.proxy_connection = generate_tcp_socket(self.dst_address.address_type)
-        # Replaced by the relay's write timeout in _prepare_sockets()
-        self.proxy_connection.settimeout(connect_timeout())
-        self.proxy_connection.connect((self.dst_address.ip, self.dst_address.port))
-        self.set_proxy_address()
-        # Register sockets with selector
-        self.selector.register(self.client_connection, selectors.EVENT_READ)
-        self.selector.register(self.proxy_connection, selectors.EVENT_READ)
+        self.proxy_connection = sock
 
     def listen_and_relay(self) -> None:
         """
@@ -71,18 +62,16 @@ class TCPRelay(BaseRelay):
                     continue
 
                 for key, _ in events:
-                    sock = key.fileobj
-                    other_sock = self.proxy_connection if sock is self.client_connection else self.client_connection
+                    sock, other_sock = self._direction(key.fileobj)
 
-                    # Handle incoming data
-                    data: bytes = self._recv_data(sock)
+                    data = sock.recv(RELAY_BUFFER_SIZE)
                     if not data:
                         self._half_close(sock, other_sock)
                         open_readers.discard(sock)
                         continue
 
                     # Blocks while the receiver is slow: that is the backpressure
-                    self._send_data(other_sock, data)
+                    other_sock.sendall(data)
                     if sock is self.client_connection:
                         self.bytes_up += len(data)
                     else:
@@ -98,6 +87,15 @@ class TCPRelay(BaseRelay):
         finally:
             self._cleanup()
 
+    def _direction(self, ready: object) -> tuple[socket.socket, socket.socket]:
+        """
+        Returns the socket the selector reported readable and the socket its data goes to. The selector types its
+        file objects as any file, so the socket is found by identity.
+        """
+        if ready is self.client_connection:
+            return self.client_connection, self.proxy_connection
+        return self.proxy_connection, self.client_connection
+
     def _prepare_sockets(self) -> None:
         """
         Makes both sockets blocking with a bounded write time, and enables keepalive to detect dead peers.
@@ -112,12 +110,6 @@ class TCPRelay(BaseRelay):
         """
         self.selector.unregister(eof_sock)
         other_sock.shutdown(socket.SHUT_WR)
-
-    def _send_data(self, sock: socket.socket, data: bytes) -> None:
-        sock.sendall(data)
-
-    def _recv_data(self, sock: socket.socket) -> bytes:
-        return sock.recv(RELAY_BUFFER_SIZE)
 
     def _cleanup(self) -> None:
         logger.info(self.closed_line())

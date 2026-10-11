@@ -1,7 +1,8 @@
 import socket
-import struct
 import threading
 import time
+from collections.abc import Callable
+from typing import TypeVar
 
 from ..constants import DNS_LOOKUP_TIMEOUT, SOCKS_VERSION, AddressTypeCodes
 from ..errors import is_routine_disconnect
@@ -18,14 +19,16 @@ from ..utils import map_address_int_to_enum
 
 logger = get_logger(__name__)
 
+T = TypeVar("T")
+
 
 class BaseHandler:
     connection: socket.socket
     deadline: float | None = None
 
-    def __init__(self, connection: socket.socket, deadline: float | None = None):
+    def __init__(self, connection: socket.socket, deadline: float | None = None) -> None:
         """
-        Initializes a new instance of the BaseRequestHandler class.
+        Initializes a new instance of the BaseHandler class.
 
         Args:
             connection (socket.socket): The client socket.
@@ -63,12 +66,6 @@ class BaseHandler:
         except TimeoutError as e:
             raise HandshakeTimeoutError("Handshake deadline expired") from e
 
-    def handle_request(self) -> bool:
-        """
-        Implemented in TCP and UDP request handlers.
-        """
-        raise NotImplementedError
-
     def parse_request(self) -> Request:
         """
         Handles requests of the form:
@@ -95,15 +92,13 @@ class BaseHandler:
         try:
             header = self._recv_exact(4)
 
-            version, cmd, rsv, address_type = struct.unpack("!BBBB", header)
+            version, cmd, rsv, address_type = header
             if version != SOCKS_VERSION:
                 raise InvalidVersionError(version)
             if rsv != 0x00:
                 raise InvalidRequestError(rsv)
 
-            address: DetailedAddress = self._parse_address(address_type)
-
-            return Request(version=version, command=cmd, address=address)
+            return Request(version=version, command=cmd, address=self._parse_address(address_type))
 
         except HandshakeTimeoutError:
             raise  # Expected for stalled clients; the server logs it without a traceback
@@ -117,9 +112,9 @@ class BaseHandler:
         # counts against the handshake deadline.
         try:
             if address_type == AddressTypeCodes.IPv4.value:
-                address: str = socket.inet_ntoa(self._recv_exact(4))
+                ip = socket.inet_ntoa(self._recv_exact(4))
                 port = self._recv_port()
-                domain_name: str = address  # IP literals are never reverse-resolved
+                name = ip  # IP literals are never reverse-resolved
             elif address_type == AddressTypeCodes.DOMAIN_NAME.value:
                 domain_length = self._recv_exact(1)[0]
                 raw_domain_name = self._recv_exact(domain_length)
@@ -128,20 +123,20 @@ class BaseHandler:
                     # connect(("", port)) would reach the local host
                     raise InvalidDomainNameError(raw_domain_name)
                 try:
-                    domain_name = raw_domain_name.decode()
+                    name = raw_domain_name.decode()
                 except UnicodeDecodeError as e:
                     raise InvalidDomainNameError(raw_domain_name) from e
-                address, address_type = self._resolve_hostname(domain_name)
+                ip, address_type = self._resolve_hostname(name)
             elif address_type == AddressTypeCodes.IPv6.value:
-                address: str = socket.inet_ntop(socket.AF_INET6, self._recv_exact(16))
+                ip = socket.inet_ntop(socket.AF_INET6, self._recv_exact(16))
                 port = self._recv_port()
-                domain_name: str = address
+                name = ip
             else:
                 raise AddressTypeNotSupportedError(address_type)
 
             return DetailedAddress(
-                name=str(domain_name),
-                ip=address,
+                name=name,
+                ip=ip,
                 port=port,
                 address_type=map_address_int_to_enum(address_type),
             )
@@ -154,18 +149,19 @@ class BaseHandler:
             raise
 
     def _recv_port(self) -> int:
-        return struct.unpack("!H", self._recv_exact(2))[0]
+        return int.from_bytes(self._recv_exact(2), "big")
 
-    def _dns_lookup_with_timeout(self, fn, label: str):
+    @staticmethod
+    def _dns_lookup_with_timeout(fn: Callable[[], T], label: str) -> T | None:
         """Run a DNS function on a daemon thread with timeout. Returns result or None."""
-        result = [None]
-        error = [None]
+        results: list[T] = []
+        errors: list[Exception] = []
 
-        def lookup():
+        def lookup() -> None:
             try:
-                result[0] = fn()
+                results.append(fn())
             except Exception as e:  # noqa: BLE001 - handed back to the caller, which logs it
-                error[0] = e
+                errors.append(e)
 
         t = threading.Thread(target=lookup, daemon=True)
         t.start()
@@ -174,11 +170,11 @@ class BaseHandler:
         if t.is_alive():
             logger.debug("DNS lookup timed out for %s", label)
             return None
-        if error[0] is not None:
-            if not isinstance(error[0], OSError):
-                logger.error("DNS lookup error for %s", label, exc_info=error[0])
+        if errors:
+            if not isinstance(errors[0], OSError):
+                logger.error("DNS lookup error for %s", label, exc_info=errors[0])
             return None
-        return result[0]
+        return results[0]
 
     def _resolve_hostname(self, name: str) -> tuple[str, int]:
         """Resolve a hostname to (ip, address_type_value) using getaddrinfo for dual-stack support."""
@@ -191,6 +187,9 @@ class BaseHandler:
 
         family, _, _, _, sockaddr = result[0]
         ip = sockaddr[0]
+        if not isinstance(ip, str):
+            # Only a Python built without IPv6 support returns (int, bytes) sockaddrs; treated as a failed lookup
+            return name, AddressTypeCodes.IPv4.value
         if family == socket.AF_INET6:
             return ip, AddressTypeCodes.IPv6.value
         return ip, AddressTypeCodes.IPv4.value

@@ -15,27 +15,27 @@ DOMAIN_HEADER = sc.build_udp_header(sc.ATYP_DOMAIN, "example.com", 53)
 
 
 class TestParseUDPDatagram(unittest.TestCase):
-    def test_parses_valid_ipv4_at_minimum_length(self):
+    def test_parses_valid_ipv4_at_minimum_length(self) -> None:
         datagram = UDPHandler.parse_udp_datagram(sc.build_udp_header(sc.ATYP_IPV4, "10.0.0.1", 53, frag=7))
         assert datagram.frag == 7
         assert datagram.address_type == AddressTypeCodes.IPv4
         assert (datagram.dst_addr, datagram.dst_port, datagram.data) == ("10.0.0.1", 53, b"")
 
-    def test_parses_valid_ipv6_at_minimum_length(self):
+    def test_parses_valid_ipv6_at_minimum_length(self) -> None:
         datagram = UDPHandler.parse_udp_datagram(IPV6_HEADER)
         assert datagram.address_type == AddressTypeCodes.IPv6
         assert (datagram.dst_addr, datagram.dst_port, datagram.data) == ("2001:db8::1", 53, b"")
 
-    def test_parses_valid_domain_at_minimum_length(self):
+    def test_parses_valid_domain_at_minimum_length(self) -> None:
         datagram = UDPHandler.parse_udp_datagram(DOMAIN_HEADER)
         assert datagram.address_type == AddressTypeCodes.DOMAIN_NAME
         assert (datagram.dst_addr, datagram.dst_port, datagram.data) == ("example.com", 53, b"")
 
-    def test_payload_after_header_is_preserved(self):
+    def test_payload_after_header_is_preserved(self) -> None:
         payload = b"\x00\x00\x00\x01 looks like a header"
         assert UDPHandler.parse_udp_datagram(IPV4_HEADER + payload).data == payload
 
-    def test_rejects_malformed(self):
+    def test_rejects_malformed(self) -> None:
         cases = {
             **{f"{n} bytes": b"\x00" * n for n in range(4)},
             "RSV=1": b"\x00\x01" + IPV4_HEADER[2:],
@@ -52,13 +52,13 @@ class TestParseUDPDatagram(unittest.TestCase):
             with self.subTest(name), pytest.raises(MalformedDatagramError):
                 UDPHandler.parse_udp_datagram(data)
 
-    def test_error_is_invalid_request_error_with_reason(self):
+    def test_error_is_invalid_request_error_with_reason(self) -> None:
         with pytest.raises(InvalidRequestError) as ctx:
             UDPHandler.parse_udp_datagram(b"\x00\x00")
         assert isinstance(ctx.value, MalformedDatagramError)
         assert "malformed UDP datagram (too short: 2 bytes)" in str(ctx.value)
 
-    def test_fuzz_only_raises_malformed_datagram_error(self):
+    def test_fuzz_only_raises_malformed_datagram_error(self) -> None:
         rng = random.Random(0x5EC5)  # noqa: S311 - seeded for reproducible fuzz input, not security
         parsed = rejected = 0
         for i in range(20_000):

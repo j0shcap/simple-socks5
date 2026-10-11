@@ -33,8 +33,8 @@ ProxyHandle(server, address)
 _e2e_leak_guard (autouse) fails a test that leaves behind a thread it started (after a 3 s grace
 period) or that triggers a ResourceWarning in any thread at any point from setup to teardown.
 
-ProxyConfiguration is deliberately left uninitialised: loggers then get a NullHandler (records
-still reach caplog) instead of writing errors.log into the working directory.
+update_loggers() is deliberately never called: the package logger keeps its NullHandler and
+propagates, so records reach caplog and nothing is written to the console or SOCKS5_LOG_FILE.
 """
 
 import gc
@@ -44,8 +44,10 @@ import socketserver
 import threading
 import time
 import warnings
+from collections.abc import Iterator
 from contextlib import ExitStack
 from dataclasses import dataclass
+from typing import Generic, Protocol, TypeVar
 
 import pytest
 
@@ -71,10 +73,12 @@ E2E_USERNAME = "e2e-user"
 E2E_PASSWORD = "e2e-pass"
 THREAD_EXIT_GRACE = 3.0
 
+ResultT = TypeVar("ResultT")
+
 
 @dataclass(frozen=True)
-class RecordingOrigin(Origin):
-    results: queue.Queue
+class RecordingOrigin(Origin, Generic[ResultT]):
+    results: queue.Queue[ResultT]
 
 
 @dataclass(frozen=True)
@@ -86,8 +90,17 @@ class ProxyHandle:
         return socket.create_connection(self.address, timeout=TIMEOUT)
 
 
+class MakeProxy(Protocol):
+    def __call__(self, *, auth_required: bool = False, allow_loopback: bool = True) -> ProxyHandle: ...
+
+
+def _bound_address(server: socketserver.TCPServer | socketserver.UDPServer) -> tuple[str, int]:
+    address: tuple[str, int] = server.socket.getsockname()[:2]
+    return address
+
+
 @pytest.fixture(autouse=True)
-def _e2e_leak_guard():
+def _e2e_leak_guard() -> Iterator[None]:
     threads_before = set(threading.enumerate())
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always", ResourceWarning)
@@ -105,7 +118,7 @@ def _e2e_leak_guard():
 
 
 @pytest.fixture
-def make_proxy(monkeypatch):
+def make_proxy(monkeypatch: pytest.MonkeyPatch) -> Iterator[MakeProxy]:
     with ExitStack() as stack:
 
         def _make_proxy(*, auth_required: bool = False, allow_loopback: bool = True) -> ProxyHandle:
@@ -114,34 +127,33 @@ def make_proxy(monkeypatch):
             monkeypatch.setenv("SOCKS5_USERNAME", E2E_USERNAME)
             monkeypatch.setenv("SOCKS5_PASSWORD", E2E_PASSWORD)
             server = stack.enter_context(serve_in_thread(ThreadingTCPServer(("127.0.0.1", 0), TCPProxyServer)))
-            return ProxyHandle(server, server.server_address)
+            return ProxyHandle(server, _bound_address(server))
 
         yield _make_proxy
 
 
 @pytest.fixture
-def proxy(make_proxy) -> ProxyHandle:
+def proxy(make_proxy: MakeProxy) -> ProxyHandle:
     return make_proxy()
 
 
 @pytest.fixture
-def auth_proxy(make_proxy) -> ProxyHandle:
+def auth_proxy(make_proxy: MakeProxy) -> ProxyHandle:
     return make_proxy(auth_required=True)
 
 
-def _serve_origin(server: socketserver.BaseServer):
+def _serve_origin(server: socketserver.TCPServer | socketserver.UDPServer) -> Iterator[Origin]:
     with serve_in_thread(server):
-        host, port = server.server_address[:2]
-        yield Origin(host, port)
+        yield Origin(*_bound_address(server))
 
 
 @pytest.fixture
-def echo_origin():
+def echo_origin() -> Iterator[Origin]:
     yield from _serve_origin(OriginTCPServer(("127.0.0.1", 0), EchoHandler))
 
 
 @pytest.fixture
-def echo_origin_v6():
+def echo_origin_v6() -> Iterator[Origin]:
     if not socket.has_ipv6:
         pytest.skip("IPv6 unavailable")
     try:
@@ -152,41 +164,40 @@ def echo_origin_v6():
 
 
 @pytest.fixture
-def half_close_origin():
+def half_close_origin() -> Iterator[Origin]:
     yield from _serve_origin(OriginTCPServer(("127.0.0.1", 0), HalfCloseHandler))
 
 
-def _serve_recording_origin(handler):
-    server = RecordingOriginTCPServer(("127.0.0.1", 0), handler)
+def _serve_recording_origin(server: RecordingOriginTCPServer[ResultT]) -> Iterator[RecordingOrigin[ResultT]]:
     for origin in _serve_origin(server):
         yield RecordingOrigin(origin.host, origin.port, server.results)
 
 
 @pytest.fixture
-def reply_then_read_origin():
-    yield from _serve_recording_origin(ReplyThenReadHandler)
+def reply_then_read_origin() -> Iterator[RecordingOrigin[str]]:
+    yield from _serve_recording_origin(RecordingOriginTCPServer[str](("127.0.0.1", 0), ReplyThenReadHandler))
 
 
 @pytest.fixture
-def streaming_origin():
-    yield from _serve_recording_origin(StreamUntilClosedHandler)
+def streaming_origin() -> Iterator[RecordingOrigin[float]]:
+    yield from _serve_recording_origin(RecordingOriginTCPServer[float](("127.0.0.1", 0), StreamUntilClosedHandler))
 
 
 @pytest.fixture
-def reset_origin():
-    yield from _serve_recording_origin(ResetMidTransferHandler)
+def reset_origin() -> Iterator[RecordingOrigin[float]]:
+    yield from _serve_recording_origin(RecordingOriginTCPServer[float](("127.0.0.1", 0), ResetMidTransferHandler))
 
 
 @pytest.fixture
-def trickle_origin():
+def trickle_origin() -> Iterator[Origin]:
     yield from _serve_origin(OriginTCPServer(("127.0.0.1", 0), TrickleHandler))
 
 
 @pytest.fixture
-def http_origin():
+def http_origin() -> Iterator[Origin]:
     yield from _serve_origin(OriginTCPServer(("127.0.0.1", 0), PayloadHTTPHandler))
 
 
 @pytest.fixture
-def udp_echo_origin():
+def udp_echo_origin() -> Iterator[Origin]:
     yield from _serve_origin(socketserver.UDPServer(("127.0.0.1", 0), UDPEchoHandler))

@@ -1,10 +1,11 @@
 import logging
+from collections.abc import Iterator
 
 import pytest
 
 
 @pytest.fixture(autouse=True)
-def _restore_package_logger():
+def _restore_package_logger() -> Iterator[None]:
     """
     update_loggers() reconfigures the process-wide "simple_socks5" logger; undo it so later tests still reach caplog.
     """

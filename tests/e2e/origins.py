@@ -27,9 +27,11 @@ import socketserver
 import struct
 import threading
 import time
+from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler
+from typing import Generic, TypeVar
 
 HANDLER_TIMEOUT = 5
 TRICKLE_CHUNK = b"x" * 1024
@@ -37,9 +39,12 @@ TRICKLE_INTERVAL = 0.1  # seconds
 STREAM_CHUNK_SIZE = 65536
 RESET_AFTER_BYTES = 1024 * 1024
 
+ServerT = TypeVar("ServerT", bound=socketserver.BaseServer)
+ResultT = TypeVar("ResultT")
+
 
 @contextmanager
-def serve_in_thread(server: socketserver.BaseServer, poll_interval: float = 0.01):
+def serve_in_thread(server: ServerT, poll_interval: float = 0.01) -> Iterator[ServerT]:
     thread = threading.Thread(
         target=server.serve_forever,
         kwargs={"poll_interval": poll_interval},
@@ -78,21 +83,21 @@ class OriginTCPServerV6(OriginTCPServer):
     address_family = socket.AF_INET6
 
 
-class RecordingOriginTCPServer(OriginTCPServer):
-    def __init__(self, *args, **kwargs):
-        self.results: queue.Queue = queue.Queue()
-        super().__init__(*args, **kwargs)
+class RecordingOriginTCPServer(OriginTCPServer, Generic[ResultT]):
+    def __init__(self, server_address: tuple[str, int], handler_class: type[socketserver.BaseRequestHandler]) -> None:
+        self.results: queue.Queue[ResultT] = queue.Queue()
+        super().__init__(server_address, handler_class)
 
 
 class EchoHandler(socketserver.BaseRequestHandler):
-    def handle(self):
+    def handle(self) -> None:
         self.request.settimeout(HANDLER_TIMEOUT)
         while data := self.request.recv(65536):
             self.request.sendall(data)
 
 
 class HalfCloseHandler(socketserver.BaseRequestHandler):
-    def handle(self):
+    def handle(self) -> None:
         self.request.settimeout(HANDLER_TIMEOUT)
         received = 0
         while data := self.request.recv(65536):
@@ -101,7 +106,7 @@ class HalfCloseHandler(socketserver.BaseRequestHandler):
 
 
 class TrickleHandler(socketserver.BaseRequestHandler):
-    def handle(self):
+    def handle(self) -> None:
         self.request.settimeout(HANDLER_TIMEOUT)
         try:
             while True:
@@ -112,7 +117,9 @@ class TrickleHandler(socketserver.BaseRequestHandler):
 
 
 class ReplyThenReadHandler(socketserver.BaseRequestHandler):
-    def handle(self):
+    server: RecordingOriginTCPServer[str]
+
+    def handle(self) -> None:
         self.request.settimeout(HANDLER_TIMEOUT)
         self.request.sendall(b"BANNER")
         self.request.shutdown(socket.SHUT_WR)
@@ -123,7 +130,9 @@ class ReplyThenReadHandler(socketserver.BaseRequestHandler):
 
 
 class StreamUntilClosedHandler(socketserver.BaseRequestHandler):
-    def handle(self):
+    server: RecordingOriginTCPServer[float]
+
+    def handle(self) -> None:
         self.request.settimeout(HANDLER_TIMEOUT)
         chunk = deterministic_payload(STREAM_CHUNK_SIZE)
         try:
@@ -134,7 +143,9 @@ class StreamUntilClosedHandler(socketserver.BaseRequestHandler):
 
 
 class ResetMidTransferHandler(socketserver.BaseRequestHandler):
-    def handle(self):
+    server: RecordingOriginTCPServer[float]
+
+    def handle(self) -> None:
         self.request.settimeout(HANDLER_TIMEOUT)
         self.request.sendall(deterministic_payload(RESET_AFTER_BYTES))
         # Linger 0 makes close() send RST; closing here, not in shutdown_request(), avoids a FIN first
@@ -146,7 +157,7 @@ class ResetMidTransferHandler(socketserver.BaseRequestHandler):
 class PayloadHTTPHandler(BaseHTTPRequestHandler):
     timeout = HANDLER_TIMEOUT
 
-    def do_GET(self):
+    def do_GET(self) -> None:
         prefix = "/bytes/"
         if not (self.path.startswith(prefix) and self.path[len(prefix) :].isdigit()):
             self.send_error(404)
@@ -158,11 +169,11 @@ class PayloadHTTPHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def log_message(self, _format, *_args):
+    def log_message(self, _format: str, *_args: object) -> None:
         pass
 
 
 class UDPEchoHandler(socketserver.BaseRequestHandler):
-    def handle(self):
+    def handle(self) -> None:
         data, sock = self.request
         sock.sendto(data, self.client_address)

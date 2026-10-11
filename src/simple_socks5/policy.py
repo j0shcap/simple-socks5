@@ -6,13 +6,14 @@ address they are about to connect to.
 """
 
 import socket
-from ipaddress import IPv4Address, IPv6Address, ip_address, ip_network
+from ipaddress import IPv4Address, IPv4Network, IPv6Address, IPv6Network, ip_address, ip_network
+from typing import Final
 
 from .constants import allow_loopback
 from .exceptions import PolicyDeniedError
 
 # Loopback, unspecified and link-local (incl. cloud metadata 169.254.169.254). SOCKS5_ALLOW_LOOPBACK lifts them all.
-_DENIED_NETWORKS = (
+_DENIED_NETWORKS: Final[tuple[IPv4Network | IPv6Network, ...]] = (
     ip_network("127.0.0.0/8"),
     ip_network("0.0.0.0/8"),
     ip_network("169.254.0.0/16"),
@@ -21,8 +22,8 @@ _DENIED_NETWORKS = (
     ip_network("fe80::/10"),
 )
 # IPv6 forms that carry an IPv4 address in their last 32 bits: IPv4-compatible and NAT64 well-known prefix
-_V4_COMPATIBLE = ip_network("::/96")
-_NAT64 = ip_network("64:ff9b::/96")
+_V4_COMPATIBLE: Final = IPv6Network("::/96")
+_NAT64: Final = IPv6Network("64:ff9b::/96")
 
 
 def _embedded_ipv4(addr: IPv6Address) -> IPv4Address | None:

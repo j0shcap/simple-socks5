@@ -11,6 +11,7 @@ to make the proxy safer; each such change is marked **Behaviour change** and is 
 ### Added
 - `pip install .` installs a `simple-socks5` command, which takes the same flags as
   `python3 app.py`. `python -m simple_socks5` works too.
+- The package ships a `py.typed` marker, so type checkers use its annotations.
 
 ### Changed
 - The code is now the `simple_socks5` package under `src/`, and `pip install .` installs it.
@@ -27,10 +28,14 @@ to make the proxy safer; each such change is marked **Behaviour change** and is 
   `pip install -e .` to fix it.
 - Contributors lint and format with Ruff instead of flake8: `pip install -e '.[dev]'`, then
   `ruff check .` and `ruff format .`.
+- Contributors type-check with mypy in strict mode: `pip install -e '.[dev]'`, then `mypy`.
+- CI tests on Python 3.10 to 3.14.
 
 ### Fixed
 - When the server can't start (for example, the port is already in use), it now exits with code 1
   under `python -S` too. Before, it crashed with `NameError: name 'exit' is not defined`.
+- IPv6 addresses are shown in brackets in the `Server started on` line and the UDP `RELAY` debug
+  lines, for example `[::]:1080` instead of `:::1080`.
 
 ## [2.1.0] - 2026-10-06
 

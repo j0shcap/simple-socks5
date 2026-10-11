@@ -5,12 +5,13 @@ are a routine disconnect.
 
 import errno
 import socket
+from typing import Final
 
 from .constants import ReplyCodes
 from .exceptions import AddressTypeNotSupportedError, InvalidDomainNameError, PolicyDeniedError
 
 # First match wins
-_TYPE_RULES: tuple[tuple[type[BaseException], ReplyCodes], ...] = (
+_TYPE_RULES: Final[tuple[tuple[type[BaseException], ReplyCodes], ...]] = (
     (PolicyDeniedError, ReplyCodes.CONNECTION_NOT_ALLOWED_BY_RULESET),
     (AddressTypeNotSupportedError, ReplyCodes.ADDRESS_TYPE_NOT_SUPPORTED),
     (InvalidDomainNameError, ReplyCodes.HOST_UNREACHABLE),
@@ -20,7 +21,7 @@ _TYPE_RULES: tuple[tuple[type[BaseException], ReplyCodes], ...] = (
     (ConnectionRefusedError, ReplyCodes.CONNECTION_REFUSED),
 )
 
-_ERRNO_RULES: dict[int, ReplyCodes] = {
+_ERRNO_RULES: Final[dict[int, ReplyCodes]] = {
     errno.ENETUNREACH: ReplyCodes.NETWORK_UNREACHABLE,
     errno.EHOSTUNREACH: ReplyCodes.HOST_UNREACHABLE,
 }
