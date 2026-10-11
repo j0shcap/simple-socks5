@@ -161,20 +161,9 @@ python3 app.py -H 0.0.0.0 -P 1080
 
 The default credentials (`myusername`/`mypassword`) are public; always set your own.
 
-## Testing
+## Contributing
 
-```bash
-python3 -m venv .venv && source .venv/bin/activate
-pip install -e '.[dev]'
-pytest --cov=simple_socks5 --cov-fail-under=85
-ruff check .
-ruff format --check .
-mypy
-```
-
-Ruff and mypy are pinned in `pyproject.toml`, which also holds their configuration; mypy checks `src/` and
-`tests/` in strict mode. `ruff format .` formats the code. To keep `git blame` from showing the commit that first
-applied the formatter, run `git config blame.ignoreRevsFile .git-blame-ignore-revs` once.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, the checks CI runs, and how releases are made.
 
 ## RFC Compliance
 
@@ -237,3 +226,7 @@ With the Docker image on its default bridge network nothing changes for you: the
 ### Cleartext
 
 Data is transmitted in cleartext, including authentication credentials. Use additional encryption (e.g., SSH tunnel, VPN) in environments where interception is a risk.
+
+### Reporting a vulnerability
+
+See [SECURITY.md](SECURITY.md); please don't open a public issue.

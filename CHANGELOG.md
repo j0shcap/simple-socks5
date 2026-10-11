@@ -12,6 +12,8 @@ to make the proxy safer; each such change is marked **Behaviour change** and is 
 - `pip install .` installs a `simple-socks5` command, which takes the same flags as
   `python3 app.py`. `python -m simple_socks5` works too.
 - The package ships a `py.typed` marker, so type checkers use its annotations.
+- `SECURITY.md` says how to report a vulnerability privately and which versions get fixes;
+  `CONTRIBUTING.md` covers development and releases.
 
 ### Changed
 - The code is now the `simple_socks5` package under `src/`, and `pip install .` installs it.
