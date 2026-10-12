@@ -1,5 +1,6 @@
 """
-Keeps the README environment-variable table and the CHANGELOG in step with the code.
+Keeps the README environment-variable table, the CHANGELOG and the links between the top-level docs in step with
+the code.
 """
 
 import re
@@ -10,6 +11,8 @@ from simple_socks5.argument_parser import __version__
 
 ROOT = Path(__file__).resolve().parents[1]
 ENV_VAR = r"SOCKS5_[A-Z_]+|LOGGING_LEVEL"
+# The target of a Markdown link that is neither a URL nor an in-page anchor, without its #fragment
+LINK = re.compile(r"\]\((?!https?://|mailto:|#)([^)#\s]+)")
 
 
 def readme_env_vars() -> set[str]:
@@ -45,6 +48,17 @@ class TestChangelog(unittest.TestCase):
         first_section = re.search(r"^## .*$", self.changelog, re.M)
         assert first_section is not None
         assert first_section.group(0) == "## [Unreleased]"
+
+
+class TestLinks(unittest.TestCase):
+    def test_relative_links_resolve(self) -> None:
+        missing = [
+            f"{doc.name}: {target}"
+            for doc in ROOT.glob("*.md")
+            for target in LINK.findall(doc.read_text())
+            if not (ROOT / target).exists()
+        ]
+        assert missing == []
 
 
 if __name__ == "__main__":
