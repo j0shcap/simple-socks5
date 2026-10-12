@@ -12,7 +12,12 @@ from unittest.mock import MagicMock, NonCallableMagicMock, create_autospec, patc
 
 import pytest
 
-from simple_socks5.constants import AddressTypeCodes, CommandCodes
+from simple_socks5.constants import (
+    CONNECTION_LIMIT_WARNING_INTERVAL,
+    POLICY_DENIED_WARNING_INTERVAL,
+    AddressTypeCodes,
+    CommandCodes,
+)
 from simple_socks5.exceptions import (
     AddressTypeNotSupportedError,
     HandshakeTimeoutError,
@@ -23,6 +28,7 @@ from simple_socks5.exceptions import (
 )
 from simple_socks5.models import BindAddress, DetailedAddress, Request
 from simple_socks5.server import TCPProxyServer, ThreadingTCPServer
+from simple_socks5.utils import WarningRateLimiter
 
 
 def make_proxy_handler() -> tuple[TCPProxyServer, NonCallableMagicMock]:
@@ -438,8 +444,8 @@ class TestConnectionLimit(unittest.TestCase):
             for _ in range(count):
                 server.process_request(create_autospec(socket.socket, instance=True), ("127.0.0.1", 9999))
 
+        server._limit_warnings = WarningRateLimiter(CONNECTION_LIMIT_WARNING_INTERVAL, clock=lambda: now[0])
         with (
-            patch("simple_socks5.server.time.monotonic", lambda: now[0]),
             patch.object(server, "shutdown_request", autospec=True) as shutdown_request,
             self.assertLogs("simple_socks5.server", level="WARNING") as logs,
         ):
@@ -493,10 +499,8 @@ class TestPolicyDenial(unittest.TestCase):
 
     def test_policy_warning_rate_limited_with_suppressed_count(self) -> None:
         now = [0.0]
-        with (
-            patch("simple_socks5.server.time.monotonic", lambda: now[0]),
-            self.assertLogs("simple_socks5.server", level="DEBUG") as logs,
-        ):
+        self.server._policy_warnings = WarningRateLimiter(POLICY_DENIED_WARNING_INTERVAL, clock=lambda: now[0])
+        with self.assertLogs("simple_socks5.server", level="DEBUG") as logs:
             for _ in range(50):
                 self.server.log_policy_denial("192.0.2.7", self.dst)
             now[0] = 9.9

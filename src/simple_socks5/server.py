@@ -21,6 +21,7 @@ from .logger import get_logger
 from .models import BindAddress, DetailedAddress, Request, SocketAddress
 from .relays import TCPRelay, UDPRelay
 from .utils import (
+    WarningRateLimiter,
     format_connection_established,
     generate_failed_reply,
     generate_succeeded_reply,
@@ -77,13 +78,8 @@ class ThreadingTCPServer(ThreadingMixIn, TCPServer):
         # Read before binding, so an invalid value can't leave a listening socket behind
         self.max_connections = max_connections()
         self._connection_semaphore = threading.BoundedSemaphore(self.max_connections)
-        # Only touched by process_request(), which socketserver calls from the serving thread alone
-        self._rejected_since_warning = 0
-        self._next_limit_warning = 0.0
-        # Touched by every handler thread that denies a destination
-        self._policy_warning_lock = threading.Lock()
-        self._denied_since_warning = 0
-        self._next_policy_warning = 0.0
+        self._limit_warnings = WarningRateLimiter(CONNECTION_LIMIT_WARNING_INTERVAL)
+        self._policy_warnings = WarningRateLimiter(POLICY_DENIED_WARNING_INTERVAL)
         super().__init__(server_address, handler_class, bind_and_activate)
         # Daemon request threads aren't tracked by ThreadingMixIn, so track their sockets for shutdown.
         self._active_requests: set[socket.socket] = set()
@@ -93,16 +89,13 @@ class ThreadingTCPServer(ThreadingMixIn, TCPServer):
         """
         Closes a connection over the limit, warning at most once per CONNECTION_LIMIT_WARNING_INTERVAL.
         """
-        self._rejected_since_warning += 1
-        now = time.monotonic()
-        if now >= self._next_limit_warning:
+        rejected = self._limit_warnings.hit()
+        if rejected is not None:
             logger.warning(
                 "Connection limit of %s reached: rejected %s connection(s) since the last warning",
                 self.max_connections,
-                self._rejected_since_warning,
+                rejected,
             )
-            self._rejected_since_warning = 0
-            self._next_limit_warning = now + CONNECTION_LIMIT_WARNING_INTERVAL
         self.shutdown_request(request)
 
     def log_policy_denial(self, client_ip: str, dst: DetailedAddress) -> None:
@@ -110,24 +103,16 @@ class ThreadingTCPServer(ThreadingMixIn, TCPServer):
         Logs a destination the policy denied, as a WARNING at most once per POLICY_DENIED_WARNING_INTERVAL and
         otherwise at DEBUG, so a scanning client can't flood the log.
         """
-        with self._policy_warning_lock:
-            now = time.monotonic()
-            if now < self._next_policy_warning:
-                self._denied_since_warning += 1
-                suppressed = None
-            else:
-                suppressed = self._denied_since_warning
-                self._denied_since_warning = 0
-                self._next_policy_warning = now + POLICY_DENIED_WARNING_INTERVAL
-        if suppressed is None:
+        denied = self._policy_warnings.hit()
+        if denied is None:
             logger.debug("Denied %s -> %s", client_ip, dst)
             return
         message = (
             f"Denied {client_ip} -> {dst}: loopback, link-local and unspecified destinations are blocked; "
             "set SOCKS5_ALLOW_LOOPBACK=true to allow them"
         )
-        if suppressed:
-            message += f" ({suppressed} more denied since the last warning)"
+        if denied > 1:
+            message += f" ({denied - 1} more denied since the last warning)"
         logger.warning(message)
 
     def handle_error(self, request: SocketServerRequest, client_address: SocketAddress) -> None:  # noqa: ARG002 - keeps socketserver.BaseServer's signature
