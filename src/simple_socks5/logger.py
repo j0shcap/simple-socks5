@@ -8,6 +8,13 @@ from .constants import LOG_FILE_BACKUP_COUNT, LOG_FILE_MAX_BYTES, log_file
 CONSOLE_FORMAT: Final = "[%(asctime)s] - [%(levelname)s] - %(message)s"
 FILE_FORMAT: Final = "[%(asctime)s] - [%(name)s] - [%(levelname)s] - [%(message)s]"
 
+# What each level means, for every log call in the package:
+#   ERROR    a server fault: an unexpected exception (with a traceback), failing to bind or to open SOCKS5_LOG_FILE
+#   WARNING  something an operator should act on: the startup banners, the connection limit, a denied destination,
+#            a relay write timeout, handshake timeouts, failed logins. Those a client can repeat are rate-limited.
+#   INFO     the CONNECTION and CLOSED lines, and the reply code sent for a destination failure (refused, unreachable)
+#   DEBUG    client protocol errors, clients hanging up, and per-datagram UDP detail
+#
 # Every module logger ("simple_socks5.server", "simple_socks5.relays.tcp_relay", ...) propagates to this one, which
 # holds the only handlers. Until update_loggers() runs it just propagates, so library use and tests see records via
 # the root logger.
