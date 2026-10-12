@@ -2,9 +2,8 @@ import hmac
 
 from ..constants import SOCKS_VERSION, MethodCodes, auth_required, credentials
 from ..errors import is_routine_disconnect
-from ..exceptions import HandshakeTimeoutError, InvalidVersionError
+from ..exceptions import AuthenticationFailedError, HandshakeTimeoutError, InvalidVersionError
 from ..logger import get_logger
-from ..models import SocketAddress
 from ..utils import generate_connection_method_response
 from .base import BaseHandler
 
@@ -150,14 +149,15 @@ class TCPHandler(BaseHandler):
                 logger.info("Authenticated user: %s", expected[0].decode("utf-8", "backslashreplace"))
                 self._send(b"\x01\x00")  # version 1, status 0 (success)
             else:
-                logger.warning("Authentication failed for client %s", self._peer_ip())
                 self._send(b"\x01\x01")  # version 1, status 1 (failure)
         except HandshakeTimeoutError:
             raise  # The server logs it, rate-limited
         except OSError as e:
             _log_socket_error("username/password authentication", e)
             return False
-        return authenticated
+        if not authenticated:
+            raise AuthenticationFailedError
+        return True
 
     @staticmethod
     def _credentials_match(username: bytes, password: bytes, expected: tuple[bytes, bytes]) -> bool:
@@ -169,13 +169,6 @@ class TCPHandler(BaseHandler):
         username_ok = hmac.compare_digest(username, expected_username)
         password_ok = hmac.compare_digest(password, expected_password)
         return bool(username) & bool(password) & username_ok & password_ok
-
-    def _peer_ip(self) -> str:
-        try:
-            peer: SocketAddress = self.connection.getpeername()
-        except OSError:
-            return "unknown"  # The client has already disconnected
-        return peer[0]
 
     def _handle_gssapi_auth(self) -> bool:
         """

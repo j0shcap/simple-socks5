@@ -57,6 +57,7 @@ DEFAULT_MAX_CONNECTIONS: Final[int] = 200
 CONNECTION_LIMIT_WARNING_INTERVAL: Final[float] = 10.0  # seconds between "connection limit reached" warnings
 POLICY_DENIED_WARNING_INTERVAL: Final[float] = 10.0  # seconds between "destination denied" warnings
 HANDSHAKE_TIMEOUT_WARNING_INTERVAL: Final[float] = 10.0  # seconds between "handshake timed out" warnings
+AUTH_FAILED_WARNING_INTERVAL: Final[float] = 10.0  # seconds between "authentication failed" warnings
 
 
 def _positive_int_env(name: str, default: int) -> int:

@@ -42,6 +42,10 @@ class HandshakeTimeoutError(TimeoutError):
     """Exception raised when a client doesn't finish the handshake before its deadline."""
 
 
+class AuthenticationFailedError(Exception):
+    """Exception raised after a client that sent the wrong username or password was told so."""
+
+
 class PolicyDeniedError(Exception):
     """Exception raised when the destination policy blocks a destination address.
 

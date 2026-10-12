@@ -6,6 +6,7 @@ from socketserver import BaseRequestHandler, StreamRequestHandler, TCPServer, Th
 from typing import Final, TypeAlias
 
 from .constants import (
+    AUTH_FAILED_WARNING_INTERVAL,
     CONNECTION_LIMIT_WARNING_INTERVAL,
     HANDSHAKE_TIMEOUT_WARNING_INTERVAL,
     POLICY_DENIED_WARNING_INTERVAL,
@@ -16,7 +17,13 @@ from .constants import (
     max_connections,
 )
 from .errors import is_routine_disconnect, reply_code_for
-from .exceptions import HandshakeTimeoutError, InvalidRequestError, InvalidVersionError, PolicyDeniedError
+from .exceptions import (
+    AuthenticationFailedError,
+    HandshakeTimeoutError,
+    InvalidRequestError,
+    InvalidVersionError,
+    PolicyDeniedError,
+)
 from .handlers import TCPHandler
 from .logger import get_logger
 from .models import BindAddress, DetailedAddress, Request, SocketAddress
@@ -82,6 +89,7 @@ class ThreadingTCPServer(ThreadingMixIn, TCPServer):
         self._limit_warnings = WarningRateLimiter(CONNECTION_LIMIT_WARNING_INTERVAL)
         self._policy_warnings = WarningRateLimiter(POLICY_DENIED_WARNING_INTERVAL)
         self._timeout_warnings = WarningRateLimiter(HANDSHAKE_TIMEOUT_WARNING_INTERVAL)
+        self._auth_warnings = WarningRateLimiter(AUTH_FAILED_WARNING_INTERVAL)
         super().__init__(server_address, handler_class, bind_and_activate)
         # Daemon request threads aren't tracked by ThreadingMixIn, so track their sockets for shutdown.
         self._active_requests: set[socket.socket] = set()
@@ -127,6 +135,19 @@ class ThreadingTCPServer(ThreadingMixIn, TCPServer):
             logger.debug("Handshake timed out for %s %s", client_ip, stage)
             return
         logger.warning("%s handshake(s) timed out since the last warning (latest: %s %s)", timed_out, client_ip, stage)
+
+    def log_auth_failure(self, client_ip: str) -> None:
+        """
+        Logs a client that sent the wrong username or password, as a WARNING at most once per
+        AUTH_FAILED_WARNING_INTERVAL and otherwise at DEBUG, so a brute-force attempt can't flood the log.
+        """
+        failures = self._auth_warnings.hit()
+        if failures is None:
+            logger.debug("Authentication failed for client %s", client_ip)
+            return
+        logger.warning(
+            "Authentication failed for client %s (%s failure(s) since the last warning)", client_ip, failures
+        )
 
     def handle_error(self, request: SocketServerRequest, client_address: SocketAddress) -> None:  # noqa: ARG002 - keeps socketserver.BaseServer's signature
         """
@@ -210,6 +231,9 @@ class TCPProxyServer(StreamRequestHandler):
             handshake_ok = request_handler.handle_request()
         except HandshakeTimeoutError:
             self.server.log_handshake_timeout(self.client_address[0], "during the greeting or authentication")
+            handshake_ok = False
+        except AuthenticationFailedError:
+            self.server.log_auth_failure(self.client_address[0])
             handshake_ok = False
         if not handshake_ok:
             logger.debug("Handshake failed")

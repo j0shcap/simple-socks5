@@ -13,6 +13,7 @@ from unittest.mock import MagicMock, NonCallableMagicMock, create_autospec, patc
 import pytest
 
 from simple_socks5.constants import (
+    AUTH_FAILED_WARNING_INTERVAL,
     CONNECTION_LIMIT_WARNING_INTERVAL,
     HANDSHAKE_TIMEOUT_WARNING_INTERVAL,
     POLICY_DENIED_WARNING_INTERVAL,
@@ -21,6 +22,7 @@ from simple_socks5.constants import (
 )
 from simple_socks5.exceptions import (
     AddressTypeNotSupportedError,
+    AuthenticationFailedError,
     HandshakeTimeoutError,
     InvalidDomainNameError,
     InvalidRequestError,
@@ -555,6 +557,43 @@ class TestHandshakeTimeoutWarnings(unittest.TestCase):
         )
         assert logs.records[1].getMessage() == "Handshake timed out for 192.0.2.1 waiting for the request"
         assert logs.records[-1].getMessage().startswith("50 handshake(s) timed out since the last warning")
+
+
+class TestAuthFailureWarnings(unittest.TestCase):
+    def setUp(self) -> None:
+        with _without_socks5_env():
+            self.server = ThreadingTCPServer(("127.0.0.1", 0), TCPProxyServer, bind_and_activate=False)
+        self.addCleanup(self.server.server_close)
+        self.now = [0.0]
+        self.server._auth_warnings = WarningRateLimiter(AUTH_FAILED_WARNING_INTERVAL, clock=lambda: self.now[0])
+
+    def test_warns_once_per_interval_with_count(self) -> None:
+        with self.assertLogs("simple_socks5.server", level="DEBUG") as logs:
+            for _ in range(20):
+                self.server.log_auth_failure("203.0.113.7")
+            self.now[0] = 10.0
+            self.server.log_auth_failure("203.0.113.8")
+
+        assert [r.levelname for r in logs.records] == ["WARNING"] + ["DEBUG"] * 19 + ["WARNING"]
+        assert logs.records[0].getMessage() == (
+            "Authentication failed for client 203.0.113.7 (1 failure(s) since the last warning)"
+        )
+        assert logs.records[1].getMessage() == "Authentication failed for client 203.0.113.7"
+        assert logs.records[-1].getMessage() == (
+            "Authentication failed for client 203.0.113.8 (20 failure(s) since the last warning)"
+        )
+
+    @patch("simple_socks5.server.TCPHandler", autospec=True)
+    def test_failed_login_logged_by_server_and_closed(self, mock_tcp_handler_cls: MagicMock) -> None:
+        handler, connection = make_proxy_handler()
+        handler.server = server = create_autospec(ThreadingTCPServer, instance=True)
+        mock_tcp_handler_cls.return_value.handle_request.side_effect = AuthenticationFailedError()
+
+        handler.handle()
+
+        server.log_auth_failure.assert_called_once_with("127.0.0.1")
+        server.shutdown_request.assert_called_once_with(connection)
+        mock_tcp_handler_cls.return_value.parse_request.assert_not_called()
 
 
 class TestConnectionTracking(unittest.TestCase):
