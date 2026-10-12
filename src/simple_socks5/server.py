@@ -7,6 +7,7 @@ from typing import Final, TypeAlias
 
 from .constants import (
     CONNECTION_LIMIT_WARNING_INTERVAL,
+    HANDSHAKE_TIMEOUT_WARNING_INTERVAL,
     POLICY_DENIED_WARNING_INTERVAL,
     AddressTypeCodes,
     CommandCodes,
@@ -80,6 +81,7 @@ class ThreadingTCPServer(ThreadingMixIn, TCPServer):
         self._connection_semaphore = threading.BoundedSemaphore(self.max_connections)
         self._limit_warnings = WarningRateLimiter(CONNECTION_LIMIT_WARNING_INTERVAL)
         self._policy_warnings = WarningRateLimiter(POLICY_DENIED_WARNING_INTERVAL)
+        self._timeout_warnings = WarningRateLimiter(HANDSHAKE_TIMEOUT_WARNING_INTERVAL)
         super().__init__(server_address, handler_class, bind_and_activate)
         # Daemon request threads aren't tracked by ThreadingMixIn, so track their sockets for shutdown.
         self._active_requests: set[socket.socket] = set()
@@ -114,6 +116,17 @@ class ThreadingTCPServer(ThreadingMixIn, TCPServer):
         if denied > 1:
             message += f" ({denied - 1} more denied since the last warning)"
         logger.warning(message)
+
+    def log_handshake_timeout(self, client_ip: str, stage: str) -> None:
+        """
+        Logs a client that didn't finish its handshake in time, as a WARNING at most once per
+        HANDSHAKE_TIMEOUT_WARNING_INTERVAL and otherwise at DEBUG, so idle connections can't flood the log.
+        """
+        timed_out = self._timeout_warnings.hit()
+        if timed_out is None:
+            logger.debug("Handshake timed out for %s %s", client_ip, stage)
+            return
+        logger.warning("%s handshake(s) timed out since the last warning (latest: %s %s)", timed_out, client_ip, stage)
 
     def handle_error(self, request: SocketServerRequest, client_address: SocketAddress) -> None:  # noqa: ARG002 - keeps socketserver.BaseServer's signature
         """
@@ -193,8 +206,12 @@ class TCPProxyServer(StreamRequestHandler):
         deadline = time.monotonic() + handshake_timeout()
         request_handler = TCPHandler(self.connection, deadline=deadline)
 
-        if not request_handler.handle_request():
-            # TCPHandler has already logged why, at the right level
+        try:
+            handshake_ok = request_handler.handle_request()
+        except HandshakeTimeoutError:
+            self.server.log_handshake_timeout(self.client_address[0], "during the greeting or authentication")
+            handshake_ok = False
+        if not handshake_ok:
             logger.debug("Handshake failed")
             self.server.shutdown_request(self.request)
             return
@@ -224,7 +241,7 @@ class TCPProxyServer(StreamRequestHandler):
             return request_handler.parse_request()
         except HandshakeTimeoutError:
             # The client never finished its request, so it gets no reply
-            logger.warning("Handshake timed out waiting for the request")
+            self.server.log_handshake_timeout(self.client_address[0], "waiting for the request")
         except Exception as e:
             if is_routine_disconnect(e):
                 logger.debug("Client disconnected before finishing its request: %s", e)

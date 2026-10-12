@@ -4,6 +4,7 @@ Handshake deadline (SOCKS5_HANDSHAKE_TIMEOUT) and outbound connect timeout (SOCK
 Both are read per connection, so each test sets a short value before talking to the proxy.
 """
 
+import logging
 import select
 import socket
 import time
@@ -70,6 +71,26 @@ def test_flood_slots_freed(monkeypatch: pytest.MonkeyPatch, proxy: ProxyHandle, 
         assert time.monotonic() - started <= 1.0 + TOLERANCE
         for sock in idle:
             sc.assert_closed(sock)
+
+
+def test_idle_flood_logs_at_most_two_timeout_warnings(
+    monkeypatch: pytest.MonkeyPatch, proxy: ProxyHandle, caplog: pytest.LogCaptureFixture
+) -> None:
+    monkeypatch.setenv("SOCKS5_HANDSHAKE_TIMEOUT", "0.5")
+    caplog.set_level(logging.DEBUG, logger="simple_socks5")
+    with _fd_limit_at_least(4 * 50 + 256), ExitStack() as stack:
+        silent = [stack.enter_context(proxy.connect()) for _ in range(25)]
+        greeted = [stack.enter_context(proxy.connect()) for _ in range(25)]
+        for sock in greeted:
+            assert sc.greet(sock, [sc.METHOD_NO_AUTH]) == sc.METHOD_NO_AUTH
+        for sock in silent + greeted:
+            sc.assert_closed(sock)
+    assert proxy.server.wait_for_connections(5.0)
+
+    timeouts = [r for r in caplog.records if "timed out" in r.getMessage()]
+    assert len([r for r in timeouts if r.levelno == logging.WARNING]) <= 2
+    assert len(timeouts) == 50
+    assert all(r.levelno in {logging.DEBUG, logging.WARNING} for r in timeouts)
 
 
 def test_drip_feed_greeting_closed_at_deadline(monkeypatch: pytest.MonkeyPatch, proxy: ProxyHandle) -> None:

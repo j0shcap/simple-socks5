@@ -462,34 +462,40 @@ class TestParseAddress(unittest.TestCase):
 
 
 class TestHandshakeTimeout(unittest.TestCase):
-    """A handshake timeout closes quietly: no STATUS byte, and a warning without a traceback."""
+    """A handshake timeout propagates as HandshakeTimeoutError, with no STATUS byte; the server logs it."""
 
     def setUp(self) -> None:
         self.connection = connection_mock()
         self.handler = TCPHandler(self.connection)
-
-    def assert_quiet_warning(self, records: list[logging.LogRecord]) -> None:
-        assert any(r.levelname == "WARNING" for r in records)
-        assert not [r for r in records if r.exc_info or r.levelno >= 40]
 
     def test_auth_does_not_reset_socket_timeout(self) -> None:
         self.connection.recv.side_effect = [b"\x01", b"\x01", b"u", b"\x01", b"p"]
         self.handler._handle_username_password_auth()
         self.connection.settimeout.assert_not_called()
 
-    def test_auth_timeout_returns_false_without_status(self) -> None:
+    def test_auth_timeout_raises_without_status(self) -> None:
         self.connection.recv.side_effect = [b"\x01", HandshakeTimeoutError("expired")]
-        with self.assertLogs("simple_socks5.handlers", level="DEBUG") as logs:
-            assert not self.handler._handle_username_password_auth()
+        with self.assertNoLogs("simple_socks5.handlers"), pytest.raises(HandshakeTimeoutError):
+            self.handler._handle_username_password_auth()
         self.connection.sendall.assert_not_called()
-        self.assert_quiet_warning(logs.records)
 
-    def test_greeting_timeout_logs_warning_without_traceback(self) -> None:
+    def test_greeting_timeout_raises(self) -> None:
         self.connection.recv.side_effect = HandshakeTimeoutError("expired")
-        with self.assertLogs("simple_socks5.handlers", level="DEBUG") as logs:
-            assert not self.handler.handle_request()
+        with self.assertNoLogs("simple_socks5.handlers"), pytest.raises(HandshakeTimeoutError):
+            self.handler.handle_request()
         self.connection.sendall.assert_not_called()
-        self.assert_quiet_warning(logs.records)
+
+    def test_greeting_sendall_timeout_raises_handshake_timeout(self) -> None:
+        self.connection.recv.side_effect = [b"\x05\x01", b"\x00"]
+        self.connection.sendall.side_effect = TimeoutError("timed out")
+        with self.assertNoLogs("simple_socks5.handlers"), pytest.raises(HandshakeTimeoutError):
+            self.handler.handle_request()
+
+    def test_auth_sendall_timeout_raises_handshake_timeout(self) -> None:
+        self.connection.recv.side_effect = [b"\x01", b"\x01", b"u", b"\x01", b"p"]
+        self.connection.sendall.side_effect = TimeoutError("timed out")
+        with pytest.raises(HandshakeTimeoutError):
+            self.handler._handle_username_password_auth()
 
     def test_request_timeout_propagates_without_traceback(self) -> None:
         self.connection.recv.side_effect = [struct.pack("!BBBB", 5, 1, 0, 1), HandshakeTimeoutError("expired")]

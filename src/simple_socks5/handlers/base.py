@@ -66,6 +66,15 @@ class BaseHandler:
         except TimeoutError as e:
             raise HandshakeTimeoutError("Handshake deadline expired") from e
 
+    def _send(self, data: bytes) -> None:
+        """
+        Sends all of data. A send that runs into the deadline the last recv set raises HandshakeTimeoutError.
+        """
+        try:
+            self.connection.sendall(data)
+        except TimeoutError as e:
+            raise HandshakeTimeoutError("Handshake deadline expired") from e
+
     def parse_request(self) -> Request:
         """
         Handles requests of the form:

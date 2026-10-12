@@ -14,6 +14,7 @@ import pytest
 
 from simple_socks5.constants import (
     CONNECTION_LIMIT_WARNING_INTERVAL,
+    HANDSHAKE_TIMEOUT_WARNING_INTERVAL,
     POLICY_DENIED_WARNING_INTERVAL,
     AddressTypeCodes,
     CommandCodes,
@@ -38,6 +39,7 @@ def make_proxy_handler() -> tuple[TCPProxyServer, NonCallableMagicMock]:
     handler = object.__new__(TCPProxyServer)
     handler.connection = connection
     handler.request = connection
+    handler.client_address = ("127.0.0.1", 9999)
     handler.server = create_autospec(ThreadingTCPServer, instance=True)
     return handler, connection
 
@@ -134,12 +136,26 @@ class TestHandshakeDeadline(unittest.TestCase):
 
     def test_parse_handshake_timeout_sends_nothing(self, mock_tcp_handler_cls: MagicMock) -> None:
         handler, connection = make_proxy_handler()
+        handler.server = server = create_autospec(ThreadingTCPServer, instance=True)
         mock_tcp_handler_cls.return_value.handle_request.return_value = True
         mock_tcp_handler_cls.return_value.parse_request.side_effect = HandshakeTimeoutError("expired")
 
         handler.handle()
 
         connection.sendall.assert_not_called()
+        server.log_handshake_timeout.assert_called_once_with("127.0.0.1", "waiting for the request")
+
+    def test_greeting_timeout_logged_by_server_and_closed(self, mock_tcp_handler_cls: MagicMock) -> None:
+        handler, connection = make_proxy_handler()
+        handler.server = server = create_autospec(ThreadingTCPServer, instance=True)
+        mock_tcp_handler_cls.return_value.handle_request.side_effect = HandshakeTimeoutError("expired")
+
+        handler.handle()
+
+        connection.sendall.assert_not_called()
+        mock_tcp_handler_cls.return_value.parse_request.assert_not_called()
+        server.log_handshake_timeout.assert_called_once_with("127.0.0.1", "during the greeting or authentication")
+        server.shutdown_request.assert_called_once_with(connection)
 
 
 @patch("simple_socks5.server.TCPHandler", autospec=True)
@@ -512,6 +528,33 @@ class TestPolicyDenial(unittest.TestCase):
         assert levels == ["WARNING"] + ["DEBUG"] * 50 + ["WARNING"]
         assert "192.0.2.9 -> " in logs.records[-1].getMessage()
         assert "(50 more denied since the last warning)" in logs.records[-1].getMessage()
+
+
+class TestHandshakeTimeoutWarnings(unittest.TestCase):
+    def setUp(self) -> None:
+        with _without_socks5_env():
+            self.server = ThreadingTCPServer(("127.0.0.1", 0), TCPProxyServer, bind_and_activate=False)
+        self.addCleanup(self.server.server_close)
+        self.now = [0.0]
+        self.server._timeout_warnings = WarningRateLimiter(
+            HANDSHAKE_TIMEOUT_WARNING_INTERVAL, clock=lambda: self.now[0]
+        )
+
+    def test_warns_once_per_interval_with_count(self) -> None:
+        with self.assertLogs("simple_socks5.server", level="DEBUG") as logs:
+            for i in range(50):
+                stage = "waiting for the request" if i % 2 else "during the greeting or authentication"
+                self.server.log_handshake_timeout(f"192.0.2.{i}", stage)
+            self.now[0] = 10.0
+            self.server.log_handshake_timeout("192.0.2.99", "waiting for the request")
+
+        levels = [r.levelname for r in logs.records]
+        assert levels == ["WARNING"] + ["DEBUG"] * 49 + ["WARNING"]
+        assert logs.records[0].getMessage() == (
+            "1 handshake(s) timed out since the last warning (latest: 192.0.2.0 during the greeting or authentication)"
+        )
+        assert logs.records[1].getMessage() == "Handshake timed out for 192.0.2.1 waiting for the request"
+        assert logs.records[-1].getMessage().startswith("50 handshake(s) timed out since the last warning")
 
 
 class TestConnectionTracking(unittest.TestCase):

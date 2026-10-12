@@ -2,7 +2,7 @@ import hmac
 
 from ..constants import SOCKS_VERSION, MethodCodes, auth_required, credentials
 from ..errors import is_routine_disconnect
-from ..exceptions import InvalidVersionError
+from ..exceptions import HandshakeTimeoutError, InvalidVersionError
 from ..logger import get_logger
 from ..models import SocketAddress
 from ..utils import generate_connection_method_response
@@ -57,11 +57,10 @@ class TCPHandler(BaseHandler):
             negotiated_authentication: MethodCodes = self._negotiate_authentication_method(methods)
 
             # Handles server response
-            self.connection.sendall(generate_connection_method_response(negotiated_authentication))
+            self._send(generate_connection_method_response(negotiated_authentication))
 
-        except TimeoutError:
-            logger.warning("Handshake timed out")
-            return False
+        except HandshakeTimeoutError:
+            raise  # The server logs it, rate-limited
         except OSError as e:
             _log_socket_error("handshake", e)
             return False
@@ -138,7 +137,7 @@ class TCPHandler(BaseHandler):
             version = self._recv_exact(1)
             if version != b"\x01":
                 logger.error("Incorrect subnegotiation version: %s", version)
-                self.connection.sendall(b"\x01\x01")
+                self._send(b"\x01\x01")
                 return False
 
             # The whole frame is read even when a length is 0: closing with unread bytes would send an RST
@@ -149,13 +148,12 @@ class TCPHandler(BaseHandler):
             authenticated = self._credentials_match(username, password, expected)
             if authenticated:
                 logger.info("Authenticated user: %s", expected[0].decode("utf-8", "backslashreplace"))
-                self.connection.sendall(b"\x01\x00")  # version 1, status 0 (success)
+                self._send(b"\x01\x00")  # version 1, status 0 (success)
             else:
                 logger.warning("Authentication failed for client %s", self._peer_ip())
-                self.connection.sendall(b"\x01\x01")  # version 1, status 1 (failure)
-        except TimeoutError:
-            logger.warning("Handshake timed out during authentication")
-            return False
+                self._send(b"\x01\x01")  # version 1, status 1 (failure)
+        except HandshakeTimeoutError:
+            raise  # The server logs it, rate-limited
         except OSError as e:
             _log_socket_error("username/password authentication", e)
             return False
