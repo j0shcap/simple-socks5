@@ -63,6 +63,21 @@ def test_10mb_download_logs_one_connection_and_one_closed_line(
     assert down == len(response) > DOWNLOAD_SIZE
 
 
+def test_auth_connect_logs_only_connection_and_closed_at_info(
+    auth_proxy: ProxyHandle, echo_origin: Origin, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.INFO, logger="simple_socks5")
+
+    credentials = (E2E_USERNAME, E2E_PASSWORD)
+    with sc.open_tunnel(auth_proxy.address, "127.0.0.1", echo_origin.port, credentials=credentials) as tunnel:
+        tunnel.sendall(b"ping")
+        assert sc.recv_exact(tunnel, 4) == b"ping"
+    _wait_for_closed_line(caplog, auth_proxy)
+
+    messages = [r.getMessage() for r in caplog.records if r.name.startswith("simple_socks5")]
+    assert [m.split(" |")[0] for m in messages] == ["CONNECTION", "CLOSED"]
+
+
 @pytest.mark.parametrize("level", [logging.DEBUG, logging.INFO])
 def test_no_per_chunk_lines_at_any_level(
     proxy: ProxyHandle, http_origin: Origin, caplog: pytest.LogCaptureFixture, level: int

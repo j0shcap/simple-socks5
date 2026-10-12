@@ -146,7 +146,7 @@ class TCPHandler(BaseHandler):
             expected = credentials()
             authenticated = self._credentials_match(username, password, expected)
             if authenticated:
-                logger.info("Authenticated user: %s", expected[0].decode("utf-8", "backslashreplace"))
+                logger.debug("Authenticated user: %s", expected[0].decode("utf-8", "backslashreplace"))
                 self._send(b"\x01\x00")  # version 1, status 0 (success)
             else:
                 self._send(b"\x01\x01")  # version 1, status 1 (failure)
