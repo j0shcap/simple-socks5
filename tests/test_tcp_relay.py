@@ -216,13 +216,14 @@ class TestTCPRelay(unittest.TestCase):
                 assert problems == []
                 assert any(r.levelno == logging.DEBUG for r in logs.records)
 
-    def test_unexpected_socket_error_logs_traceback(self) -> None:
+    def test_other_socket_error_logs_debug_without_traceback(self) -> None:
         relay, client, _proxy, selector = self._create_relay()
         selector.select.return_value = [(_event(client), selectors.EVENT_READ)]
         client.recv.side_effect = OSError(errno.EBADF, "bad file descriptor")
-        with self.assertLogs("simple_socks5.relays.tcp_relay", level="ERROR") as logs:
+        with self.assertLogs("simple_socks5.relays.tcp_relay", level="DEBUG") as logs:
             relay.listen_and_relay()
-        assert logs.records[0].exc_info
+        relay_ended = [r for r in logs.records if r.getMessage().startswith("Relay ended")]
+        assert [(r.levelno, r.exc_info) for r in relay_ended] == [(logging.DEBUG, None)]
         selector.close.assert_called_once()
 
     def test_cleanup_closes_proxy_and_selector_not_client(self) -> None:

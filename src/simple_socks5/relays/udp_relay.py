@@ -70,7 +70,7 @@ class UDPRelay(BaseRelay):
                         idle_deadline = time.monotonic() + UDP_RECV_TIMEOUT
 
         except OSError as e:
-            logger.error("UDP relay socket error: %s", e)
+            logger.debug("UDP relay socket error: %s", e)
         finally:
             logger.info(self.closed_line())
             selector.close()

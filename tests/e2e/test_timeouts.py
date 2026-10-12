@@ -139,7 +139,7 @@ def test_relay_outlives_handshake_deadline(
         assert sc.recv_exact(tunnel, 4) == b"ping"
 
 
-def _blackhole_times_out() -> bool:
+def blackhole_times_out() -> bool:
     with socket.socket() as probe:
         probe.settimeout(0.3)
         try:
@@ -152,7 +152,7 @@ def _blackhole_times_out() -> bool:
 
 
 def test_blackhole_connect_replies_host_unreachable(monkeypatch: pytest.MonkeyPatch, proxy: ProxyHandle) -> None:
-    if not _blackhole_times_out():
+    if not blackhole_times_out():
         pytest.skip(f"{BLACKHOLE[0]} is not a blackhole on this network (connect fails or succeeds fast)")
     monkeypatch.setenv("SOCKS5_CONNECT_TIMEOUT", "0.5")
     with proxy.connect() as sock:

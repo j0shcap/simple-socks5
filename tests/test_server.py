@@ -282,11 +282,12 @@ class TestSendErrorReply(unittest.TestCase):
             handler._send_error_reply(b"\x05\x01\x00\x01\x00\x00\x00\x00\x00\x00")
         assert not [r for r in logs.records if r.exc_info or r.levelno > logging.DEBUG]
 
-    def test_error_reply_unexpected_oserror_logs_error(self) -> None:
+    def test_error_reply_other_oserror_logs_debug(self) -> None:
         handler, connection = make_proxy_handler()
         connection.sendall.side_effect = OSError(errno.EBADF, "bad file descriptor")
-        with self.assertLogs("simple_socks5.server", level="ERROR"):
+        with self.assertLogs("simple_socks5.server", level="DEBUG") as logs:
             handler._send_error_reply(b"\x05\x01\x00\x01\x00\x00\x00\x00\x00\x00")
+        assert [(r.levelno, r.exc_info) for r in logs.records] == [(logging.DEBUG, None)]
 
 
 @patch("simple_socks5.server.TCPHandler", autospec=True)
@@ -324,10 +325,10 @@ class TestDisconnectLogging(unittest.TestCase):
                 self.run_handle(mock_tcp_handler_cls, error)
             self.assert_debug_only(logs.records)
 
-    def test_parse_protocol_error_logs_error_without_traceback(self, mock_tcp_handler_cls: MagicMock) -> None:
-        with self.assertLogs("simple_socks5.server", level="ERROR") as logs:
+    def test_parse_protocol_error_logs_debug(self, mock_tcp_handler_cls: MagicMock) -> None:
+        with self.assertLogs("simple_socks5.server", level="DEBUG") as logs:
             self.run_handle(mock_tcp_handler_cls, InvalidVersionError(4))
-        assert not logs.records[0].exc_info
+        self.assert_debug_only(logs.records)
 
     def test_parse_unexpected_error_logs_traceback_and_replies(self, mock_tcp_handler_cls: MagicMock) -> None:
         with self.assertLogs("simple_socks5.server", level="ERROR") as logs:
@@ -343,13 +344,30 @@ class TestDisconnectLogging(unittest.TestCase):
             self.run_handle(mock_tcp_handler_cls, connect_request())
         assert logs.records[0].exc_info
 
-    def test_connect_refused_logs_error_without_traceback(self, mock_tcp_handler_cls: MagicMock) -> None:
+    def test_connect_refused_logs_info_with_reply_code(self, mock_tcp_handler_cls: MagicMock) -> None:
         with (
             patch("simple_socks5.server.TCPRelay", autospec=True, side_effect=ConnectionRefusedError("refused")),
-            self.assertLogs("simple_socks5.server", level="ERROR") as logs,
+            self.assertLogs("simple_socks5.server", level="DEBUG") as logs,
         ):
             self.run_handle(mock_tcp_handler_cls, connect_request())
-        assert not logs.records[0].exc_info
+        assert [(r.levelno, r.getMessage(), r.exc_info) for r in logs.records] == [
+            (logging.INFO, "CONNECTION | 127.0.0.1:9999 -> 127.0.0.1:80", None),
+            (logging.INFO, "CONNECTION_REFUSED for 127.0.0.1:80: refused", None),
+        ]
+
+    def test_connect_error_after_reply_logs_debug(self, mock_tcp_handler_cls: MagicMock) -> None:
+        with (
+            patch.object(TCPProxyServer, "handle_connect", autospec=True) as handle_connect,
+            self.assertLogs("simple_socks5.server", level="DEBUG") as logs,
+        ):
+
+            def fail_after_reply(handler: TCPProxyServer, _address: DetailedAddress) -> None:
+                handler._reply_sent = True
+                raise OSError(errno.EBADF, "bad file descriptor")
+
+            handle_connect.side_effect = fail_after_reply
+            self.run_handle(mock_tcp_handler_cls, connect_request())
+        self.assert_debug_only([r for r in logs.records if not r.getMessage().startswith("CONNECTION |")])
 
     def test_client_gone_before_success_reply_logs_debug(self, mock_tcp_handler_cls: MagicMock) -> None:
         mock_instance = mock_tcp_handler_cls.return_value
@@ -390,9 +408,9 @@ class TestHandleError(unittest.TestCase):
                 records = self.handle_error(error)
                 assert [(r.levelno, bool(r.exc_info)) for r in records] == [(logging.DEBUG, False)]
 
-    def test_protocol_error_logs_error_without_traceback(self) -> None:
+    def test_protocol_error_logs_debug(self) -> None:
         records = self.handle_error(InvalidVersionError(4))
-        assert [(r.levelno, bool(r.exc_info)) for r in records] == [(logging.ERROR, False)]
+        assert [(r.levelno, bool(r.exc_info)) for r in records] == [(logging.DEBUG, False)]
 
     def test_handle_error_without_active_exception(self) -> None:
         with self.assertLogs("simple_socks5.server", level="DEBUG") as logs:

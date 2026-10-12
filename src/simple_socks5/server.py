@@ -1,3 +1,4 @@
+import logging
 import socket
 import sys
 import threading
@@ -42,6 +43,16 @@ _EXPECTED_ERRORS: Final = (OSError, InvalidRequestError, InvalidVersionError)
 
 # What socketserver passes as a request: a connected socket for a TCP server, (data, socket) for a UDP one
 SocketServerRequest: TypeAlias = socket.socket | tuple[bytes, socket.socket]
+
+
+def _log_failure(level: int, msg: str, *args: object, exc: BaseException) -> None:
+    """
+    Logs an expected failure at level without a traceback, and anything else as an ERROR with one.
+    """
+    if isinstance(exc, _EXPECTED_ERRORS):
+        logger.log(level, msg, *args)
+    else:
+        logger.error(msg, *args, exc_info=exc)
 
 
 def _tcp_socket(request: SocketServerRequest) -> socket.socket:
@@ -157,7 +168,7 @@ class ThreadingTCPServer(ThreadingMixIn, TCPServer):
         if e is not None and is_routine_disconnect(e):
             logger.debug("Client %s disconnected: %s", client_address[0], e)
         elif isinstance(e, _EXPECTED_ERRORS):
-            logger.error("Error serving %s: %s", client_address[0], e)
+            logger.debug("Error serving %s: %s", client_address[0], e)
         else:
             logger.error("Unhandled error serving %s", client_address[0], exc_info=e)
 
@@ -266,11 +277,11 @@ class TCPProxyServer(StreamRequestHandler):
         except HandshakeTimeoutError:
             # The client never finished its request, so it gets no reply
             self.server.log_handshake_timeout(self.client_address[0], "waiting for the request")
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - _log_failure gives anything unexpected a traceback
             if is_routine_disconnect(e):
                 logger.debug("Client disconnected before finishing its request: %s", e)
             else:
-                logger.error("Failed to parse SOCKS5 request: %s", e, exc_info=not isinstance(e, _EXPECTED_ERRORS))
+                _log_failure(logging.DEBUG, "Failed to parse SOCKS5 request: %s", e, exc=e)
             self._send_error_reply(generate_failed_reply(AddressTypeCodes.IPv4, reply_code_for(e)))
         return None
 
@@ -290,23 +301,23 @@ class TCPProxyServer(StreamRequestHandler):
                 self.handle_udp_associate(dst_request.address)
 
             else:
+                logger.debug("Unsupported command 0x%02x", dst_request.command)
                 self._send_error_reply(generate_failed_reply(atyp, ReplyCodes.COMMAND_NOT_SUPPORTED))
 
-        except Exception as e:
-            exc_info = not isinstance(e, _EXPECTED_ERRORS)
+        except Exception as e:  # noqa: BLE001 - _log_failure gives anything unexpected a traceback
             if self._reply_sent:
                 if is_routine_disconnect(e):
                     logger.debug("Client disconnected after the reply to the %s request: %s", dst_request.address, e)
                 else:
-                    logger.error(
-                        "Error after replying to the %s request: %s", dst_request.address, e, exc_info=exc_info
+                    _log_failure(
+                        logging.DEBUG, "Error after replying to the %s request: %s", dst_request.address, e, exc=e
                     )
                 return
             reply_code = reply_code_for(e)
             if isinstance(e, PolicyDeniedError):
                 self.server.log_policy_denial(self.client.ip, dst_request.address)
             else:
-                logger.error("%s for %s: %s", reply_code.name, dst_request.address, e, exc_info=exc_info)
+                _log_failure(logging.INFO, "%s for %s: %s", reply_code.name, dst_request.address, e, exc=e)
             self._send_error_reply(generate_failed_reply(atyp, reply_code))
 
     def handle_connect(self, dst_address: DetailedAddress) -> None:
@@ -339,7 +350,7 @@ class TCPProxyServer(StreamRequestHandler):
         """
         Handles BIND command.
         """
-        logger.error("BIND command not supported")
+        logger.debug("BIND command not supported")
         self._send_error_reply(generate_failed_reply(address.address_type, ReplyCodes.COMMAND_NOT_SUPPORTED))
 
     def _send_success_reply(self, address_type: AddressTypeCodes, bind_address: BindAddress) -> None:
@@ -364,7 +375,7 @@ class TCPProxyServer(StreamRequestHandler):
             if is_routine_disconnect(e):
                 logger.debug("Client disconnected before the reply: %s", e)
             else:
-                logger.error("Error sending reply: %s", e)
+                logger.debug("Error sending reply: %s", e)
 
     def finish(self) -> None:
         """

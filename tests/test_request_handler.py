@@ -543,11 +543,11 @@ class TestHandshakeDisconnects(unittest.TestCase):
         self.connection.sendall.assert_called_once_with(RESP_CORRECT_VERSION_NO_ACCEPTABLE_METHODS)
         self.assert_debug_only(logs.records)
 
-    def test_unexpected_socket_error_logs_traceback(self) -> None:
+    def test_other_socket_error_logs_debug_without_traceback(self) -> None:
         self.connection.recv.side_effect = OSError(errno.EBADF, "bad file descriptor")
-        with self.assertLogs("simple_socks5.handlers", level="ERROR") as logs:
+        with self.assertLogs("simple_socks5.handlers", level="DEBUG") as logs:
             assert not self.handler.handle_request()
-        assert logs.records[0].exc_info
+        self.assert_debug_only(logs.records)
 
     def test_request_disconnect_raises_without_logging(self) -> None:
         for recv in ([b""], [struct.pack("!BBBB", 5, 1, 0, 1), b"\x7f"], [ConnectionResetError("reset")]):

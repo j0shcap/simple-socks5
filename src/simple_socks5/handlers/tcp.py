@@ -135,7 +135,7 @@ class TCPHandler(BaseHandler):
             # Receive and verify the version
             version = self._recv_exact(1)
             if version != b"\x01":
-                logger.error("Incorrect subnegotiation version: %s", version)
+                logger.debug("Incorrect subnegotiation version: %s", version)
                 self._send(b"\x01\x01")
                 return False
 
@@ -174,7 +174,7 @@ class TCPHandler(BaseHandler):
         """
         GSS-API method implementation per RFC 1961.
         """
-        logger.warning("GSS-API authentication method not implemented")
+        logger.debug("GSS-API authentication method not implemented")
         return False
 
 
@@ -182,4 +182,4 @@ def _log_socket_error(stage: str, e: OSError) -> None:
     if is_routine_disconnect(e):
         logger.debug("Client disconnected during %s: %s", stage, e)
     else:
-        logger.error("Socket error during %s: %s", stage, e, exc_info=e)
+        logger.debug("Socket error during %s: %s", stage, e)
