@@ -1,4 +1,5 @@
 import socket
+import threading
 import unittest
 
 import pytest
@@ -6,6 +7,7 @@ import pytest
 from simple_socks5.constants import AddressTypeCodes, MethodCodes, ReplyCodes
 from simple_socks5.models import BaseAddress, DetailedAddress
 from simple_socks5.utils import (
+    WarningRateLimiter,
     format_connection_closed,
     format_connection_established,
     format_relay,
@@ -224,6 +226,47 @@ class TestConnectionLogLines(unittest.TestCase):
             format_relay("UDP", BaseAddress("::1", 5000), BaseAddress("2001:db8::1", 53), 42)
             == "RELAY | UDP | [::1]:5000 -> [2001:db8::1]:53 | 42 bytes"
         )
+
+
+class TestWarningRateLimiter(unittest.TestCase):
+    def setUp(self) -> None:
+        self.now = 100.0
+        self.limiter = WarningRateLimiter(10.0, clock=lambda: self.now)
+
+    def test_first_hit_warns_with_count_1(self) -> None:
+        assert self.limiter.hit() == 1
+
+    def test_hits_inside_window_return_none(self) -> None:
+        self.limiter.hit()
+        self.now += 9.9
+        assert [self.limiter.hit() for _ in range(3)] == [None] * 3
+
+    def test_first_hit_after_window_returns_accumulated_count(self) -> None:
+        self.limiter.hit()
+        for _ in range(4):
+            self.limiter.hit()
+        self.now += 10.0
+        assert self.limiter.hit() == 5
+        assert self.limiter.hit() is None
+
+    def test_concurrent_hits_are_all_counted(self) -> None:
+        results: list[int | None] = []
+        lock = threading.Lock()
+
+        def hit_many() -> None:
+            for _ in range(100):
+                count = self.limiter.hit()
+                with lock:
+                    results.append(count)
+
+        threads = [threading.Thread(target=hit_many) for _ in range(8)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        self.now += 10.0
+        assert [c for c in results if c is not None] == [1]
+        assert self.limiter.hit() == 800
 
 
 if __name__ == "__main__":
