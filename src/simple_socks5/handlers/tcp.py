@@ -2,9 +2,8 @@ import hmac
 
 from ..constants import SOCKS_VERSION, MethodCodes, auth_required, credentials
 from ..errors import is_routine_disconnect
-from ..exceptions import InvalidVersionError
+from ..exceptions import AuthenticationFailedError, HandshakeTimeoutError, InvalidVersionError
 from ..logger import get_logger
-from ..models import SocketAddress
 from ..utils import generate_connection_method_response
 from .base import BaseHandler
 
@@ -41,6 +40,10 @@ class TCPHandler(BaseHandler):
 
         Returns:
             bool: True if the handshake was successful, False otherwise.
+
+        Raises:
+            HandshakeTimeoutError: The client didn't finish before the deadline.
+            AuthenticationFailedError: The client sent the wrong username or password, and was told so.
         """
         try:
             # Parses client VER, NMETHODS, METHODS
@@ -57,11 +60,10 @@ class TCPHandler(BaseHandler):
             negotiated_authentication: MethodCodes = self._negotiate_authentication_method(methods)
 
             # Handles server response
-            self.connection.sendall(generate_connection_method_response(negotiated_authentication))
+            self._send(generate_connection_method_response(negotiated_authentication))
 
-        except TimeoutError:
-            logger.warning("Handshake timed out")
-            return False
+        except HandshakeTimeoutError:
+            raise  # The server logs it, rate-limited
         except OSError as e:
             _log_socket_error("handshake", e)
             return False
@@ -137,8 +139,8 @@ class TCPHandler(BaseHandler):
             # Receive and verify the version
             version = self._recv_exact(1)
             if version != b"\x01":
-                logger.error("Incorrect subnegotiation version: %s", version)
-                self.connection.sendall(b"\x01\x01")
+                logger.debug("Incorrect subnegotiation version: %s", version)
+                self._send(b"\x01\x01")
                 return False
 
             # The whole frame is read even when a length is 0: closing with unread bytes would send an RST
@@ -148,18 +150,18 @@ class TCPHandler(BaseHandler):
             expected = credentials()
             authenticated = self._credentials_match(username, password, expected)
             if authenticated:
-                logger.info("Authenticated user: %s", expected[0].decode("utf-8", "backslashreplace"))
-                self.connection.sendall(b"\x01\x00")  # version 1, status 0 (success)
+                logger.debug("Authenticated user: %s", expected[0].decode("utf-8", "backslashreplace"))
+                self._send(b"\x01\x00")  # version 1, status 0 (success)
             else:
-                logger.warning("Authentication failed for client %s", self._peer_ip())
-                self.connection.sendall(b"\x01\x01")  # version 1, status 1 (failure)
-        except TimeoutError:
-            logger.warning("Handshake timed out during authentication")
-            return False
+                self._send(b"\x01\x01")  # version 1, status 1 (failure)
+        except HandshakeTimeoutError:
+            raise  # The server logs it, rate-limited
         except OSError as e:
             _log_socket_error("username/password authentication", e)
             return False
-        return authenticated
+        if not authenticated:
+            raise AuthenticationFailedError
+        return True
 
     @staticmethod
     def _credentials_match(username: bytes, password: bytes, expected: tuple[bytes, bytes]) -> bool:
@@ -172,18 +174,11 @@ class TCPHandler(BaseHandler):
         password_ok = hmac.compare_digest(password, expected_password)
         return bool(username) & bool(password) & username_ok & password_ok
 
-    def _peer_ip(self) -> str:
-        try:
-            peer: SocketAddress = self.connection.getpeername()
-        except OSError:
-            return "unknown"  # The client has already disconnected
-        return peer[0]
-
     def _handle_gssapi_auth(self) -> bool:
         """
         GSS-API method implementation per RFC 1961.
         """
-        logger.warning("GSS-API authentication method not implemented")
+        logger.debug("GSS-API authentication method not implemented")
         return False
 
 
@@ -191,4 +186,4 @@ def _log_socket_error(stage: str, e: OSError) -> None:
     if is_routine_disconnect(e):
         logger.debug("Client disconnected during %s: %s", stage, e)
     else:
-        logger.error("Socket error during %s: %s", stage, e, exc_info=e)
+        logger.debug("Socket error during %s: %s", stage, e)

@@ -302,12 +302,18 @@ class TestListenAndRelay(unittest.TestCase):
             self.control.close()
             self.assert_relay_ends(thread)
 
-    def test_relay_socket_error_ends_association(self) -> None:
+    def test_relay_socket_error_ends_association_at_debug(self) -> None:
         self.relay.proxy_connection = MagicMock(wraps=self.relay.proxy_connection)
         self.relay.proxy_connection.recvfrom.side_effect = OSError("network down")
-        thread = self.start_relay()
-        self.send_datagrams(b"readable")
-        self.assert_relay_ends(thread)
+        with self.assertLogs("simple_socks5.relays.udp_relay", level="DEBUG") as logs:
+            thread = self.start_relay()
+            self.send_datagrams(b"readable")
+            self.assert_relay_ends(thread)
+
+        assert [(r.levelname, r.getMessage().split(" |")[0]) for r in logs.records] == [
+            ("DEBUG", "UDP relay socket error: network down"),
+            ("INFO", "CLOSED"),
+        ]
 
 
 if __name__ == "__main__":

@@ -12,9 +12,17 @@ from unittest.mock import MagicMock, NonCallableMagicMock, create_autospec, patc
 
 import pytest
 
-from simple_socks5.constants import AddressTypeCodes, CommandCodes
+from simple_socks5.constants import (
+    AUTH_FAILED_WARNING_INTERVAL,
+    CONNECTION_LIMIT_WARNING_INTERVAL,
+    HANDSHAKE_TIMEOUT_WARNING_INTERVAL,
+    POLICY_DENIED_WARNING_INTERVAL,
+    AddressTypeCodes,
+    CommandCodes,
+)
 from simple_socks5.exceptions import (
     AddressTypeNotSupportedError,
+    AuthenticationFailedError,
     HandshakeTimeoutError,
     InvalidDomainNameError,
     InvalidRequestError,
@@ -23,6 +31,7 @@ from simple_socks5.exceptions import (
 )
 from simple_socks5.models import BindAddress, DetailedAddress, Request
 from simple_socks5.server import TCPProxyServer, ThreadingTCPServer
+from simple_socks5.utils import WarningRateLimiter
 
 
 def make_proxy_handler() -> tuple[TCPProxyServer, NonCallableMagicMock]:
@@ -32,6 +41,7 @@ def make_proxy_handler() -> tuple[TCPProxyServer, NonCallableMagicMock]:
     handler = object.__new__(TCPProxyServer)
     handler.connection = connection
     handler.request = connection
+    handler.client_address = ("127.0.0.1", 9999)
     handler.server = create_autospec(ThreadingTCPServer, instance=True)
     return handler, connection
 
@@ -128,12 +138,26 @@ class TestHandshakeDeadline(unittest.TestCase):
 
     def test_parse_handshake_timeout_sends_nothing(self, mock_tcp_handler_cls: MagicMock) -> None:
         handler, connection = make_proxy_handler()
+        handler.server = server = create_autospec(ThreadingTCPServer, instance=True)
         mock_tcp_handler_cls.return_value.handle_request.return_value = True
         mock_tcp_handler_cls.return_value.parse_request.side_effect = HandshakeTimeoutError("expired")
 
         handler.handle()
 
         connection.sendall.assert_not_called()
+        server.log_handshake_timeout.assert_called_once_with("127.0.0.1", "waiting for the request")
+
+    def test_greeting_timeout_logged_by_server_and_closed(self, mock_tcp_handler_cls: MagicMock) -> None:
+        handler, connection = make_proxy_handler()
+        handler.server = server = create_autospec(ThreadingTCPServer, instance=True)
+        mock_tcp_handler_cls.return_value.handle_request.side_effect = HandshakeTimeoutError("expired")
+
+        handler.handle()
+
+        connection.sendall.assert_not_called()
+        mock_tcp_handler_cls.return_value.parse_request.assert_not_called()
+        server.log_handshake_timeout.assert_called_once_with("127.0.0.1", "during the greeting or authentication")
+        server.shutdown_request.assert_called_once_with(connection)
 
 
 @patch("simple_socks5.server.TCPHandler", autospec=True)
@@ -258,11 +282,12 @@ class TestSendErrorReply(unittest.TestCase):
             handler._send_error_reply(b"\x05\x01\x00\x01\x00\x00\x00\x00\x00\x00")
         assert not [r for r in logs.records if r.exc_info or r.levelno > logging.DEBUG]
 
-    def test_error_reply_unexpected_oserror_logs_error(self) -> None:
+    def test_error_reply_other_oserror_logs_debug(self) -> None:
         handler, connection = make_proxy_handler()
         connection.sendall.side_effect = OSError(errno.EBADF, "bad file descriptor")
-        with self.assertLogs("simple_socks5.server", level="ERROR"):
+        with self.assertLogs("simple_socks5.server", level="DEBUG") as logs:
             handler._send_error_reply(b"\x05\x01\x00\x01\x00\x00\x00\x00\x00\x00")
+        assert [(r.levelno, r.exc_info) for r in logs.records] == [(logging.DEBUG, None)]
 
 
 @patch("simple_socks5.server.TCPHandler", autospec=True)
@@ -300,10 +325,10 @@ class TestDisconnectLogging(unittest.TestCase):
                 self.run_handle(mock_tcp_handler_cls, error)
             self.assert_debug_only(logs.records)
 
-    def test_parse_protocol_error_logs_error_without_traceback(self, mock_tcp_handler_cls: MagicMock) -> None:
-        with self.assertLogs("simple_socks5.server", level="ERROR") as logs:
+    def test_parse_protocol_error_logs_debug(self, mock_tcp_handler_cls: MagicMock) -> None:
+        with self.assertLogs("simple_socks5.server", level="DEBUG") as logs:
             self.run_handle(mock_tcp_handler_cls, InvalidVersionError(4))
-        assert not logs.records[0].exc_info
+        self.assert_debug_only(logs.records)
 
     def test_parse_unexpected_error_logs_traceback_and_replies(self, mock_tcp_handler_cls: MagicMock) -> None:
         with self.assertLogs("simple_socks5.server", level="ERROR") as logs:
@@ -319,13 +344,30 @@ class TestDisconnectLogging(unittest.TestCase):
             self.run_handle(mock_tcp_handler_cls, connect_request())
         assert logs.records[0].exc_info
 
-    def test_connect_refused_logs_error_without_traceback(self, mock_tcp_handler_cls: MagicMock) -> None:
+    def test_connect_refused_logs_info_with_reply_code(self, mock_tcp_handler_cls: MagicMock) -> None:
         with (
             patch("simple_socks5.server.TCPRelay", autospec=True, side_effect=ConnectionRefusedError("refused")),
-            self.assertLogs("simple_socks5.server", level="ERROR") as logs,
+            self.assertLogs("simple_socks5.server", level="DEBUG") as logs,
         ):
             self.run_handle(mock_tcp_handler_cls, connect_request())
-        assert not logs.records[0].exc_info
+        assert [(r.levelno, r.getMessage(), r.exc_info) for r in logs.records] == [
+            (logging.INFO, "CONNECTION | 127.0.0.1:9999 -> 127.0.0.1:80", None),
+            (logging.INFO, "CONNECTION_REFUSED for 127.0.0.1:80: refused", None),
+        ]
+
+    def test_connect_error_after_reply_logs_debug(self, mock_tcp_handler_cls: MagicMock) -> None:
+        with (
+            patch.object(TCPProxyServer, "handle_connect", autospec=True) as handle_connect,
+            self.assertLogs("simple_socks5.server", level="DEBUG") as logs,
+        ):
+
+            def fail_after_reply(handler: TCPProxyServer, _address: DetailedAddress) -> None:
+                handler._reply_sent = True
+                raise OSError(errno.EBADF, "bad file descriptor")
+
+            handle_connect.side_effect = fail_after_reply
+            self.run_handle(mock_tcp_handler_cls, connect_request())
+        self.assert_debug_only([r for r in logs.records if not r.getMessage().startswith("CONNECTION |")])
 
     def test_client_gone_before_success_reply_logs_debug(self, mock_tcp_handler_cls: MagicMock) -> None:
         mock_instance = mock_tcp_handler_cls.return_value
@@ -366,9 +408,9 @@ class TestHandleError(unittest.TestCase):
                 records = self.handle_error(error)
                 assert [(r.levelno, bool(r.exc_info)) for r in records] == [(logging.DEBUG, False)]
 
-    def test_protocol_error_logs_error_without_traceback(self) -> None:
+    def test_protocol_error_logs_debug(self) -> None:
         records = self.handle_error(InvalidVersionError(4))
-        assert [(r.levelno, bool(r.exc_info)) for r in records] == [(logging.ERROR, False)]
+        assert [(r.levelno, bool(r.exc_info)) for r in records] == [(logging.DEBUG, False)]
 
     def test_handle_error_without_active_exception(self) -> None:
         with self.assertLogs("simple_socks5.server", level="DEBUG") as logs:
@@ -438,8 +480,8 @@ class TestConnectionLimit(unittest.TestCase):
             for _ in range(count):
                 server.process_request(create_autospec(socket.socket, instance=True), ("127.0.0.1", 9999))
 
+        server._limit_warnings = WarningRateLimiter(CONNECTION_LIMIT_WARNING_INTERVAL, clock=lambda: now[0])
         with (
-            patch("simple_socks5.server.time.monotonic", lambda: now[0]),
             patch.object(server, "shutdown_request", autospec=True) as shutdown_request,
             self.assertLogs("simple_socks5.server", level="WARNING") as logs,
         ):
@@ -493,10 +535,8 @@ class TestPolicyDenial(unittest.TestCase):
 
     def test_policy_warning_rate_limited_with_suppressed_count(self) -> None:
         now = [0.0]
-        with (
-            patch("simple_socks5.server.time.monotonic", lambda: now[0]),
-            self.assertLogs("simple_socks5.server", level="DEBUG") as logs,
-        ):
+        self.server._policy_warnings = WarningRateLimiter(POLICY_DENIED_WARNING_INTERVAL, clock=lambda: now[0])
+        with self.assertLogs("simple_socks5.server", level="DEBUG") as logs:
             for _ in range(50):
                 self.server.log_policy_denial("192.0.2.7", self.dst)
             now[0] = 9.9
@@ -508,6 +548,70 @@ class TestPolicyDenial(unittest.TestCase):
         assert levels == ["WARNING"] + ["DEBUG"] * 50 + ["WARNING"]
         assert "192.0.2.9 -> " in logs.records[-1].getMessage()
         assert "(50 more denied since the last warning)" in logs.records[-1].getMessage()
+
+
+class TestHandshakeTimeoutWarnings(unittest.TestCase):
+    def setUp(self) -> None:
+        with _without_socks5_env():
+            self.server = ThreadingTCPServer(("127.0.0.1", 0), TCPProxyServer, bind_and_activate=False)
+        self.addCleanup(self.server.server_close)
+        self.now = [0.0]
+        self.server._timeout_warnings = WarningRateLimiter(
+            HANDSHAKE_TIMEOUT_WARNING_INTERVAL, clock=lambda: self.now[0]
+        )
+
+    def test_warns_once_per_interval_with_count(self) -> None:
+        with self.assertLogs("simple_socks5.server", level="DEBUG") as logs:
+            for i in range(50):
+                stage = "waiting for the request" if i % 2 else "during the greeting or authentication"
+                self.server.log_handshake_timeout(f"192.0.2.{i}", stage)
+            self.now[0] = 10.0
+            self.server.log_handshake_timeout("192.0.2.99", "waiting for the request")
+
+        levels = [r.levelname for r in logs.records]
+        assert levels == ["WARNING"] + ["DEBUG"] * 49 + ["WARNING"]
+        assert logs.records[0].getMessage() == (
+            "1 handshake(s) timed out since the last warning (latest: 192.0.2.0 during the greeting or authentication)"
+        )
+        assert logs.records[1].getMessage() == "Handshake timed out for 192.0.2.1 waiting for the request"
+        assert logs.records[-1].getMessage().startswith("50 handshake(s) timed out since the last warning")
+
+
+class TestAuthFailureWarnings(unittest.TestCase):
+    def setUp(self) -> None:
+        with _without_socks5_env():
+            self.server = ThreadingTCPServer(("127.0.0.1", 0), TCPProxyServer, bind_and_activate=False)
+        self.addCleanup(self.server.server_close)
+        self.now = [0.0]
+        self.server._auth_warnings = WarningRateLimiter(AUTH_FAILED_WARNING_INTERVAL, clock=lambda: self.now[0])
+
+    def test_warns_once_per_interval_with_count(self) -> None:
+        with self.assertLogs("simple_socks5.server", level="DEBUG") as logs:
+            for _ in range(20):
+                self.server.log_auth_failure("203.0.113.7")
+            self.now[0] = 10.0
+            self.server.log_auth_failure("203.0.113.8")
+
+        assert [r.levelname for r in logs.records] == ["WARNING"] + ["DEBUG"] * 19 + ["WARNING"]
+        assert logs.records[0].getMessage() == (
+            "Authentication failed for client 203.0.113.7 (1 failure(s) since the last warning)"
+        )
+        assert logs.records[1].getMessage() == "Authentication failed for client 203.0.113.7"
+        assert logs.records[-1].getMessage() == (
+            "Authentication failed for client 203.0.113.8 (20 failure(s) since the last warning)"
+        )
+
+    @patch("simple_socks5.server.TCPHandler", autospec=True)
+    def test_failed_login_logged_by_server_and_closed(self, mock_tcp_handler_cls: MagicMock) -> None:
+        handler, connection = make_proxy_handler()
+        handler.server = server = create_autospec(ThreadingTCPServer, instance=True)
+        mock_tcp_handler_cls.return_value.handle_request.side_effect = AuthenticationFailedError()
+
+        handler.handle()
+
+        server.log_auth_failure.assert_called_once_with("127.0.0.1")
+        server.shutdown_request.assert_called_once_with(connection)
+        mock_tcp_handler_cls.return_value.parse_request.assert_not_called()
 
 
 class TestConnectionTracking(unittest.TestCase):

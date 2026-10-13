@@ -5,7 +5,6 @@ from collections.abc import Callable
 from typing import TypeVar
 
 from ..constants import DNS_LOOKUP_TIMEOUT, SOCKS_VERSION, AddressTypeCodes
-from ..errors import is_routine_disconnect
 from ..exceptions import (
     AddressTypeNotSupportedError,
     HandshakeTimeoutError,
@@ -66,6 +65,15 @@ class BaseHandler:
         except TimeoutError as e:
             raise HandshakeTimeoutError("Handshake deadline expired") from e
 
+    def _send(self, data: bytes) -> None:
+        """
+        Sends all of data. A send that runs into the deadline the last recv set raises HandshakeTimeoutError.
+        """
+        try:
+            self.connection.sendall(data)
+        except TimeoutError as e:
+            raise HandshakeTimeoutError("Handshake deadline expired") from e
+
     def parse_request(self) -> Request:
         """
         Handles requests of the form:
@@ -89,64 +97,48 @@ class BaseHandler:
         o  DST.ADDR - desired destination address
         o  DST.PORT - desired destination port in network octet order
         """
-        try:
-            header = self._recv_exact(4)
+        header = self._recv_exact(4)
 
-            version, cmd, rsv, address_type = header
-            if version != SOCKS_VERSION:
-                raise InvalidVersionError(version)
-            if rsv != 0x00:
-                raise InvalidRequestError(rsv)
+        version, cmd, rsv, address_type = header
+        if version != SOCKS_VERSION:
+            raise InvalidVersionError(version)
+        if rsv != 0x00:
+            raise InvalidRequestError(rsv)
 
-            return Request(version=version, command=cmd, address=self._parse_address(address_type))
-
-        except HandshakeTimeoutError:
-            raise  # Expected for stalled clients; the server logs it without a traceback
-        except OSError as e:
-            if not is_routine_disconnect(e):  # The server logs a disconnect once, at DEBUG
-                logger.exception("Socket error during request parsing")
-            raise
+        return Request(version=version, command=cmd, address=self._parse_address(address_type))
 
     def _parse_address(self, address_type: int) -> DetailedAddress:
         # Every request byte, port included, is read before any DNS lookup, so a slow lookup never
         # counts against the handshake deadline.
-        try:
-            if address_type == AddressTypeCodes.IPv4.value:
-                ip = socket.inet_ntoa(self._recv_exact(4))
-                port = self._recv_port()
-                name = ip  # IP literals are never reverse-resolved
-            elif address_type == AddressTypeCodes.DOMAIN_NAME.value:
-                domain_length = self._recv_exact(1)[0]
-                raw_domain_name = self._recv_exact(domain_length)
-                port = self._recv_port()
-                if not raw_domain_name:
-                    # connect(("", port)) would reach the local host
-                    raise InvalidDomainNameError(raw_domain_name)
-                try:
-                    name = raw_domain_name.decode()
-                except UnicodeDecodeError as e:
-                    raise InvalidDomainNameError(raw_domain_name) from e
-                ip, address_type = self._resolve_hostname(name)
-            elif address_type == AddressTypeCodes.IPv6.value:
-                ip = socket.inet_ntop(socket.AF_INET6, self._recv_exact(16))
-                port = self._recv_port()
-                name = ip
-            else:
-                raise AddressTypeNotSupportedError(address_type)
+        if address_type == AddressTypeCodes.IPv4.value:
+            ip = socket.inet_ntoa(self._recv_exact(4))
+            port = self._recv_port()
+            name = ip  # IP literals are never reverse-resolved
+        elif address_type == AddressTypeCodes.DOMAIN_NAME.value:
+            domain_length = self._recv_exact(1)[0]
+            raw_domain_name = self._recv_exact(domain_length)
+            port = self._recv_port()
+            if not raw_domain_name:
+                # connect(("", port)) would reach the local host
+                raise InvalidDomainNameError(raw_domain_name)
+            try:
+                name = raw_domain_name.decode()
+            except UnicodeDecodeError as e:
+                raise InvalidDomainNameError(raw_domain_name) from e
+            ip, address_type = self._resolve_hostname(name)
+        elif address_type == AddressTypeCodes.IPv6.value:
+            ip = socket.inet_ntop(socket.AF_INET6, self._recv_exact(16))
+            port = self._recv_port()
+            name = ip
+        else:
+            raise AddressTypeNotSupportedError(address_type)
 
-            return DetailedAddress(
-                name=name,
-                ip=ip,
-                port=port,
-                address_type=map_address_int_to_enum(address_type),
-            )
-
-        except HandshakeTimeoutError:
-            raise
-        except OSError as e:
-            if not is_routine_disconnect(e):
-                logger.exception("Socket error during address and port parsing")
-            raise
+        return DetailedAddress(
+            name=name,
+            ip=ip,
+            port=port,
+            address_type=map_address_int_to_enum(address_type),
+        )
 
     def _recv_port(self) -> int:
         return int.from_bytes(self._recv_exact(2), "big")

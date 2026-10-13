@@ -4,6 +4,7 @@ Handshake deadline (SOCKS5_HANDSHAKE_TIMEOUT) and outbound connect timeout (SOCK
 Both are read per connection, so each test sets a short value before talking to the proxy.
 """
 
+import logging
 import select
 import socket
 import time
@@ -72,6 +73,26 @@ def test_flood_slots_freed(monkeypatch: pytest.MonkeyPatch, proxy: ProxyHandle, 
             sc.assert_closed(sock)
 
 
+def test_idle_flood_logs_at_most_two_timeout_warnings(
+    monkeypatch: pytest.MonkeyPatch, proxy: ProxyHandle, caplog: pytest.LogCaptureFixture
+) -> None:
+    monkeypatch.setenv("SOCKS5_HANDSHAKE_TIMEOUT", "0.5")
+    caplog.set_level(logging.DEBUG, logger="simple_socks5")
+    with _fd_limit_at_least(4 * 50 + 256), ExitStack() as stack:
+        silent = [stack.enter_context(proxy.connect()) for _ in range(25)]
+        greeted = [stack.enter_context(proxy.connect()) for _ in range(25)]
+        for sock in greeted:
+            assert sc.greet(sock, [sc.METHOD_NO_AUTH]) == sc.METHOD_NO_AUTH
+        for sock in silent + greeted:
+            sc.assert_closed(sock)
+    assert proxy.server.wait_for_connections(5.0)
+
+    timeouts = [r for r in caplog.records if "timed out" in r.getMessage()]
+    assert len([r for r in timeouts if r.levelno == logging.WARNING]) <= 2
+    assert len(timeouts) == 50
+    assert all(r.levelno in {logging.DEBUG, logging.WARNING} for r in timeouts)
+
+
 def test_drip_feed_greeting_closed_at_deadline(monkeypatch: pytest.MonkeyPatch, proxy: ProxyHandle) -> None:
     monkeypatch.setenv("SOCKS5_HANDSHAKE_TIMEOUT", "1.0")
     greeting = sc.build_greeting(range(1, 256))  # 257 bytes: far more than fit before the deadline
@@ -118,7 +139,7 @@ def test_relay_outlives_handshake_deadline(
         assert sc.recv_exact(tunnel, 4) == b"ping"
 
 
-def _blackhole_times_out() -> bool:
+def blackhole_times_out() -> bool:
     with socket.socket() as probe:
         probe.settimeout(0.3)
         try:
@@ -131,7 +152,7 @@ def _blackhole_times_out() -> bool:
 
 
 def test_blackhole_connect_replies_host_unreachable(monkeypatch: pytest.MonkeyPatch, proxy: ProxyHandle) -> None:
-    if not _blackhole_times_out():
+    if not blackhole_times_out():
         pytest.skip(f"{BLACKHOLE[0]} is not a blackhole on this network (connect fails or succeeds fast)")
     monkeypatch.setenv("SOCKS5_CONNECT_TIMEOUT", "0.5")
     with proxy.connect() as sock:

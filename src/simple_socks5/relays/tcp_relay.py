@@ -3,7 +3,6 @@ import selectors
 import socket
 
 from ..constants import RELAY_BUFFER_SIZE, RELAY_WRITE_TIMEOUT, TCP_SELECTOR_TIMEOUT, connect_timeout
-from ..errors import is_routine_disconnect
 from ..logger import get_logger
 from ..models import DetailedAddress
 from ..policy import check_destination
@@ -80,10 +79,7 @@ class TCPRelay(BaseRelay):
         except TimeoutError:
             logger.warning("Relay write timed out after %s seconds", RELAY_WRITE_TIMEOUT)
         except OSError as e:
-            if is_routine_disconnect(e):
-                logger.debug("Relay ended: %s", e)
-            else:
-                logger.exception("Socket error during relay")
+            logger.debug("Relay ended: %s", e)
         finally:
             self._cleanup()
 

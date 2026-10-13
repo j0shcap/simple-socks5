@@ -14,6 +14,7 @@ from simple_socks5.constants import AddressTypeCodes, MethodCodes, ReplyCodes
 from simple_socks5.errors import reply_code_for
 from simple_socks5.exceptions import (
     AddressTypeNotSupportedError,
+    AuthenticationFailedError,
     HandshakeTimeoutError,
     InvalidDomainNameError,
     InvalidRequestError,
@@ -161,9 +162,9 @@ class TestTCPRequestHandlerIPv4(unittest.TestCase):
             bytes([len("eh")]),
             b"eh",
         ]
-        result = self.handler._handle_username_password_auth()
+        with pytest.raises(AuthenticationFailedError):
+            self.handler._handle_username_password_auth()
         mock_sendall.assert_called_with(RESP_LOGIN_FAILURE)
-        assert not result
 
     @patch("socket.socket.recv", autospec=True)
     @patch(
@@ -462,34 +463,41 @@ class TestParseAddress(unittest.TestCase):
 
 
 class TestHandshakeTimeout(unittest.TestCase):
-    """A handshake timeout closes quietly: no STATUS byte, and a warning without a traceback."""
+    """A handshake timeout propagates as HandshakeTimeoutError, with no STATUS byte; the server logs it."""
 
     def setUp(self) -> None:
         self.connection = connection_mock()
         self.handler = TCPHandler(self.connection)
 
-    def assert_quiet_warning(self, records: list[logging.LogRecord]) -> None:
-        assert any(r.levelname == "WARNING" for r in records)
-        assert not [r for r in records if r.exc_info or r.levelno >= 40]
-
     def test_auth_does_not_reset_socket_timeout(self) -> None:
         self.connection.recv.side_effect = [b"\x01", b"\x01", b"u", b"\x01", b"p"]
-        self.handler._handle_username_password_auth()
+        with pytest.raises(AuthenticationFailedError):
+            self.handler._handle_username_password_auth()
         self.connection.settimeout.assert_not_called()
 
-    def test_auth_timeout_returns_false_without_status(self) -> None:
+    def test_auth_timeout_raises_without_status(self) -> None:
         self.connection.recv.side_effect = [b"\x01", HandshakeTimeoutError("expired")]
-        with self.assertLogs("simple_socks5.handlers", level="DEBUG") as logs:
-            assert not self.handler._handle_username_password_auth()
+        with self.assertNoLogs("simple_socks5.handlers"), pytest.raises(HandshakeTimeoutError):
+            self.handler._handle_username_password_auth()
         self.connection.sendall.assert_not_called()
-        self.assert_quiet_warning(logs.records)
 
-    def test_greeting_timeout_logs_warning_without_traceback(self) -> None:
+    def test_greeting_timeout_raises(self) -> None:
         self.connection.recv.side_effect = HandshakeTimeoutError("expired")
-        with self.assertLogs("simple_socks5.handlers", level="DEBUG") as logs:
-            assert not self.handler.handle_request()
+        with self.assertNoLogs("simple_socks5.handlers"), pytest.raises(HandshakeTimeoutError):
+            self.handler.handle_request()
         self.connection.sendall.assert_not_called()
-        self.assert_quiet_warning(logs.records)
+
+    def test_greeting_sendall_timeout_raises_handshake_timeout(self) -> None:
+        self.connection.recv.side_effect = [b"\x05\x01", b"\x00"]
+        self.connection.sendall.side_effect = TimeoutError("timed out")
+        with self.assertNoLogs("simple_socks5.handlers"), pytest.raises(HandshakeTimeoutError):
+            self.handler.handle_request()
+
+    def test_auth_sendall_timeout_raises_handshake_timeout(self) -> None:
+        self.connection.recv.side_effect = [b"\x01", b"\x01", b"u", b"\x01", b"p"]
+        self.connection.sendall.side_effect = TimeoutError("timed out")
+        with pytest.raises(HandshakeTimeoutError):
+            self.handler._handle_username_password_auth()
 
     def test_request_timeout_propagates_without_traceback(self) -> None:
         self.connection.recv.side_effect = [struct.pack("!BBBB", 5, 1, 0, 1), HandshakeTimeoutError("expired")]
@@ -535,11 +543,11 @@ class TestHandshakeDisconnects(unittest.TestCase):
         self.connection.sendall.assert_called_once_with(RESP_CORRECT_VERSION_NO_ACCEPTABLE_METHODS)
         self.assert_debug_only(logs.records)
 
-    def test_unexpected_socket_error_logs_traceback(self) -> None:
+    def test_other_socket_error_logs_debug_without_traceback(self) -> None:
         self.connection.recv.side_effect = OSError(errno.EBADF, "bad file descriptor")
-        with self.assertLogs("simple_socks5.handlers", level="ERROR") as logs:
+        with self.assertLogs("simple_socks5.handlers", level="DEBUG") as logs:
             assert not self.handler.handle_request()
-        assert logs.records[0].exc_info
+        self.assert_debug_only(logs.records)
 
     def test_request_disconnect_raises_without_logging(self) -> None:
         for recv in ([b""], [struct.pack("!BBBB", 5, 1, 0, 1), b"\x7f"], [ConnectionResetError("reset")]):
@@ -556,26 +564,22 @@ def userpass_frame(username: bytes, password: bytes) -> list[bytes]:
 
 
 class TestUsernamePasswordAuth(unittest.TestCase):
-    CLIENT_IP = "203.0.113.7"
-
     def setUp(self) -> None:
         strip_socks5_env(self, SOCKS5_USERNAME="alice", SOCKS5_PASSWORD="s3cret")
         self.connection = connection_mock()
-        self.connection.getpeername.return_value = (self.CLIENT_IP, 5555)
         self.handler = TCPHandler(self.connection)
 
     def authenticate(self, username: bytes, password: bytes) -> bool:
         self.connection.recv.side_effect = userpass_frame(username, password)
         return self.handler._handle_username_password_auth()
 
-    def assert_rejected(self, username: bytes, password: bytes) -> list[logging.LogRecord]:
-        with self.assertLogs("simple_socks5.handlers", level="DEBUG") as logs:
-            assert not self.authenticate(username, password)
+    def assert_rejected(self, username: bytes, password: bytes) -> None:
+        # The server logs the failure, rate-limited; the handler only reports it
+        with self.assertNoLogs("simple_socks5.handlers"), pytest.raises(AuthenticationFailedError):
+            self.authenticate(username, password)
         self.connection.sendall.assert_called_once_with(RESP_LOGIN_FAILURE)
         # The whole frame was read, so closing sends FIN rather than RST
         assert self.connection.recv.call_count == len(userpass_frame(username, password))
-        assert not [r for r in logs.records if r.exc_info]
-        return logs.records
 
     def test_correct_credentials_succeed(self) -> None:
         assert self.authenticate(b"alice", b"s3cret")
@@ -603,35 +607,27 @@ class TestUsernamePasswordAuth(unittest.TestCase):
     def test_non_utf8_username_fails_without_exception(self) -> None:
         # The audit repro: VER=1, ULEN=2, UNAME=ff fe, PLEN=1, PASSWD="a"
         self.connection.recv.side_effect = [b"\x01", b"\x02", b"\xff\xfe", b"\x01", b"a"]
-        assert not self.handler._handle_username_password_auth()
+        with pytest.raises(AuthenticationFailedError):
+            self.handler._handle_username_password_auth()
         self.connection.sendall.assert_called_once_with(RESP_LOGIN_FAILURE)
 
     def test_non_utf8_password_fails_without_exception(self) -> None:
         self.assert_rejected(b"alice", b"\xff\xfe")
 
     def test_compare_digest_called_for_both_fields_even_on_wrong_username(self) -> None:
-        with patch("simple_socks5.handlers.tcp.hmac.compare_digest", wraps=hmac.compare_digest) as spy:
-            assert not self.authenticate(b"mallory", b"s3cret")
+        with (
+            patch("simple_socks5.handlers.tcp.hmac.compare_digest", wraps=hmac.compare_digest) as spy,
+            pytest.raises(AuthenticationFailedError),
+        ):
+            self.authenticate(b"mallory", b"s3cret")
         assert spy.call_count == 2
 
     def test_password_change_after_import_honoured(self) -> None:
         with patch.dict(os.environ, {"SOCKS5_PASSWORD": "rotated"}):
-            assert not self.authenticate(b"alice", b"s3cret")
+            with pytest.raises(AuthenticationFailedError):
+                self.authenticate(b"alice", b"s3cret")
             self.connection.reset_mock()
-            self.connection.getpeername.return_value = (self.CLIENT_IP, 5555)
             assert self.authenticate(b"alice", b"rotated")
-
-    def test_failure_log_has_ip_not_username_or_password(self) -> None:
-        records = self.assert_rejected(b"mallory", b"guess")
-        messages = "\n".join(r.getMessage() for r in records)
-        assert self.CLIENT_IP in messages
-        for secret in ("mallory", "guess", "s3cret"):
-            assert secret not in messages
-
-    def test_failure_log_survives_disconnected_peer(self) -> None:
-        self.connection.getpeername.side_effect = OSError("not connected")
-        records = self.assert_rejected(b"mallory", b"guess")
-        assert "unknown" in "\n".join(r.getMessage() for r in records)
 
     def test_success_logs_configured_username_never_password(self) -> None:
         with self.assertLogs("simple_socks5.handlers", level="DEBUG") as logs:

@@ -1,3 +1,4 @@
+import logging
 import socket
 import sys
 import threading
@@ -6,7 +7,9 @@ from socketserver import BaseRequestHandler, StreamRequestHandler, TCPServer, Th
 from typing import Final, TypeAlias
 
 from .constants import (
+    AUTH_FAILED_WARNING_INTERVAL,
     CONNECTION_LIMIT_WARNING_INTERVAL,
+    HANDSHAKE_TIMEOUT_WARNING_INTERVAL,
     POLICY_DENIED_WARNING_INTERVAL,
     AddressTypeCodes,
     CommandCodes,
@@ -15,12 +18,19 @@ from .constants import (
     max_connections,
 )
 from .errors import is_routine_disconnect, reply_code_for
-from .exceptions import HandshakeTimeoutError, InvalidRequestError, InvalidVersionError, PolicyDeniedError
+from .exceptions import (
+    AuthenticationFailedError,
+    HandshakeTimeoutError,
+    InvalidRequestError,
+    InvalidVersionError,
+    PolicyDeniedError,
+)
 from .handlers import TCPHandler
 from .logger import get_logger
 from .models import BindAddress, DetailedAddress, Request, SocketAddress
 from .relays import TCPRelay, UDPRelay
 from .utils import (
+    WarningRateLimiter,
     format_connection_established,
     generate_failed_reply,
     generate_succeeded_reply,
@@ -33,6 +43,16 @@ _EXPECTED_ERRORS: Final = (OSError, InvalidRequestError, InvalidVersionError)
 
 # What socketserver passes as a request: a connected socket for a TCP server, (data, socket) for a UDP one
 SocketServerRequest: TypeAlias = socket.socket | tuple[bytes, socket.socket]
+
+
+def _log_failure(level: int, msg: str, *args: object, exc: BaseException) -> None:
+    """
+    Logs an expected failure at level without a traceback, and anything else as an ERROR with one.
+    """
+    if isinstance(exc, _EXPECTED_ERRORS):
+        logger.log(level, msg, *args)
+    else:
+        logger.error(msg, *args, exc_info=exc)
 
 
 def _tcp_socket(request: SocketServerRequest) -> socket.socket:
@@ -77,13 +97,10 @@ class ThreadingTCPServer(ThreadingMixIn, TCPServer):
         # Read before binding, so an invalid value can't leave a listening socket behind
         self.max_connections = max_connections()
         self._connection_semaphore = threading.BoundedSemaphore(self.max_connections)
-        # Only touched by process_request(), which socketserver calls from the serving thread alone
-        self._rejected_since_warning = 0
-        self._next_limit_warning = 0.0
-        # Touched by every handler thread that denies a destination
-        self._policy_warning_lock = threading.Lock()
-        self._denied_since_warning = 0
-        self._next_policy_warning = 0.0
+        self._limit_warnings = WarningRateLimiter(CONNECTION_LIMIT_WARNING_INTERVAL)
+        self._policy_warnings = WarningRateLimiter(POLICY_DENIED_WARNING_INTERVAL)
+        self._timeout_warnings = WarningRateLimiter(HANDSHAKE_TIMEOUT_WARNING_INTERVAL)
+        self._auth_warnings = WarningRateLimiter(AUTH_FAILED_WARNING_INTERVAL)
         super().__init__(server_address, handler_class, bind_and_activate)
         # Daemon request threads aren't tracked by ThreadingMixIn, so track their sockets for shutdown.
         self._active_requests: set[socket.socket] = set()
@@ -93,16 +110,13 @@ class ThreadingTCPServer(ThreadingMixIn, TCPServer):
         """
         Closes a connection over the limit, warning at most once per CONNECTION_LIMIT_WARNING_INTERVAL.
         """
-        self._rejected_since_warning += 1
-        now = time.monotonic()
-        if now >= self._next_limit_warning:
+        rejected = self._limit_warnings.hit()
+        if rejected is not None:
             logger.warning(
                 "Connection limit of %s reached: rejected %s connection(s) since the last warning",
                 self.max_connections,
-                self._rejected_since_warning,
+                rejected,
             )
-            self._rejected_since_warning = 0
-            self._next_limit_warning = now + CONNECTION_LIMIT_WARNING_INTERVAL
         self.shutdown_request(request)
 
     def log_policy_denial(self, client_ip: str, dst: DetailedAddress) -> None:
@@ -110,25 +124,41 @@ class ThreadingTCPServer(ThreadingMixIn, TCPServer):
         Logs a destination the policy denied, as a WARNING at most once per POLICY_DENIED_WARNING_INTERVAL and
         otherwise at DEBUG, so a scanning client can't flood the log.
         """
-        with self._policy_warning_lock:
-            now = time.monotonic()
-            if now < self._next_policy_warning:
-                self._denied_since_warning += 1
-                suppressed = None
-            else:
-                suppressed = self._denied_since_warning
-                self._denied_since_warning = 0
-                self._next_policy_warning = now + POLICY_DENIED_WARNING_INTERVAL
-        if suppressed is None:
+        denied = self._policy_warnings.hit()
+        if denied is None:
             logger.debug("Denied %s -> %s", client_ip, dst)
             return
         message = (
             f"Denied {client_ip} -> {dst}: loopback, link-local and unspecified destinations are blocked; "
             "set SOCKS5_ALLOW_LOOPBACK=true to allow them"
         )
-        if suppressed:
-            message += f" ({suppressed} more denied since the last warning)"
+        if denied > 1:
+            message += f" ({denied - 1} more denied since the last warning)"
         logger.warning(message)
+
+    def log_handshake_timeout(self, client_ip: str, stage: str) -> None:
+        """
+        Logs a client that didn't finish its handshake in time, as a WARNING at most once per
+        HANDSHAKE_TIMEOUT_WARNING_INTERVAL and otherwise at DEBUG, so idle connections can't flood the log.
+        """
+        timed_out = self._timeout_warnings.hit()
+        if timed_out is None:
+            logger.debug("Handshake timed out for %s %s", client_ip, stage)
+            return
+        logger.warning("%s handshake(s) timed out since the last warning (latest: %s %s)", timed_out, client_ip, stage)
+
+    def log_auth_failure(self, client_ip: str) -> None:
+        """
+        Logs a client that sent the wrong username or password, as a WARNING at most once per
+        AUTH_FAILED_WARNING_INTERVAL and otherwise at DEBUG, so a brute-force attempt can't flood the log.
+        """
+        failures = self._auth_warnings.hit()
+        if failures is None:
+            logger.debug("Authentication failed for client %s", client_ip)
+            return
+        logger.warning(
+            "Authentication failed for client %s (%s failure(s) since the last warning)", client_ip, failures
+        )
 
     def handle_error(self, request: SocketServerRequest, client_address: SocketAddress) -> None:  # noqa: ARG002 - keeps socketserver.BaseServer's signature
         """
@@ -138,7 +168,7 @@ class ThreadingTCPServer(ThreadingMixIn, TCPServer):
         if e is not None and is_routine_disconnect(e):
             logger.debug("Client %s disconnected: %s", client_address[0], e)
         elif isinstance(e, _EXPECTED_ERRORS):
-            logger.error("Error serving %s: %s", client_address[0], e)
+            logger.debug("Error serving %s: %s", client_address[0], e)
         else:
             logger.error("Unhandled error serving %s", client_address[0], exc_info=e)
 
@@ -208,8 +238,15 @@ class TCPProxyServer(StreamRequestHandler):
         deadline = time.monotonic() + handshake_timeout()
         request_handler = TCPHandler(self.connection, deadline=deadline)
 
-        if not request_handler.handle_request():
-            # TCPHandler has already logged why, at the right level
+        try:
+            handshake_ok = request_handler.handle_request()
+        except HandshakeTimeoutError:
+            self.server.log_handshake_timeout(self.client_address[0], "during the greeting or authentication")
+            handshake_ok = False
+        except AuthenticationFailedError:
+            self.server.log_auth_failure(self.client_address[0])
+            handshake_ok = False
+        if not handshake_ok:
             logger.debug("Handshake failed")
             self.server.shutdown_request(self.request)
             return
@@ -239,12 +276,12 @@ class TCPProxyServer(StreamRequestHandler):
             return request_handler.parse_request()
         except HandshakeTimeoutError:
             # The client never finished its request, so it gets no reply
-            logger.warning("Handshake timed out waiting for the request")
-        except Exception as e:
+            self.server.log_handshake_timeout(self.client_address[0], "waiting for the request")
+        except Exception as e:  # noqa: BLE001 - _log_failure gives anything unexpected a traceback
             if is_routine_disconnect(e):
                 logger.debug("Client disconnected before finishing its request: %s", e)
             else:
-                logger.error("Failed to parse SOCKS5 request: %s", e, exc_info=not isinstance(e, _EXPECTED_ERRORS))
+                _log_failure(logging.DEBUG, "Failed to parse SOCKS5 request: %s", e, exc=e)
             self._send_error_reply(generate_failed_reply(AddressTypeCodes.IPv4, reply_code_for(e)))
         return None
 
@@ -264,23 +301,23 @@ class TCPProxyServer(StreamRequestHandler):
                 self.handle_udp_associate(dst_request.address)
 
             else:
+                logger.debug("Unsupported command 0x%02x", dst_request.command)
                 self._send_error_reply(generate_failed_reply(atyp, ReplyCodes.COMMAND_NOT_SUPPORTED))
 
-        except Exception as e:
-            exc_info = not isinstance(e, _EXPECTED_ERRORS)
+        except Exception as e:  # noqa: BLE001 - _log_failure gives anything unexpected a traceback
             if self._reply_sent:
                 if is_routine_disconnect(e):
                     logger.debug("Client disconnected after the reply to the %s request: %s", dst_request.address, e)
                 else:
-                    logger.error(
-                        "Error after replying to the %s request: %s", dst_request.address, e, exc_info=exc_info
+                    _log_failure(
+                        logging.DEBUG, "Error after replying to the %s request: %s", dst_request.address, e, exc=e
                     )
                 return
             reply_code = reply_code_for(e)
             if isinstance(e, PolicyDeniedError):
                 self.server.log_policy_denial(self.client.ip, dst_request.address)
             else:
-                logger.error("%s for %s: %s", reply_code.name, dst_request.address, e, exc_info=exc_info)
+                _log_failure(logging.INFO, "%s for %s: %s", reply_code.name, dst_request.address, e, exc=e)
             self._send_error_reply(generate_failed_reply(atyp, reply_code))
 
     def handle_connect(self, dst_address: DetailedAddress) -> None:
@@ -313,7 +350,7 @@ class TCPProxyServer(StreamRequestHandler):
         """
         Handles BIND command.
         """
-        logger.error("BIND command not supported")
+        logger.debug("BIND command not supported")
         self._send_error_reply(generate_failed_reply(address.address_type, ReplyCodes.COMMAND_NOT_SUPPORTED))
 
     def _send_success_reply(self, address_type: AddressTypeCodes, bind_address: BindAddress) -> None:
@@ -338,7 +375,7 @@ class TCPProxyServer(StreamRequestHandler):
             if is_routine_disconnect(e):
                 logger.debug("Client disconnected before the reply: %s", e)
             else:
-                logger.error("Error sending reply: %s", e)
+                logger.debug("Error sending reply: %s", e)
 
     def finish(self) -> None:
         """

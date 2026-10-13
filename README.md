@@ -104,7 +104,14 @@ CLOSED | 172.17.0.1:51234 -> example.com:443 (93.184.216.34) | up=517 B down=104
 
 `up` counts bytes from the client to the destination, `down` the other way. The destination is the hostname the client sent, with the address it resolved to, or just the IP the client sent: the proxy never does reverse-DNS lookups. A UDP association logs the same two lines: it closes with its TCP control connection, and `up` and `down` count the datagram payloads relayed. Individual UDP datagrams are logged at `debug`.
 
-A client that disconnects mid-handshake is logged at `debug` only; unexpected errors are logged at ERROR with a traceback. Colours are used only when stderr is a terminal. Nothing is written to disk unless `SOCKS5_LOG_FILE` is set.
+Levels mean:
+
+- `error`: a fault in the proxy itself, such as an unexpected exception (with a traceback) or a port it can't bind.
+- `warning`: something to act on, such as the connection limit, a denied destination, handshake timeouts or failed logins. Those a client can repeat are logged once every 10 s, with a count.
+- `info`: the CONNECTION and CLOSED lines, plus the reply code when a destination refuses or doesn't answer.
+- `debug`: malformed requests, unsupported commands, clients hanging up mid-handshake, and individual UDP datagrams.
+
+Colours are used only when stderr is a terminal. Nothing is written to disk unless `SOCKS5_LOG_FILE` is set.
 
 ## Docker
 

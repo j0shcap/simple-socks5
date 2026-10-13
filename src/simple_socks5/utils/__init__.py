@@ -5,6 +5,7 @@ from .addresses import (
     map_address_to_bytes,
 )
 from .logs import (
+    WarningRateLimiter,
     format_connection_closed,
     format_connection_established,
     format_relay,
@@ -20,6 +21,7 @@ from .sockets import (
 )
 
 __all__ = [
+    "WarningRateLimiter",
     "format_connection_closed",
     "format_connection_established",
     "format_relay",
