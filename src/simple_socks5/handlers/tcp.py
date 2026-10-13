@@ -40,6 +40,10 @@ class TCPHandler(BaseHandler):
 
         Returns:
             bool: True if the handshake was successful, False otherwise.
+
+        Raises:
+            HandshakeTimeoutError: The client didn't finish before the deadline.
+            AuthenticationFailedError: The client sent the wrong username or password, and was told so.
         """
         try:
             # Parses client VER, NMETHODS, METHODS

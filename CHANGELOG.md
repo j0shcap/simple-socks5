@@ -36,9 +36,12 @@ to make the proxy safer; each such change is marked **Behaviour change** and is 
   commands and clients hanging up log at DEBUG, and a destination that refuses or doesn't answer
   logs at INFO with the reply code. `SOCKS5_LOG_FILE`, which keeps ERROR and above, no longer
   fills up with client mistakes.
-- Handshake-timeout and failed-login warnings are rate-limited to one line every 10 s, with a count
-  of how many happened since the last one, so idle or brute-force clients can't flood the log.
-- `Authenticated user` logs at DEBUG, so at INFO a connection logs only its CONNECTION and CLOSED lines.
+- **Behaviour change:** handshake-timeout and failed-login warnings are rate-limited to one line
+  every 10 s, with a count of how many happened since the last one, so idle or brute-force clients
+  can't flood the log. If you ban IPs from those lines, set `LOGGING_LEVEL=debug` (or `-L debug`):
+  every failure is still logged there, with the client's IP.
+- **Behaviour change:** `Authenticated user` logs at DEBUG, so at INFO a connection logs only its
+  CONNECTION and CLOSED lines.
 
 ### Fixed
 - When the server can't start (for example, the port is already in use), it now exits with code 1
