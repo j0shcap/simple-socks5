@@ -58,6 +58,7 @@ CONNECTION_LIMIT_WARNING_INTERVAL: Final[float] = 10.0  # seconds between "conne
 POLICY_DENIED_WARNING_INTERVAL: Final[float] = 10.0  # seconds between "destination denied" warnings
 HANDSHAKE_TIMEOUT_WARNING_INTERVAL: Final[float] = 10.0  # seconds between "handshake timed out" warnings
 AUTH_FAILED_WARNING_INTERVAL: Final[float] = 10.0  # seconds between "authentication failed" warnings
+DNS_SATURATED_WARNING_INTERVAL: Final[float] = 10.0  # seconds between "DNS lookups are not finishing" warnings
 
 
 def _positive_int_env(name: str, default: int) -> int:
@@ -102,6 +103,9 @@ RELAY_WRITE_TIMEOUT: Final[float] = 300.0  # seconds
 LOG_FILE_MAX_BYTES: Final[int] = 1048576  # 1 MB
 LOG_FILE_BACKUP_COUNT: Final[int] = 5
 DNS_LOOKUP_TIMEOUT: Final[float] = 2.0  # seconds
+# Lookup threads still running; above the default connection limit, so it is reached only when lookups hang
+MAX_PENDING_DNS_LOOKUPS: Final[int] = 256
+MAX_CONNECT_ATTEMPTS: Final[int] = 4  # addresses of one hostname tried per CONNECT, each with SOCKS5_CONNECT_TIMEOUT
 UDP_RECV_TIMEOUT: Final[int] = 120  # seconds
 UDP_FORWARD_TIMEOUT: Final[int] = 10  # seconds
 SHUTDOWN_GRACE_PERIOD: Final[float] = 5.0  # seconds in-flight connections get after SIGTERM/SIGINT

@@ -2,11 +2,10 @@ import contextlib
 import selectors
 import socket
 
-from ..constants import RELAY_BUFFER_SIZE, RELAY_WRITE_TIMEOUT, TCP_SELECTOR_TIMEOUT, connect_timeout
+from ..constants import RELAY_BUFFER_SIZE, RELAY_WRITE_TIMEOUT, TCP_SELECTOR_TIMEOUT
 from ..logger import get_logger
 from ..models import DetailedAddress
-from ..policy import check_destination
-from ..utils import generate_tcp_socket
+from ..resolver import connect_any
 from .base import BaseRelay
 
 logger = get_logger(__name__)
@@ -23,17 +22,13 @@ class TCPRelay(BaseRelay):
 
         Args:
             client_connection (socket.socket): The client socket.
-            dst_address (DetailedAddress): The address to connect to.
+            dst_address (DetailedAddress): The address to connect to. self.dst_address becomes the address reached.
         """
         super().__init__(client_connection, dst_address)
         self.selector: selectors.BaseSelector = selectors.DefaultSelector()
         sock: socket.socket | None = None
         try:
-            check_destination(dst_address.ip, dst_address.port)
-            sock = generate_tcp_socket(dst_address.address_type)
-            # Replaced by the relay's write timeout in _prepare_sockets()
-            sock.settimeout(connect_timeout())
-            sock.connect((dst_address.ip, dst_address.port))
+            sock, self.dst_address = connect_any(dst_address)
             self.selector.register(client_connection, selectors.EVENT_READ)
             self.selector.register(sock, selectors.EVENT_READ)
         except Exception:

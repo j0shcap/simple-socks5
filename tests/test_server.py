@@ -30,6 +30,7 @@ from simple_socks5.exceptions import (
     PolicyDeniedError,
 )
 from simple_socks5.models import BindAddress, DetailedAddress, Request
+from simple_socks5.resolver import Candidate
 from simple_socks5.server import TCPProxyServer, ThreadingTCPServer
 from simple_socks5.utils import WarningRateLimiter
 
@@ -50,6 +51,15 @@ def connect_request(address_type: AddressTypeCodes = AddressTypeCodes.IPv4) -> R
     ip = "::1" if address_type == AddressTypeCodes.IPv6 else "127.0.0.1"
     address = DetailedAddress(name=ip, ip=ip, port=80, address_type=address_type)
     return Request(version=5, command=CommandCodes.CONNECT.value, address=address)
+
+
+PROXY_BIND = BindAddress("127.0.0.1", 5000)
+
+
+def connected_relay(relay_cls: MagicMock, dst: DetailedAddress | None = None, bind: BindAddress = PROXY_BIND) -> None:
+    """Makes a patched relay class return a relay that connected to dst (by default the request's address)."""
+    relay_cls.return_value.get_proxy_address.return_value = bind
+    relay_cls.return_value.dst_address = dst or connect_request().address
 
 
 class TestHandleParseRequestErrors(unittest.TestCase):
@@ -218,7 +228,7 @@ class TestOneReply(unittest.TestCase):
         mock_instance.parse_request.return_value = Request(5, command.value, connect_request().address)
         handler, connection = make_proxy_handler()
         with patch(relay_class, autospec=True) as relay_cls:
-            relay_cls.return_value.get_proxy_address.return_value = BindAddress("127.0.0.1", 5000)
+            connected_relay(relay_cls)
             relay_cls.return_value.listen_and_relay.side_effect = relay_error
             handler.handle()
         return connection
@@ -245,7 +255,7 @@ class TestOneReply(unittest.TestCase):
         handler, connection = make_proxy_handler()
         connection.sendall.side_effect = BrokenPipeError
         with patch("simple_socks5.server.TCPRelay", autospec=True) as relay_cls:
-            relay_cls.return_value.get_proxy_address.return_value = BindAddress("127.0.0.1", 5000)
+            connected_relay(relay_cls)
             handler.handle()
         connection.sendall.assert_called_once_with(self.SUCCESS_REPLY)
         relay_cls.return_value.listen_and_relay.assert_not_called()
@@ -344,14 +354,13 @@ class TestDisconnectLogging(unittest.TestCase):
             self.run_handle(mock_tcp_handler_cls, connect_request())
         assert logs.records[0].exc_info
 
-    def test_connect_refused_logs_info_with_reply_code(self, mock_tcp_handler_cls: MagicMock) -> None:
+    def test_failed_connect_logs_no_connection_line(self, mock_tcp_handler_cls: MagicMock) -> None:
         with (
             patch("simple_socks5.server.TCPRelay", autospec=True, side_effect=ConnectionRefusedError("refused")),
             self.assertLogs("simple_socks5.server", level="DEBUG") as logs,
         ):
             self.run_handle(mock_tcp_handler_cls, connect_request())
         assert [(r.levelno, r.getMessage(), r.exc_info) for r in logs.records] == [
-            (logging.INFO, "CONNECTION | 127.0.0.1:9999 -> 127.0.0.1:80", None),
             (logging.INFO, "CONNECTION_REFUSED for 127.0.0.1:80: refused", None),
         ]
 
@@ -379,10 +388,85 @@ class TestDisconnectLogging(unittest.TestCase):
             patch("simple_socks5.server.TCPRelay", autospec=True) as relay_cls,
             self.assertLogs("simple_socks5.server", level="DEBUG") as logs,
         ):
-            relay_cls.return_value.get_proxy_address.return_value = BindAddress("127.0.0.1", 5000)
+            connected_relay(relay_cls)
             handler.handle()
         # Only the CONNECTION line, which is logged before the reply
         assert not [r for r in logs.records if r.exc_info or r.levelno > logging.INFO]
+
+
+@patch("simple_socks5.server.TCPHandler", autospec=True)
+class TestDomainDestinations(unittest.TestCase):
+    """A hostname is resolved when connecting; the reply and the log show the address that was used."""
+
+    DOMAIN = DetailedAddress(name="example.com", ip="example.com", port=80, address_type=AddressTypeCodes.DOMAIN_NAME)
+
+    def run_handle(self, mock_tcp_handler_cls: MagicMock, command: CommandCodes) -> NonCallableMagicMock:
+        """Returns the client connection mock."""
+        mock_instance = mock_tcp_handler_cls.return_value
+        mock_instance.handle_request.return_value = True
+        mock_instance.parse_request.return_value = Request(5, command.value, self.DOMAIN)
+        handler, connection = make_proxy_handler()
+        handler.handle()
+        return connection
+
+    def test_connect_logs_connection_after_connecting_with_resolved_address(
+        self, mock_tcp_handler_cls: MagicMock
+    ) -> None:
+        resolved = DetailedAddress(name="example.com", ip="2001:db8::1", port=80, address_type=AddressTypeCodes.IPv6)
+
+        def connect(_connection: socket.socket, dst: DetailedAddress) -> object:
+            assert dst == self.DOMAIN
+            logging.getLogger("simple_socks5.server").debug("connected")
+            return relay_cls.return_value
+
+        with (
+            patch("simple_socks5.server.TCPRelay", autospec=True, side_effect=connect) as relay_cls,
+            self.assertLogs("simple_socks5.server", level="DEBUG") as logs,
+        ):
+            connected_relay(relay_cls, resolved, BindAddress("2001:db8::2", 5000))
+            self.run_handle(mock_tcp_handler_cls, CommandCodes.CONNECT)
+        assert [r.getMessage() for r in logs.records] == [
+            "connected",
+            "CONNECTION | 127.0.0.1:9999 -> example.com:80 (2001:db8::1)",
+        ]
+
+    def test_domain_connect_reply_uses_connected_family(self, mock_tcp_handler_cls: MagicMock) -> None:
+        resolved = DetailedAddress(name="example.com", ip="192.0.2.1", port=80, address_type=AddressTypeCodes.IPv4)
+        with patch("simple_socks5.server.TCPRelay", autospec=True) as relay_cls:
+            connected_relay(relay_cls, resolved, BindAddress("192.0.2.9", 5000))
+            connection = self.run_handle(mock_tcp_handler_cls, CommandCodes.CONNECT)
+        connection.sendall.assert_called_once_with(b"\x05\x00\x00\x01\xc0\x00\x02\x09\x13\x88")
+
+    @patch("simple_socks5.server.resolve", autospec=True)
+    def test_udp_associate_domain_uses_first_resolved_family(
+        self, mock_resolve: MagicMock, mock_tcp_handler_cls: MagicMock
+    ) -> None:
+        mock_resolve.return_value = [
+            Candidate(socket.AF_INET6, ("2001:db8::1", 80, 0, 0)),
+            Candidate(socket.AF_INET, ("192.0.2.1", 80)),
+        ]
+        with patch("simple_socks5.server.UDPRelay", autospec=True) as relay_cls:
+            relay_cls.return_value.get_proxy_address.return_value = BindAddress("::", 5000)
+            connection = self.run_handle(mock_tcp_handler_cls, CommandCodes.UDP_ASSOCIATE)
+        relay_cls.assert_called_once_with(
+            connection,
+            DetailedAddress(name="example.com", ip="2001:db8::1", port=80, address_type=AddressTypeCodes.IPv6),
+        )
+        connection.sendall.assert_called_once_with(b"\x05\x00\x00\x04" + b"\x00" * 16 + b"\x13\x88")
+
+    @patch("simple_socks5.server.resolve", autospec=True)
+    def test_udp_associate_domain_lookup_failure_falls_back_to_ipv4(
+        self, mock_resolve: MagicMock, mock_tcp_handler_cls: MagicMock
+    ) -> None:
+        mock_resolve.side_effect = socket.gaierror(socket.EAI_NONAME, "nx")
+        with patch("simple_socks5.server.UDPRelay", autospec=True) as relay_cls:
+            relay_cls.return_value.get_proxy_address.return_value = BindAddress("0.0.0.0", 5000)
+            connection = self.run_handle(mock_tcp_handler_cls, CommandCodes.UDP_ASSOCIATE)
+        relay_cls.assert_called_once_with(
+            connection,
+            DetailedAddress(name="example.com", ip="example.com", port=80, address_type=AddressTypeCodes.IPv4),
+        )
+        connection.sendall.assert_called_once_with(b"\x05\x00\x00\x01\x00\x00\x00\x00\x13\x88")
 
 
 class TestHandleError(unittest.TestCase):

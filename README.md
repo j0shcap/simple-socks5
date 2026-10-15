@@ -84,7 +84,7 @@ simple-socks5 -H 0.0.0.0 -P 1080   # or: python -m simple_socks5 -H 0.0.0.0 -P 1
 | `SOCKS5_PASSWORD` | `mypassword` | Password for RFC 1929 authentication. An empty username or password never authenticates. |
 | `SOCKS5_AUTH_REQUIRED` | `false` | Set to `true` to require authentication. |
 | `SOCKS5_HANDSHAKE_TIMEOUT` | `10` | Seconds a client has to finish the greeting, authentication and request. A client that is still sending when it runs out is disconnected without a reply. |
-| `SOCKS5_CONNECT_TIMEOUT` | `10` | Seconds to connect to the destination. A timeout replies `0x04` (host unreachable). |
+| `SOCKS5_CONNECT_TIMEOUT` | `10` | Seconds to connect to each of the destination's addresses. A hostname's addresses are tried in turn, up to 4 of them, so it can take up to 4 times this before the client gets a reply. A timeout replies `0x04` (host unreachable). |
 | `SOCKS5_ALLOW_LOOPBACK` | `false` | Set to `true` to allow destinations on loopback, link-local and unspecified addresses. See [Destination policy](#destination-policy). |
 | `SOCKS5_MAX_CONNECTIONS` | `200` | Maximum concurrent client connections. Further connections are closed without a reply; a WARNING with the number rejected is logged at most every 10 seconds. |
 | `LOGGING_LEVEL` | `debug` (Docker image: `info`) | Logging level used when `-L` isn't given. Same choices as `-L`. |
@@ -95,21 +95,21 @@ Timeouts accept any positive number of seconds, such as `2.5`. `SOCKS5_MAX_CONNE
 
 ### Logging
 
-Logs go to stderr. Each connection logs one line when it opens and one when it closes:
+Logs go to stderr. Each connection logs one line once it has connected to the destination and one when it closes:
 
 ```
 CONNECTION | 172.17.0.1:51234 -> example.com:443 (93.184.216.34)
 CLOSED | 172.17.0.1:51234 -> example.com:443 (93.184.216.34) | up=517 B down=10485943 B | 2.31 s
 ```
 
-`up` counts bytes from the client to the destination, `down` the other way. The destination is the hostname the client sent, with the address it resolved to, or just the IP the client sent: the proxy never does reverse-DNS lookups. A UDP association logs the same two lines: it closes with its TCP control connection, and `up` and `down` count the datagram payloads relayed. Individual UDP datagrams are logged at `debug`.
+`up` counts bytes from the client to the destination, `down` the other way. The destination is the hostname the client sent, with the address the proxy connected to, or just the IP the client sent: the proxy never does reverse-DNS lookups. A CONNECT that fails logs only its reply code. A UDP association logs the same two lines: it closes with its TCP control connection, and `up` and `down` count the datagram payloads relayed. Individual UDP datagrams are logged at `debug`.
 
 Levels mean:
 
 - `error`: a fault in the proxy itself, such as an unexpected exception (with a traceback) or a port it can't bind.
-- `warning`: something to act on, such as the connection limit, a denied destination, handshake timeouts or failed logins. Those a client can repeat are logged once every 10 s, with a count.
+- `warning`: something to act on, such as the connection limit, a denied destination, handshake timeouts, failed logins or DNS lookups that aren't finishing. Those a client can repeat are logged once every 10 s, with a count.
 - `info`: the CONNECTION and CLOSED lines, plus the reply code when a destination refuses or doesn't answer.
-- `debug`: malformed requests, unsupported commands, clients hanging up mid-handshake, and individual UDP datagrams.
+- `debug`: malformed requests, unsupported commands, clients hanging up mid-handshake, individual UDP datagrams, and each address of a hostname that failed or was skipped before another one connected.
 
 Colours are used only when stderr is a terminal. Nothing is written to disk unless `SOCKS5_LOG_FILE` is set.
 
@@ -132,7 +132,7 @@ docker build --build-arg LOGGING_LEVEL=debug -t my-socks5 .
 
 The container always listens on `0.0.0.0` inside Docker; the `-p` flag decides which host interfaces the port is published on.
 
-Docker's default bridge network has no IPv6. A client that resolves names itself (`curl --socks5`, `socks5://` URLs) may send the proxy an IPv6 address, which then fails with reply `0x03` (network unreachable). Let the proxy resolve names instead (`curl --socks5-hostname`, `socks5h://`, "Proxy DNS when using SOCKS v5" in Firefox), or [enable IPv6](https://docs.docker.com/engine/daemon/ipv6/) on the container's network.
+Docker's default bridge network has no IPv6. A client that resolves names itself (`curl --socks5`, `socks5://` URLs) may send the proxy an IPv6 address, which then fails with reply `0x03` (network unreachable). Let the proxy resolve names instead (`curl --socks5-hostname`, `socks5h://`, "Proxy DNS when using SOCKS v5" in Firefox), or [enable IPv6](https://docs.docker.com/engine/daemon/ipv6/) on the container's network. The proxy tries a name's addresses in the order the system returns them, usually IPv6 first, and moves on to the next when one fails. It stops after 4 attempts, so a name with 4 or more IPv6 addresses listed before its IPv4 ones still needs IPv6.
 
 ### Version tags and pinning
 
@@ -226,7 +226,7 @@ By default the proxy refuses to connect or send to:
 - link-local: `169.254.0.0/16` and `fe80::/10`, which includes the cloud instance metadata service at `169.254.169.254`;
 - the IPv4-mapped (`::ffff:127.0.0.1`), IPv4-compatible (`::127.0.0.1`) and NAT64 (`64:ff9b::7f00:1`) forms of these.
 
-The check is made on the resolved IP address just before connecting, so `localhost` and names that resolve or rebind to these addresses are refused too. A refused CONNECT gets reply `0x02` (connection not allowed by ruleset), and a WARNING naming the client, the destination and `SOCKS5_ALLOW_LOOPBACK` is logged at most every 10 seconds. A refused UDP datagram is dropped and logged at DEBUG; the association stays open. Private ranges (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `fc00::/7`) and public addresses are allowed, so the proxy and other services stay reachable on the host's or container's own non-loopback addresses. A request with an empty domain name gets `0x04` (host unreachable).
+The check is made on each resolved IP address just before connecting to it, so `localhost` and names that resolve or rebind to these addresses are refused too. A refused address is skipped and the name's next address is tried. A CONNECT whose addresses are all refused gets reply `0x02` (connection not allowed by ruleset), and a WARNING naming the client, the destination and `SOCKS5_ALLOW_LOOPBACK` is logged at most every 10 seconds. A refused UDP datagram is dropped and logged at DEBUG; the association stays open. Private ranges (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `fc00::/7`) and public addresses are allowed, so the proxy and other services stay reachable on the host's or container's own non-loopback addresses. A request with an empty domain name gets `0x04` (host unreachable).
 
 With the Docker image on its default bridge network nothing changes for you: the container's loopback is the container itself, and services on the host are reached through a private address such as `host.docker.internal`. If you run the proxy directly on a host, or with `--network host`, and proxy to services on `localhost`, set `SOCKS5_ALLOW_LOOPBACK=true`. It lifts the whole policy above.
 

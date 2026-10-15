@@ -1,6 +1,5 @@
 import errno
 import logging
-import os
 import selectors
 import socket
 import unittest
@@ -12,6 +11,8 @@ from simple_socks5.constants import RELAY_BUFFER_SIZE, RELAY_WRITE_TIMEOUT, Addr
 from simple_socks5.exceptions import PolicyDeniedError
 from simple_socks5.models import DetailedAddress
 from simple_socks5.relays.tcp_relay import TCPRelay
+
+DOMAIN = DetailedAddress(name="example.com", ip="example.com", port=80, address_type=AddressTypeCodes.DOMAIN_NAME)
 
 
 def _event(sock: socket.socket) -> selectors.SelectorKey:
@@ -28,16 +29,19 @@ def _selector() -> NonCallableMagicMock:
     return selector
 
 
+RESOLVED = DetailedAddress(name="example.com", ip="93.184.216.34", port=80, address_type=AddressTypeCodes.IPv4)
+
+
 class TestTCPRelay(unittest.TestCase):
     @patch("simple_socks5.relays.tcp_relay.selectors.DefaultSelector", autospec=True)
-    @patch("simple_socks5.relays.tcp_relay.generate_tcp_socket", autospec=True)
+    @patch("simple_socks5.relays.tcp_relay.connect_any", autospec=True)
     def _create_relay(
-        self, mock_gen_socket: MagicMock, mock_selector_cls: MagicMock
+        self, mock_connect_any: MagicMock, mock_selector_cls: MagicMock
     ) -> tuple[TCPRelay, NonCallableMagicMock, NonCallableMagicMock, NonCallableMagicMock]:
         """Helper to create a TCPRelay with fully mocked sockets and selector."""
         mock_proxy_sock = _socket()
         mock_proxy_sock.getsockname.return_value = ("0.0.0.0", 5000)
-        mock_gen_socket.return_value = mock_proxy_sock
+        mock_connect_any.return_value = (mock_proxy_sock, RESOLVED)
 
         mock_selector: NonCallableMagicMock = create_autospec(selectors.BaseSelector, instance=True)
         mock_selector_cls.return_value = mock_selector
@@ -45,100 +49,55 @@ class TestTCPRelay(unittest.TestCase):
         client_conn = _socket()
         client_conn.getpeername.return_value = ("127.0.0.1", 1234)
 
-        dst = DetailedAddress(
-            name="example.com",
-            ip="93.184.216.34",
-            port=80,
-            address_type=AddressTypeCodes.IPv4,
-        )
-
-        relay = TCPRelay(client_conn, dst)
+        relay = TCPRelay(client_conn, DOMAIN)
+        mock_connect_any.assert_called_once_with(DOMAIN)
         return relay, client_conn, mock_proxy_sock, mock_selector
 
     def test_init_creates_selector_and_connects(self) -> None:
         relay, _client, proxy, selector = self._create_relay()
         assert relay.selector is not None
-        proxy.connect.assert_called_once_with(("93.184.216.34", 80))
+        assert relay.proxy_connection is proxy
         assert relay.get_proxy_address().port == 5000
         # Both sockets should be registered with the selector
         assert selector.register.call_count == 2
 
-    def test_connect_timeout_set_before_connect(self) -> None:
-        with patch.dict(os.environ, {"SOCKS5_CONNECT_TIMEOUT": "0.5"}):
-            _, _, proxy, _ = self._create_relay()
-        assert proxy.mock_calls[:2] == [call.settimeout(0.5), call.connect(("93.184.216.34", 80))]
+    def test_dst_address_is_the_resolved_address(self) -> None:
+        relay, _client, _proxy, _selector = self._create_relay()
+        assert relay.dst_address == RESOLVED
+        assert "example.com:80 (93.184.216.34)" in relay.closed_line()
+
+    @patch("simple_socks5.relays.tcp_relay.connect_any", autospec=True)
+    def test_init_closes_selector_on_connection_failure(self, mock_connect_any: MagicMock) -> None:
+        for error in (
+            ConnectionRefusedError(errno.ECONNREFUSED, "refused"),
+            TimeoutError("timed out"),
+            PolicyDeniedError("127.0.0.1", 80),
+            socket.gaierror(socket.EAI_NONAME, "nx"),
+        ):
+            with (
+                self.subTest(error=type(error).__name__),
+                patch(
+                    "simple_socks5.relays.tcp_relay.selectors.DefaultSelector", autospec=selectors.BaseSelector
+                ) as mock_sel_cls,
+            ):
+                mock_connect_any.side_effect = error
+                with pytest.raises(type(error)):
+                    TCPRelay(_socket(), DOMAIN)
+                mock_sel_cls.return_value.close.assert_called_once()
 
     @patch("simple_socks5.relays.tcp_relay.selectors.DefaultSelector", autospec=True)
-    @patch("simple_socks5.relays.tcp_relay.generate_tcp_socket", autospec=True)
-    def test_connect_timeout_closes_socket_and_selector(
-        self, mock_gen_socket: MagicMock, mock_sel_cls: MagicMock
-    ) -> None:
-        mock_gen_socket.return_value.connect.side_effect = TimeoutError("timed out")
-        dst = DetailedAddress(name="test", ip="10.255.255.1", port=80, address_type=AddressTypeCodes.IPv4)
-
-        with pytest.raises(TimeoutError):
-            TCPRelay(_socket(), dst)
-
-        mock_gen_socket.return_value.close.assert_called_once()
-        mock_sel_cls.return_value.close.assert_called_once()
-
-    @patch("simple_socks5.relays.tcp_relay.selectors.DefaultSelector", autospec=True)
-    @patch("simple_socks5.relays.tcp_relay.generate_tcp_socket", autospec=True)
-    def test_init_closes_selector_on_connection_failure(
-        self, mock_gen_socket: MagicMock, mock_sel_cls: MagicMock
-    ) -> None:
-        mock_selector = create_autospec(selectors.BaseSelector, instance=True)
-        mock_sel_cls.return_value = mock_selector
-        mock_gen_socket.return_value = _socket()
-        mock_gen_socket.return_value.connect.side_effect = ConnectionRefusedError
-
-        client_conn = _socket()
-        client_conn.getpeername.return_value = ("127.0.0.1", 1234)
-        dst = DetailedAddress(
-            name="test",
-            ip="1.2.3.4",
-            port=80,
-            address_type=AddressTypeCodes.IPv4,
-        )
-
-        with pytest.raises(ConnectionRefusedError):
-            TCPRelay(client_conn, dst)
-
-        mock_selector.close.assert_called_once()
-
-    @patch("simple_socks5.relays.tcp_relay.selectors.DefaultSelector", _selector)
-    @patch("simple_socks5.relays.tcp_relay.generate_tcp_socket", autospec=True)
-    def test_init_closes_proxy_socket_when_connect_fails(self, mock_gen_socket: MagicMock) -> None:
-        mock_proxy_sock = _socket()
-        mock_proxy_sock.connect.side_effect = ConnectionRefusedError
-        mock_gen_socket.return_value = mock_proxy_sock
-
-        client_conn = _socket()
-        client_conn.getpeername.return_value = ("127.0.0.1", 1234)
-        dst = DetailedAddress(
-            name="test",
-            ip="1.2.3.4",
-            port=80,
-            address_type=AddressTypeCodes.IPv4,
-        )
-
-        with pytest.raises(ConnectionRefusedError):
-            TCPRelay(client_conn, dst)
-
-        mock_proxy_sock.close.assert_called_once()
-
-    @patch("simple_socks5.relays.tcp_relay.selectors.DefaultSelector", autospec=True)
-    @patch("simple_socks5.relays.tcp_relay.generate_tcp_socket", autospec=True)
+    @patch("simple_socks5.relays.tcp_relay.connect_any", autospec=True)
     def test_init_closes_proxy_socket_when_register_fails(
-        self, mock_gen_socket: MagicMock, mock_sel_cls: MagicMock
+        self, mock_connect_any: MagicMock, mock_sel_cls: MagicMock
     ) -> None:
+        proxy = _socket()
+        mock_connect_any.return_value = (proxy, RESOLVED)
         mock_sel_cls.return_value.register.side_effect = [None, ValueError("Invalid file descriptor: -1")]
-        dst = DetailedAddress(name="test", ip="1.2.3.4", port=80, address_type=AddressTypeCodes.IPv4)
 
         with pytest.raises(ValueError, match="Invalid file descriptor"):
-            TCPRelay(_socket(), dst)
+            TCPRelay(_socket(), DOMAIN)
 
-        mock_gen_socket.return_value.close.assert_called_once()
+        proxy.close.assert_called_once()
         mock_sel_cls.return_value.close.assert_called_once()
 
     def test_relay_data_eof_triggers_cleanup(self) -> None:
@@ -347,41 +306,6 @@ class TestTCPRelay(unittest.TestCase):
 
         proxy.sendall.assert_called_once_with(b"request data")
         proxy.send.assert_not_called()
-
-
-@patch("simple_socks5.relays.tcp_relay.selectors.DefaultSelector", _selector)
-@patch("simple_socks5.relays.tcp_relay.generate_tcp_socket", autospec=True)
-class TestTCPRelayDestinationPolicy(unittest.TestCase):
-    def setUp(self) -> None:
-        environ = {k: v for k, v in os.environ.items() if not k.startswith("SOCKS5_")}
-        patcher = patch.dict(os.environ, environ, clear=True)
-        patcher.start()
-        self.addCleanup(patcher.stop)
-
-    def _dst(self, ip: str, address_type: AddressTypeCodes = AddressTypeCodes.IPv4) -> DetailedAddress:
-        return DetailedAddress(name="test", ip=ip, port=80, address_type=address_type)
-
-    def test_denied_destination_raises_before_socket(self, mock_gen_socket: MagicMock) -> None:
-        with (
-            patch(
-                "simple_socks5.relays.tcp_relay.selectors.DefaultSelector", autospec=selectors.BaseSelector
-            ) as mock_sel_cls,
-            pytest.raises(PolicyDeniedError),
-        ):
-            TCPRelay(_socket(), self._dst("169.254.169.254"))
-        mock_gen_socket.assert_not_called()
-        mock_sel_cls.return_value.close.assert_called_once()
-
-    def test_unresolved_hostname_raises_gaierror_without_connect(self, mock_gen_socket: MagicMock) -> None:
-        with pytest.raises(socket.gaierror):
-            TCPRelay(_socket(), self._dst("slow-dns.example"))
-        mock_gen_socket.assert_not_called()
-
-    def test_opt_out_connects_to_loopback(self, mock_gen_socket: MagicMock) -> None:
-        mock_gen_socket.return_value.getsockname.return_value = ("127.0.0.1", 5000)
-        with patch.dict(os.environ, {"SOCKS5_ALLOW_LOOPBACK": "true"}):
-            TCPRelay(_socket(), self._dst("::1", AddressTypeCodes.IPv6))
-        mock_gen_socket.return_value.connect.assert_called_once_with(("::1", 80))
 
 
 if __name__ == "__main__":

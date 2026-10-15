@@ -1,3 +1,4 @@
+import dataclasses
 import logging
 import socket
 import sys
@@ -29,11 +30,13 @@ from .handlers import TCPHandler
 from .logger import get_logger
 from .models import BindAddress, DetailedAddress, Request, SocketAddress
 from .relays import TCPRelay, UDPRelay
+from .resolver import resolve
 from .utils import (
     WarningRateLimiter,
     format_connection_established,
     generate_failed_reply,
     generate_succeeded_reply,
+    map_address_family_to_enum,
 )
 
 logger = get_logger(__name__)
@@ -53,6 +56,20 @@ def _log_failure(level: int, msg: str, *args: object, exc: BaseException) -> Non
         logger.log(level, msg, *args)
     else:
         logger.error(msg, *args, exc_info=exc)
+
+
+def _udp_family_address(dst: DetailedAddress) -> DetailedAddress:
+    """
+    Returns dst with the address type the UDP relay socket is created for. A hostname gets its first address's
+    family, or IPv4 if it doesn't resolve.
+    """
+    if dst.address_type != AddressTypeCodes.DOMAIN_NAME:
+        return dst
+    try:
+        first = resolve(dst.name, dst.port)[0]
+    except OSError:
+        return dataclasses.replace(dst, address_type=AddressTypeCodes.IPv4)
+    return dataclasses.replace(dst, ip=first.ip, address_type=map_address_family_to_enum(first.family))
 
 
 def _tcp_socket(request: SocketServerRequest) -> socket.socket:
@@ -265,7 +282,9 @@ class TCPProxyServer(StreamRequestHandler):
             name="Client",
             address_type=dst_request.address.address_type,
         )
-        self._log_connection(dst_request.address)
+        if dst_request.command != CommandCodes.CONNECT.value:
+            # A CONNECT is logged once it has connected, with the address it reached
+            self._log_connection(dst_request.address)
         self._dispatch(dst_request)
 
     def _read_request(self, request_handler: TCPHandler) -> Request | None:
@@ -324,11 +343,12 @@ class TCPProxyServer(StreamRequestHandler):
         """
         Handles CONNECT command.
         """
-        # Allocate port for TCP relay
+        # Connects to the first of dst_address's addresses that accepts
         tcp_relay = TCPRelay(self.connection, dst_address)
+        self._log_connection(tcp_relay.dst_address)
 
         # Send reply with bind address and port
-        self._send_success_reply(dst_address.address_type, tcp_relay.get_proxy_address())
+        self._send_success_reply(tcp_relay.dst_address.address_type, tcp_relay.get_proxy_address())
 
         # Start TCP relay
         tcp_relay.listen_and_relay()
@@ -338,10 +358,11 @@ class TCPProxyServer(StreamRequestHandler):
         Handles UDP ASSOCIATE command.
         """
         # Allocate port for UDP relay
-        udp_relay = UDPRelay(self.connection, dst_address)
+        relay_address = _udp_family_address(dst_address)
+        udp_relay = UDPRelay(self.connection, relay_address)
 
         # Send reply with allocated port and server IP
-        self._send_success_reply(dst_address.address_type, udp_relay.get_proxy_address())
+        self._send_success_reply(relay_address.address_type, udp_relay.get_proxy_address())
 
         # Start UDP relay
         udp_relay.listen_and_relay()

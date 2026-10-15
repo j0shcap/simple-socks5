@@ -4,7 +4,6 @@ import logging
 import os
 import socket
 import struct
-import threading
 import unittest
 from unittest.mock import MagicMock, NonCallableMagicMock, create_autospec, patch
 
@@ -210,10 +209,8 @@ class TestTCPRequestHandlerIPv4(unittest.TestCase):
 
     @patch("socket.socket.recv", autospec=True)
     @patch("simple_socks5.handlers.base.socket.getaddrinfo", autospec=True)
-    def test_parse_address_domain_name_ipv4(self, mock_getaddrinfo: MagicMock, mock_recv: MagicMock) -> None:
-        mock_getaddrinfo.return_value = [
-            (socket.AF_INET, socket.SOCK_STREAM, 0, "", ("93.184.216.34", 0)),
-        ]
+    def test_parse_address_domain_name_is_not_resolved(self, mock_getaddrinfo: MagicMock, mock_recv: MagicMock) -> None:
+        """The name is resolved when connecting, so a request is only bytes until then."""
         domain = "example.com"
         mock_recv.side_effect = [
             bytes([len(domain)]),
@@ -221,28 +218,11 @@ class TestTCPRequestHandlerIPv4(unittest.TestCase):
             struct.pack("!H", 80),
         ]
         result = self.handler._parse_address(AddressTypeCodes.DOMAIN_NAME.value)
-        assert result.ip == "93.184.216.34"
+        assert result.ip == domain
         assert result.port == 80
         assert result.name == domain
-        assert result.address_type == AddressTypeCodes.IPv4
-
-    @patch("socket.socket.recv", autospec=True)
-    @patch("simple_socks5.handlers.base.socket.getaddrinfo", autospec=True)
-    def test_parse_address_domain_name_ipv6(self, mock_getaddrinfo: MagicMock, mock_recv: MagicMock) -> None:
-        mock_getaddrinfo.return_value = [
-            (socket.AF_INET6, socket.SOCK_STREAM, 0, "", ("2606:4700::6812:1a78", 0, 0, 0)),
-        ]
-        domain = "ipv6only.example.com"
-        mock_recv.side_effect = [
-            bytes([len(domain)]),
-            domain.encode(),
-            struct.pack("!H", 443),
-        ]
-        result = self.handler._parse_address(AddressTypeCodes.DOMAIN_NAME.value)
-        assert result.ip == "2606:4700::6812:1a78"
-        assert result.port == 443
-        assert result.name == domain
-        assert result.address_type == AddressTypeCodes.IPv6
+        assert result.address_type == AddressTypeCodes.DOMAIN_NAME
+        mock_getaddrinfo.assert_not_called()
 
     @patch("socket.socket.recv", autospec=True)
     @patch(
@@ -277,63 +257,6 @@ class TestTCPRequestHandlerIPv4(unittest.TestCase):
     def test_parse_address_invalid(self) -> None:
         with pytest.raises(InvalidRequestError):
             self.handler._parse_address(0xFF)
-
-    @patch("simple_socks5.handlers.base.DNS_LOOKUP_TIMEOUT", 0.1)
-    @patch("simple_socks5.handlers.base.socket.getaddrinfo", autospec=True)
-    def test_resolve_hostname_timeout_returns_name(self, mock_getaddrinfo: MagicMock) -> None:
-        """Forward DNS should return the name with IPv4 default if the lookup takes too long."""
-        done = threading.Event()
-
-        def slow_lookup(*_args: object, **_kwargs: object) -> list[tuple[int, int, int, str, tuple[str, int]]]:
-            done.wait(timeout=5)
-            return [(socket.AF_INET, socket.SOCK_STREAM, 0, "", ("93.184.216.34", 0))]
-
-        mock_getaddrinfo.side_effect = slow_lookup
-        ip, atyp = self.handler._resolve_hostname("example.com")
-        assert ip == "example.com"
-        assert atyp == AddressTypeCodes.IPv4.value
-        done.set()
-
-    @patch("simple_socks5.handlers.base.socket.getaddrinfo", autospec=True)
-    def test_resolve_hostname_ipv4(self, mock_getaddrinfo: MagicMock) -> None:
-        mock_getaddrinfo.return_value = [
-            (socket.AF_INET, socket.SOCK_STREAM, 0, "", ("93.184.216.34", 0)),
-        ]
-        ip, atyp = self.handler._resolve_hostname("example.com")
-        assert ip == "93.184.216.34"
-        assert atyp == AddressTypeCodes.IPv4.value
-
-    @patch("simple_socks5.handlers.base.socket.getaddrinfo", autospec=True)
-    def test_resolve_hostname_ipv6(self, mock_getaddrinfo: MagicMock) -> None:
-        mock_getaddrinfo.return_value = [
-            (socket.AF_INET6, socket.SOCK_STREAM, 0, "", ("2606:4700::6812:1a78", 0, 0, 0)),
-        ]
-        ip, atyp = self.handler._resolve_hostname("example.com")
-        assert ip == "2606:4700::6812:1a78"
-        assert atyp == AddressTypeCodes.IPv6.value
-
-    @patch("simple_socks5.handlers.base.socket.getaddrinfo", autospec=True)
-    def test_resolve_hostname_failure_returns_name(self, mock_getaddrinfo: MagicMock) -> None:
-        mock_getaddrinfo.side_effect = OSError("no DNS")
-        ip, atyp = self.handler._resolve_hostname("example.com")
-        assert ip == "example.com"
-        assert atyp == AddressTypeCodes.IPv4.value
-
-    @patch("simple_socks5.handlers.base.socket.getaddrinfo", autospec=True)
-    def test_resolve_hostname_non_str_sockaddr_is_unresolved(self, mock_getaddrinfo: MagicMock) -> None:
-        """A Python built without IPv6 support reports AF_INET6 results as (int, bytes) sockaddrs."""
-        mock_getaddrinfo.return_value = [(socket.AF_INET6, socket.SOCK_STREAM, 0, "", (10, b"\x00" * 16))]
-        ip, atyp = self.handler._resolve_hostname("example.com")
-        assert ip == "example.com"
-        assert atyp == AddressTypeCodes.IPv4.value
-
-    @patch("simple_socks5.handlers.base.socket.getaddrinfo", autospec=True)
-    def test_resolve_hostname_empty_result_returns_name(self, mock_getaddrinfo: MagicMock) -> None:
-        """getaddrinfo returning empty list should fall back to name with IPv4."""
-        mock_getaddrinfo.return_value = []
-        ip, atyp = self.handler._resolve_hostname("example.com")
-        assert ip == "example.com"
-        assert atyp == AddressTypeCodes.IPv4.value
 
 
 class FakeClock:
@@ -400,18 +323,18 @@ class TestRecvExactDeadline(unittest.TestCase):
 
 
 class TestParseAddress(unittest.TestCase):
-    """Typed errors for bad addresses, and every request byte read before any DNS lookup."""
+    """Typed errors for bad addresses, and no DNS lookup while parsing."""
 
     def setUp(self) -> None:
         self.events: list[str] = []
         self.connection = connection_mock()
         self.handler = BaseHandler(self.connection)
 
-        def resolve_hostname(_name: str) -> tuple[str, int]:
+        def getaddrinfo(*_args: object) -> list[object]:
             self.events.append("lookup")
-            return "1.2.3.4", AddressTypeCodes.IPv4.value
+            return []
 
-        patcher = patch.object(self.handler, "_resolve_hostname", autospec=True, side_effect=resolve_hostname)
+        patcher = patch("simple_socks5.handlers.base.socket.getaddrinfo", autospec=True, side_effect=getaddrinfo)
         patcher.start()
         self.addCleanup(patcher.stop)
 
@@ -442,14 +365,9 @@ class TestParseAddress(unittest.TestCase):
         # The port is read, so the whole request is consumed, and nothing is looked up
         assert self.events == ["recv"] * 2
 
-    def test_port_read_before_lookup(self) -> None:
-        self.feed(b"\x07", b"example", struct.pack("!H", 80))
-        address = self.handler._parse_address(AddressTypeCodes.DOMAIN_NAME.value)
-        assert address.port == 80
-        assert self.events == ["recv"] * 3 + ["lookup"]
-
-    def test_ip_literals_need_no_lookup(self) -> None:
+    def test_addresses_need_no_lookup(self) -> None:
         cases = {
+            AddressTypeCodes.DOMAIN_NAME: (b"\x07", b"example", struct.pack("!H", 80)),
             AddressTypeCodes.IPv4: (socket.inet_aton("1.2.3.4"), struct.pack("!H", 80)),
             AddressTypeCodes.IPv6: (socket.inet_pton(socket.AF_INET6, "::1"), struct.pack("!H", 80)),
         }
