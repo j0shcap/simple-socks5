@@ -15,10 +15,7 @@ from .replies import (
     generate_failed_reply,
     generate_succeeded_reply,
 )
-from .sockets import (
-    generate_tcp_socket,
-    generate_udp_socket,
-)
+from .sockets import generate_udp_socket
 
 __all__ = [
     "WarningRateLimiter",
@@ -28,7 +25,6 @@ __all__ = [
     "generate_connection_method_response",
     "generate_failed_reply",
     "generate_succeeded_reply",
-    "generate_tcp_socket",
     "generate_udp_socket",
     "map_address_enum_to_socket_family",
     "map_address_family_to_enum",

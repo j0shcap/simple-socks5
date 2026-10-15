@@ -14,7 +14,6 @@ from simple_socks5.utils import (
     generate_connection_method_response,
     generate_failed_reply,
     generate_succeeded_reply,
-    generate_tcp_socket,
     map_address_enum_to_socket_family,
     map_address_int_to_enum,
     map_address_to_bytes,
@@ -166,32 +165,6 @@ class TestSuccessUtils(unittest.TestCase):
         # VER=05, REP=00, RSV=00, ATYP=04, then 16-byte IPv6 addr, then port
         expected = b"\x05\x00\x00\x04\x20\x01\x0d\xb8\x85\xa3\x00\x00\x00\x00\x8a\x2e\x03\x70\x73\x34\x01\xbb"
         assert expected_reply == expected
-
-
-class TestGenerateSocketUtils(unittest.TestCase):
-    def test_generate_tcp_socket__ipv4(self) -> None:
-        sock = generate_tcp_socket(AddressTypeCodes.IPv4)
-        self.addCleanup(sock.close)
-        assert isinstance(sock, socket.socket)
-        assert sock.family == socket.AF_INET
-        assert sock.type == socket.SOCK_STREAM
-
-    def test_generate_tcp_socket__ipv6(self) -> None:
-        sock = generate_tcp_socket(AddressTypeCodes.IPv6)
-        self.addCleanup(sock.close)
-        assert isinstance(sock, socket.socket)
-        assert sock.family == socket.AF_INET6
-        assert sock.type == socket.SOCK_STREAM
-
-    def test_generate_tcp_socket__domain_name(self) -> None:
-        address = DetailedAddress(
-            name="Test Localhost",
-            ip="google.com",
-            port=80,
-            address_type=AddressTypeCodes.DOMAIN_NAME,
-        )
-        with pytest.raises(ValueError, match="Unknown address type"):
-            generate_tcp_socket(address.address_type)
 
 
 class TestConnectionLogLines(unittest.TestCase):

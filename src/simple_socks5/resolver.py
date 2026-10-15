@@ -89,9 +89,12 @@ def connect_any(dst: DetailedAddress) -> tuple[socket.socket, DetailedAddress]:
             continue
         connected = dataclasses.replace(dst, ip=candidate.ip, address_type=map_address_family_to_enum(candidate.family))
         return sock, connected
-    if last_error is not None:
+    if last_error is None:
+        raise PolicyDeniedError(dst.name, dst.port)
+    try:
         raise last_error
-    raise PolicyDeniedError(dst.name, dst.port)
+    finally:
+        del last_error  # Its traceback references this frame; the cycle would keep the client's socket alive
 
 
 def _candidates(dst: DetailedAddress) -> list[Candidate]:
@@ -104,7 +107,7 @@ def _candidates(dst: DetailedAddress) -> list[Candidate]:
 def _connect(sock: socket.socket, sockaddr: SocketAddress, timeout: float) -> None:
     """Connects sock to sockaddr within timeout seconds, closing it if that fails."""
     try:
-        # Replaced by the relay's write timeout once relaying starts
+        # Replaced by the relay's write timeout in TCPRelay._prepare_sockets()
         sock.settimeout(timeout)
         sock.connect(sockaddr)
     except BaseException:
@@ -171,8 +174,10 @@ def _bounded_lookup(fn: Callable[[], T], label: str) -> T:
     if thread.is_alive():
         logger.debug("DNS lookup timed out for %s", label)
         raise socket.gaierror(socket.EAI_AGAIN, f"DNS lookup for {label!r} timed out")
-    if errors:
-        error = errors[0]
+    if not errors:
+        return results[0]
+    error = errors.pop()
+    try:
         if isinstance(error, OSError):
             raise error
         if isinstance(error, UnicodeError):
@@ -180,4 +185,5 @@ def _bounded_lookup(fn: Callable[[], T], label: str) -> T:
             raise socket.gaierror(socket.EAI_NONAME, f"invalid hostname {label!r}: {error}") from error
         logger.error("DNS lookup error for %s", label, exc_info=error)
         raise socket.gaierror(socket.EAI_FAIL, f"DNS lookup for {label!r} failed") from error
-    return results[0]
+    finally:
+        del error  # As in connect_any(): the raised traceback references this frame
