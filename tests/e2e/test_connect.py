@@ -26,10 +26,37 @@ def test_connect_domain_ipv4_literal_echo(proxy: ProxyHandle, echo_origin: Origi
         _assert_echo(tunnel)
 
 
-@pytest.mark.xfail(strict=False, reason="only the first getaddrinfo result is tried; localhost may be ::1")
+def _localhost_addresses(port: int) -> list[str]:
+    """localhost's addresses in the order the proxy tries them: it makes the same getaddrinfo() call."""
+    infos = socket.getaddrinfo("localhost", port, socket.AF_UNSPEC, socket.SOCK_STREAM)
+    return list(dict.fromkeys(str(sockaddr[0]) for *_, sockaddr in infos))
+
+
+def _assert_localhost_reaches(proxy: ProxyHandle, origin: Origin, atyp: int, bnd_addr: str) -> None:
+    with proxy.connect() as sock:
+        assert sc.greet(sock, [sc.METHOD_NO_AUTH]) == sc.METHOD_NO_AUTH
+        sc.send_request(sock, sc.CMD_CONNECT, sc.ATYP_DOMAIN, "localhost", origin.port)
+
+        reply = sc.read_reply(sock)
+
+        assert (reply.rep, reply.atyp, reply.bnd_addr) == (sc.REP_SUCCEEDED, atyp, bnd_addr)
+        _assert_echo(sock)
+
+
 def test_connect_domain_localhost_echo(proxy: ProxyHandle, echo_origin: Origin) -> None:
-    with sc.open_tunnel(proxy.address, "localhost", echo_origin.port) as tunnel:
-        _assert_echo(tunnel)
+    """An origin listening only on 127.0.0.1 is reachable as localhost when the name resolves to ::1 first."""
+    addresses = _localhost_addresses(echo_origin.port)
+    if addresses[:1] != ["::1"] or "127.0.0.1" not in addresses:
+        pytest.skip(f"localhost resolves to {addresses} here, not ::1 then 127.0.0.1")
+    _assert_localhost_reaches(proxy, echo_origin, sc.ATYP_IPV4, "127.0.0.1")
+
+
+def test_connect_domain_localhost_v6_only_origin(proxy: ProxyHandle, echo_origin_v6: Origin) -> None:
+    """The fallback in the other direction, for resolvers that return 127.0.0.1 first."""
+    addresses = _localhost_addresses(echo_origin_v6.port)
+    if not {"::1", "127.0.0.1"} <= set(addresses):
+        pytest.skip(f"localhost resolves to {addresses} here, not both ::1 and 127.0.0.1")
+    _assert_localhost_reaches(proxy, echo_origin_v6, sc.ATYP_IPV6, "::1")
 
 
 def test_connect_ipv6_echo(proxy: ProxyHandle, echo_origin_v6: Origin) -> None:
