@@ -42,12 +42,24 @@ to make the proxy safer; each such change is marked **Behaviour change** and is 
   every failure is still logged there, with the client's IP.
 - **Behaviour change:** `Authenticated user` logs at DEBUG, so at INFO a connection logs only its
   CONNECTION and CLOSED lines.
+- **Behaviour change:** a CONNECT logs its `CONNECTION` line once the destination has connected,
+  showing the address it connected to. A CONNECT that fails logs only its reply-code line, so
+  `CONNECTION` lines no longer count failed attempts.
 
 ### Fixed
 - When the server can't start (for example, the port is already in use), it now exits with code 1
   under `python -S` too. Before, it crashed with `NameError: name 'exit' is not defined`.
 - IPv6 addresses are shown in brackets in the `Server started on` line and the UDP `RELAY` debug
   lines, for example `[::]:1080` instead of `:::1080`.
+- A CONNECT by hostname tries every address the name resolves to, in the order the system returns
+  them, until one connects (at most 4, each with `SOCKS5_CONNECT_TIMEOUT`). Before, only the first
+  was tried, so `localhost` (which usually resolves to `::1` first) failed with "connection refused"
+  against a server listening on 127.0.0.1 only, and dual-stack hosts failed with "network
+  unreachable" where IPv6 is broken.
+- A hostname that doesn't resolve within the DNS timeout gets "host unreachable" straight away.
+  Before, the proxy passed the name to `connect()`, which looked it up again with no time limit.
+  Unfinished lookups are capped, so a hung resolver can't pile up threads.
+- A hostname with an empty or over-long label gets "host unreachable" without logging an ERROR.
 
 ## [2.1.0] - 2026-10-06
 
