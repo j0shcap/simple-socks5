@@ -1,20 +1,35 @@
 """
-Resolves a destination hostname to every address it has, with a bounded lookup.
+Connects to a CONNECT destination, trying each address a hostname resolves to in turn.
+
+Addresses are tried one after another in the order getaddrinfo() returns them (RFC 6724), like
+socket.create_connection(), with no reordering or racing (RFC 8305 Happy Eyeballs). Each is checked against the
+destination policy first, and at most MAX_CONNECT_ATTEMPTS are tried, so a hostname gets a reply within
+MAX_CONNECT_ATTEMPTS * SOCKS5_CONNECT_TIMEOUT seconds however many dead addresses it has.
 
 getaddrinfo() has no timeout of its own, so each lookup runs on a daemon thread that is waited on for
 DNS_LOOKUP_TIMEOUT seconds. A lookup that takes longer is abandoned, but its thread runs until getaddrinfo() returns,
 so at most MAX_PENDING_DNS_LOOKUPS lookups may be running at once; beyond that, a lookup fails straight away.
 """
 
+import dataclasses
 import socket
 import threading
 from collections.abc import Callable
 from typing import NamedTuple, TypeVar
 
-from .constants import DNS_LOOKUP_TIMEOUT, DNS_SATURATED_WARNING_INTERVAL, MAX_PENDING_DNS_LOOKUPS
+from .constants import (
+    DNS_LOOKUP_TIMEOUT,
+    DNS_SATURATED_WARNING_INTERVAL,
+    MAX_CONNECT_ATTEMPTS,
+    MAX_PENDING_DNS_LOOKUPS,
+    AddressTypeCodes,
+    connect_timeout,
+)
+from .exceptions import PolicyDeniedError
 from .logger import get_logger
-from .models import SocketAddress
-from .utils import WarningRateLimiter
+from .models import DetailedAddress, SocketAddress
+from .policy import check_destination
+from .utils import WarningRateLimiter, map_address_enum_to_socket_family, map_address_family_to_enum
 
 logger = get_logger(__name__)
 
@@ -33,6 +48,68 @@ class Candidate(NamedTuple):
     @property
     def ip(self) -> str:
         return self.sockaddr[0]
+
+
+def connect_any(dst: DetailedAddress) -> tuple[socket.socket, DetailedAddress]:
+    """
+    Connects to dst. Returns the connected socket and dst with ip and address_type set to the address it reached;
+    name stays as the client sent it.
+
+    Addresses the policy denies, and addresses whose socket can't be created (no IPv6 in the kernel), are skipped
+    and don't count towards MAX_CONNECT_ATTEMPTS.
+
+    Raises:
+        socket.gaierror: dst is a hostname that didn't resolve.
+        PolicyDeniedError: the policy denied every address.
+        OSError: the error of the last address tried.
+    """
+    timeout = connect_timeout()
+    attempts = 0
+    last_error: OSError | None = None
+    for candidate in _candidates(dst):
+        if attempts == MAX_CONNECT_ATTEMPTS:
+            break
+        try:
+            check_destination(candidate.ip, dst.port)
+        except PolicyDeniedError:
+            logger.debug("Skipped %s for %s: denied by the destination policy", candidate.ip, dst)
+            continue
+        try:
+            sock = socket.socket(candidate.family, socket.SOCK_STREAM)
+        except OSError as e:
+            logger.debug("Skipped %s for %s: %s", candidate.ip, dst, e)
+            last_error = e
+            continue
+        attempts += 1
+        try:
+            _connect(sock, candidate.sockaddr, timeout)
+        except OSError as e:
+            logger.debug("Connect to %s via %s failed: %s", dst, candidate.ip, e)
+            last_error = e
+            continue
+        connected = dataclasses.replace(dst, ip=candidate.ip, address_type=map_address_family_to_enum(candidate.family))
+        return sock, connected
+    if last_error is not None:
+        raise last_error
+    raise PolicyDeniedError(dst.name, dst.port)
+
+
+def _candidates(dst: DetailedAddress) -> list[Candidate]:
+    if dst.address_type == AddressTypeCodes.DOMAIN_NAME:
+        return resolve(dst.name, dst.port)
+    family = socket.AddressFamily(map_address_enum_to_socket_family(dst.address_type))
+    return [Candidate(family, (dst.ip, dst.port))]
+
+
+def _connect(sock: socket.socket, sockaddr: SocketAddress, timeout: float) -> None:
+    """Connects sock to sockaddr within timeout seconds, closing it if that fails."""
+    try:
+        # Replaced by the relay's write timeout once relaying starts
+        sock.settimeout(timeout)
+        sock.connect(sockaddr)
+    except BaseException:
+        sock.close()
+        raise
 
 
 def resolve(host: str, port: int) -> list[Candidate]:

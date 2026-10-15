@@ -1,16 +1,24 @@
+import contextlib
+import errno
 import logging
 import socket
 import threading
+import time
 import unittest
+from collections.abc import Callable
+from ipaddress import ip_address
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from simple_socks5 import resolver
-from simple_socks5.constants import ReplyCodes
+from simple_socks5.constants import MAX_CONNECT_ATTEMPTS, AddressTypeCodes, ReplyCodes
 from simple_socks5.errors import reply_code_for
-from simple_socks5.resolver import Candidate, resolve
+from simple_socks5.exceptions import PolicyDeniedError
+from simple_socks5.models import DetailedAddress
+from simple_socks5.resolver import Candidate, connect_any, resolve
 from simple_socks5.utils import WarningRateLimiter
+from tests.env import strip_socks5_env
 
 AddrInfo = tuple[socket.AddressFamily, socket.SocketKind, int, str, tuple[str, int] | tuple[str, int, int, int]]
 
@@ -167,3 +175,240 @@ class TestBoundedLookup(unittest.TestCase):
             resolve("example.com", 80)
 
         assert [c.ip for c in resolve("example.com", 80)] == ["10.0.0.1"]
+
+
+class FakeSocket:
+    """A TCP socket whose connect() outcome is scripted per IP."""
+
+    def __init__(self, factory: "FakeSockets", family: socket.AddressFamily) -> None:
+        self.factory = factory
+        self.family = family
+        self.timeout: float | None = None
+        self.closed = False
+
+    def settimeout(self, timeout: float) -> None:
+        self.timeout = timeout
+
+    def connect(self, sockaddr: tuple[object, ...]) -> None:
+        self.factory.connects.append(sockaddr)
+        outcome = self.factory.outcomes.get(str(sockaddr[0]))
+        if self.factory.connect_delay:
+            threading.Event().wait(self.factory.connect_delay)
+        if outcome is not None:
+            raise outcome
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class FakeSockets:
+    """Stands in for socket.socket; an IP missing from outcomes connects."""
+
+    def __init__(self, outcomes: dict[str, OSError] | None = None, connect_delay: float = 0.0) -> None:
+        self.outcomes = outcomes or {}
+        self.connect_delay = connect_delay
+        self.unsupported_families: set[socket.AddressFamily] = set()
+        self.created: list[FakeSocket] = []
+        self.connects: list[tuple[object, ...]] = []
+
+    def __call__(self, family: socket.AddressFamily, _kind: socket.SocketKind) -> FakeSocket:
+        if family in self.unsupported_families:
+            raise OSError(errno.EAFNOSUPPORT, "Address family not supported by protocol")
+        sock = FakeSocket(self, family)
+        self.created.append(sock)
+        return sock
+
+
+def domain(name: str, port: int = 80) -> DetailedAddress:
+    return DetailedAddress(ip=name, port=port, name=name, address_type=AddressTypeCodes.DOMAIN_NAME)
+
+
+def same(returned: object, fake: FakeSocket) -> bool:
+    """Whether connect_any() returned this fake; typed loosely because it is declared to return a real socket."""
+    return returned is fake
+
+
+REFUSED = ConnectionRefusedError(errno.ECONNREFUSED, "Connection refused")
+
+
+class TestConnectAny(unittest.TestCase):
+    def setUp(self) -> None:
+        strip_socks5_env(self)
+        getaddrinfo = patch("simple_socks5.resolver.socket.getaddrinfo", autospec=True)
+        self.getaddrinfo = getaddrinfo.start()
+        self.addCleanup(getaddrinfo.stop)
+        self.sockets = FakeSockets()
+        sockets = patch("simple_socks5.resolver.socket.socket", self.sockets)
+        sockets.start()
+        self.addCleanup(sockets.stop)
+
+    def resolves_to(self, *infos: AddrInfo) -> None:
+        self.getaddrinfo.return_value = list(infos)
+
+    def test_v6_unreachable_then_v4_connects(self) -> None:
+        strip_socks5_env(self, SOCKS5_ALLOW_LOOPBACK="true")
+        self.resolves_to(v6("::1"), v4("127.0.0.1"))
+        self.sockets.outcomes["::1"] = OSError(errno.ENETUNREACH, "Network is unreachable")
+
+        with self.assertLogs("simple_socks5.resolver", level="DEBUG") as logs:
+            sock, connected = connect_any(domain("localhost"))
+
+        assert connected == DetailedAddress(
+            ip="127.0.0.1", port=80, name="localhost", address_type=AddressTypeCodes.IPv4
+        )
+        v6_sock, v4_sock = self.sockets.created
+        assert same(sock, v4_sock)
+        assert v6_sock.closed
+        assert not v4_sock.closed
+        assert [r.levelno for r in logs.records] == [logging.DEBUG]
+        assert "::1" in logs.output[0]
+
+    def test_all_refused_raises_last_error(self) -> None:
+        self.resolves_to(v4("192.0.2.1"), v4("192.0.2.2"), v6("2001:db8::1"))
+        last = ConnectionRefusedError(errno.ECONNREFUSED, "last")
+        self.sockets.outcomes = {"192.0.2.1": REFUSED, "192.0.2.2": REFUSED, "2001:db8::1": last}
+
+        with pytest.raises(ConnectionRefusedError) as caught:
+            connect_any(domain("example.com"))
+
+        assert caught.value is last
+        assert reply_code_for(caught.value) == ReplyCodes.CONNECTION_REFUSED
+        assert len(self.sockets.connects) == 3
+        assert all(s.closed for s in self.sockets.created)
+
+    def test_all_time_out_stops_after_four_attempts(self) -> None:
+        strip_socks5_env(self, SOCKS5_CONNECT_TIMEOUT="0.05")
+        ips = [f"192.0.2.{i}" for i in range(1, 7)]
+        self.resolves_to(*(v4(ip) for ip in ips))
+        self.sockets.connect_delay = 0.05
+        self.sockets.outcomes = dict.fromkeys(ips, TimeoutError("timed out"))
+
+        started = time.monotonic()
+        with pytest.raises(TimeoutError) as caught:
+            connect_any(domain("blackhole.example"))
+        elapsed = time.monotonic() - started
+
+        assert MAX_CONNECT_ATTEMPTS == 4
+        assert [s[0] for s in self.sockets.connects] == ips[:MAX_CONNECT_ATTEMPTS]
+        assert [s.timeout for s in self.sockets.created] == [0.05] * MAX_CONNECT_ATTEMPTS
+        assert elapsed < MAX_CONNECT_ATTEMPTS * 0.05 + 0.5
+        assert reply_code_for(caught.value) == ReplyCodes.HOST_UNREACHABLE
+
+    def test_all_denied_raises_policy_denied_without_sockets(self) -> None:
+        self.resolves_to(v6("::1"), v4("127.0.0.1"))
+
+        with pytest.raises(PolicyDeniedError) as caught:
+            connect_any(domain("localhost"))
+
+        assert reply_code_for(caught.value) == ReplyCodes.CONNECTION_NOT_ALLOWED_BY_RULESET
+        assert self.sockets.created == []
+
+    def test_denied_then_refused_replies_refused(self) -> None:
+        self.resolves_to(v4("127.0.0.1"), v4("192.0.2.1"))
+        self.sockets.outcomes["192.0.2.1"] = REFUSED
+
+        with pytest.raises(ConnectionRefusedError) as caught:
+            connect_any(domain("mixed.example"))
+
+        assert reply_code_for(caught.value) == ReplyCodes.CONNECTION_REFUSED
+        assert [s[0] for s in self.sockets.connects] == ["192.0.2.1"]
+
+    def test_denied_addresses_do_not_use_up_attempts(self) -> None:
+        denied = [v4(f"127.0.0.{i}") for i in range(1, 5)]
+        self.resolves_to(*denied, v4("192.0.2.1"), v4("192.0.2.2"))
+        self.sockets.outcomes["192.0.2.1"] = REFUSED
+
+        _, connected = connect_any(domain("mixed.example"))
+
+        assert connected.ip == "192.0.2.2"
+
+    def test_socket_creation_failure_does_not_count_as_attempt(self) -> None:
+        self.sockets.unsupported_families.add(socket.AF_INET6)
+        self.resolves_to(*(v6(f"2001:db8::{i}") for i in range(1, 5)), v4("192.0.2.1"))
+
+        _, connected = connect_any(domain("dual.example"))
+
+        assert connected.ip == "192.0.2.1"
+        assert connected.address_type == AddressTypeCodes.IPv4
+
+    def test_only_unsupported_families_raise_their_error(self) -> None:
+        self.sockets.unsupported_families.add(socket.AF_INET6)
+        self.resolves_to(v6("2001:db8::1"))
+
+        with pytest.raises(OSError, match="not supported"):
+            connect_any(domain("v6only.example"))
+
+    def test_literal_destination_skips_lookup(self) -> None:
+        for ip, atyp, family in (
+            ("192.0.2.1", AddressTypeCodes.IPv4, socket.AF_INET),
+            ("2001:db8::1", AddressTypeCodes.IPv6, socket.AF_INET6),
+        ):
+            with self.subTest(ip=ip):
+                dst = DetailedAddress(ip=ip, port=443, name=ip, address_type=atyp)
+
+                sock, connected = connect_any(dst)
+
+                assert connected == dst
+                assert same(sock, self.sockets.created[-1])
+                assert self.sockets.created[-1].family == family
+                assert self.sockets.connects[-1] == (ip, 443)
+        self.getaddrinfo.assert_not_called()
+
+    def test_literal_destination_denied_by_policy(self) -> None:
+        dst = DetailedAddress(ip="127.0.0.1", port=80, name="127.0.0.1", address_type=AddressTypeCodes.IPv4)
+
+        with pytest.raises(PolicyDeniedError):
+            connect_any(dst)
+        assert self.sockets.created == []
+
+    def test_connected_ipv6_keeps_scope_id(self) -> None:
+        self.resolves_to(v6("2001:db8::1", scope_id=3))
+
+        _, connected = connect_any(domain("scoped.example"))
+
+        assert self.sockets.connects == [("2001:db8::1", 80, 0, 3)]
+        assert connected.address_type == AddressTypeCodes.IPv6
+
+    @patch("simple_socks5.resolver.DNS_LOOKUP_TIMEOUT", 0.05)
+    def test_lookup_failure_never_connects(self) -> None:
+        lookup = HangingLookup()
+        self.addCleanup(lookup.finish)
+        failures: dict[str, Callable[[], None]] = {
+            "timeout": lambda: setattr(self.getaddrinfo, "side_effect", lookup),
+            "nxdomain": lambda: setattr(self.getaddrinfo, "side_effect", socket.gaierror(socket.EAI_NONAME, "nx")),
+            "empty": self.resolves_to,
+        }
+        for name, arrange in failures.items():
+            with self.subTest(failure=name):
+                self.getaddrinfo.side_effect = None
+                arrange()
+
+                with pytest.raises(socket.gaierror) as caught:
+                    connect_any(domain("unresolvable.example"))
+
+                assert reply_code_for(caught.value) == ReplyCodes.HOST_UNREACHABLE
+                assert self.sockets.created == []
+
+    def test_connect_never_receives_hostname(self) -> None:
+        outcomes: dict[str, Callable[[], None]] = {
+            "first fails": lambda: self.sockets.outcomes.update({"::1": REFUSED}),
+            "all fail": lambda: self.sockets.outcomes.update({"::1": REFUSED, "127.0.0.1": REFUSED}),
+            "first connects": lambda: None,
+            "nxdomain": lambda: setattr(self.getaddrinfo, "side_effect", socket.gaierror(socket.EAI_NONAME, "nx")),
+            "empty": self.resolves_to,
+        }
+        for allow in ("true", "false"):
+            for name, arrange in outcomes.items():
+                with self.subTest(allow_loopback=allow, outcome=name):
+                    strip_socks5_env(self, SOCKS5_ALLOW_LOOPBACK=allow)
+                    self.sockets.outcomes.clear()
+                    self.sockets.connects.clear()
+                    self.getaddrinfo.side_effect = None
+                    self.resolves_to(v6("::1"), v4("127.0.0.1"))
+                    arrange()
+
+                    with contextlib.suppress(OSError, PolicyDeniedError):
+                        connect_any(domain("localhost"))
+
+                    for sockaddr in self.sockets.connects:
+                        ip_address(str(sockaddr[0]))  # raises ValueError for a hostname
