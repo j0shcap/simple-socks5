@@ -170,7 +170,7 @@ class TestBoundedLookup(unittest.TestCase):
         mock_getaddrinfo.return_value = [v4("10.0.0.1")]
         with (
             patch.object(threading.Thread, "start", side_effect=RuntimeError("can't start new thread")),
-            pytest.raises(RuntimeError),
+            pytest.raises(socket.gaierror),
         ):
             resolve("example.com", 80)
 
@@ -337,6 +337,13 @@ class TestConnectAny(unittest.TestCase):
 
         with pytest.raises(OSError, match="not supported"):
             connect_any(domain("v6only.example"))
+
+    def test_denied_and_unsupported_families_raise_policy_denied(self) -> None:
+        self.sockets.unsupported_families.add(socket.AF_INET6)
+        self.resolves_to(v4("127.0.0.1"), v6("2001:db8::1"))
+
+        with pytest.raises(PolicyDeniedError):
+            connect_any(domain("mixed.example"))
 
     def test_literal_destination_skips_lookup(self) -> None:
         for ip, atyp, family in (

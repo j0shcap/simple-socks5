@@ -60,11 +60,12 @@ def connect_any(dst: DetailedAddress) -> tuple[socket.socket, DetailedAddress]:
 
     Raises:
         socket.gaierror: dst is a hostname that didn't resolve.
-        PolicyDeniedError: the policy denied every address.
-        OSError: the error of the last address tried.
+        PolicyDeniedError: no address was tried and the policy denied at least one.
+        OSError: the error of the last address tried, or of the last socket that couldn't be created.
     """
     timeout = connect_timeout()
     attempts = 0
+    denied = False
     last_error: OSError | None = None
     try:
         for candidate in _candidates(dst):
@@ -74,6 +75,7 @@ def connect_any(dst: DetailedAddress) -> tuple[socket.socket, DetailedAddress]:
                 check_destination(candidate.ip, dst.port)
             except PolicyDeniedError:
                 logger.debug("Skipped %s for %s: denied by the destination policy", candidate.ip, dst)
+                denied = True
                 continue
             try:
                 sock = socket.socket(candidate.family, socket.SOCK_STREAM)
@@ -90,7 +92,7 @@ def connect_any(dst: DetailedAddress) -> tuple[socket.socket, DetailedAddress]:
                 continue
             family = map_address_family_to_enum(candidate.family)
             return sock, dataclasses.replace(dst, ip=candidate.ip, address_type=family)
-        if last_error is None:
+        if last_error is None or (attempts == 0 and denied):
             raise PolicyDeniedError(dst.name, dst.port)
         raise last_error
     finally:
@@ -140,7 +142,8 @@ def _bounded_lookup(fn: Callable[[], T], label: str) -> T:
     Runs fn on a daemon thread and returns its result, waiting at most DNS_LOOKUP_TIMEOUT seconds.
 
     Raises:
-        socket.gaierror: fn timed out, too many lookups are pending, or fn raised something other than an OSError.
+        socket.gaierror: fn timed out, too many lookups are pending, its thread couldn't start, or fn raised
+            something other than an OSError.
         OSError: whatever fn raised.
     """
     slots = _lookup_slots  # The thread releases this semaphore even if the module's is replaced meanwhile
@@ -168,9 +171,9 @@ def _bounded_lookup(fn: Callable[[], T], label: str) -> T:
     thread = threading.Thread(target=lookup, name=f"dns-lookup {label}", daemon=True)
     try:
         thread.start()
-    except Exception:
+    except RuntimeError as e:
         slots.release()
-        raise
+        raise socket.gaierror(socket.EAI_AGAIN, f"couldn't start a DNS lookup for {label!r}: {e}") from None
     thread.join(timeout=DNS_LOOKUP_TIMEOUT)
 
     if thread.is_alive():
