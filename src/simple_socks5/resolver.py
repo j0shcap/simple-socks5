@@ -66,35 +66,37 @@ def connect_any(dst: DetailedAddress) -> tuple[socket.socket, DetailedAddress]:
     timeout = connect_timeout()
     attempts = 0
     last_error: OSError | None = None
-    for candidate in _candidates(dst):
-        if attempts == MAX_CONNECT_ATTEMPTS:
-            break
-        try:
-            check_destination(candidate.ip, dst.port)
-        except PolicyDeniedError:
-            logger.debug("Skipped %s for %s: denied by the destination policy", candidate.ip, dst)
-            continue
-        try:
-            sock = socket.socket(candidate.family, socket.SOCK_STREAM)
-        except OSError as e:
-            logger.debug("Skipped %s for %s: %s", candidate.ip, dst, e)
-            last_error = e
-            continue
-        attempts += 1
-        try:
-            _connect(sock, candidate.sockaddr, timeout)
-        except OSError as e:
-            logger.debug("Connect to %s via %s failed: %s", dst, candidate.ip, e)
-            last_error = e
-            continue
-        connected = dataclasses.replace(dst, ip=candidate.ip, address_type=map_address_family_to_enum(candidate.family))
-        return sock, connected
-    if last_error is None:
-        raise PolicyDeniedError(dst.name, dst.port)
     try:
+        for candidate in _candidates(dst):
+            if attempts == MAX_CONNECT_ATTEMPTS:
+                break
+            try:
+                check_destination(candidate.ip, dst.port)
+            except PolicyDeniedError:
+                logger.debug("Skipped %s for %s: denied by the destination policy", candidate.ip, dst)
+                continue
+            try:
+                sock = socket.socket(candidate.family, socket.SOCK_STREAM)
+            except OSError as e:
+                logger.debug("Skipped %s for %s: %s", candidate.ip, dst, e)
+                last_error = e
+                continue
+            attempts += 1
+            try:
+                _connect(sock, candidate.sockaddr, timeout)
+            except OSError as e:
+                logger.debug("Connect to %s via %s failed: %s", dst, candidate.ip, e)
+                last_error = e
+                continue
+            family = map_address_family_to_enum(candidate.family)
+            return sock, dataclasses.replace(dst, ip=candidate.ip, address_type=family)
+        if last_error is None:
+            raise PolicyDeniedError(dst.name, dst.port)
         raise last_error
     finally:
-        del last_error  # Its traceback references this frame; the cycle would keep the client's socket alive
+        # last_error's traceback references this frame and, through it, the handler's: the cycle would keep the
+        # client's socket open until the next garbage collection
+        del last_error
 
 
 def _candidates(dst: DetailedAddress) -> list[Candidate]:
