@@ -9,10 +9,14 @@ import json
 import subprocess
 import sys
 from pathlib import Path
+from xml.etree import ElementTree
 
 import pytest
 
+from benchmarks import profiles
+
 ROOT = Path(__file__).resolve().parents[1]
+SVG = "{http://www.w3.org/2000/svg}"
 
 pytestmark = pytest.mark.bench
 
@@ -78,3 +82,101 @@ def test_compare_prints_both_runs(tmp_path: Path) -> None:
 
     assert "| first-byte |" in output
     assert "+0.0%" in output
+
+
+def _benchmarks(*args: str) -> str:
+    return subprocess.run(  # noqa: S603 - fixed argv built by the test
+        [sys.executable, "-m", "benchmarks", *args], cwd=ROOT, capture_output=True, text=True, check=True
+    ).stdout
+
+
+def _root(svg: Path) -> ElementTree.Element:
+    return ElementTree.parse(svg).getroot()  # noqa: S314 - an SVG the harness just wrote
+
+
+def _texts(svg: Path) -> list[str]:
+    """The visible text of an SVG, after checking it parses and starts with an opaque background."""
+    root = _root(svg)
+    assert root.tag == f"{SVG}svg"
+    background = root[0]
+    assert background.tag == f"{SVG}rect"
+    assert background.get("width") == "100%"
+    return ["".join(element.itertext()) for element in root.iter(f"{SVG}text")]
+
+
+@pytest.fixture(scope="module")
+def quick_run(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    out = tmp_path_factory.mktemp("quick")
+    _bench(out, "first-byte", "small-writes", "concurrency", "--variant", "nodelay")
+    return out / "results.json"
+
+
+def test_chart_writes_an_svg_per_scenario(quick_run: Path, tmp_path: Path) -> None:
+    _benchmarks("chart", str(quick_run), "--out", str(tmp_path))
+
+    for scenario in ("first-byte", "small-writes", "concurrency"):
+        texts = _texts(tmp_path / f"{scenario}.svg")
+        assert {"direct", "proxy", "proxy+nodelay"} <= set(texts)
+        assert any(text.endswith((" ms", " MB/s")) for text in texts)
+
+
+def test_chart_marks_lower_is_better(tmp_path: Path) -> None:
+    rows = [
+        {
+            "scenario": "small-writes",
+            "case": "300 x 512 B",
+            "path": path,
+            "metrics": {"p50 ms": p50},
+            "primary": "p50 ms",
+            "notes": [],
+        }
+        for path, p50 in (("direct", 1.43), ("proxy", 85.5), ("proxy+nodelay", 1.9))
+    ]
+    results = tmp_path / "results.json"
+    results.write_text(json.dumps({"environment": {}, "rows": rows}))
+
+    _benchmarks("chart", str(results), "--out", str(tmp_path))
+
+    texts = _texts(tmp_path / "small-writes.svg")
+    assert "\N{MULTIPLICATION SIGN}45.0 vs proxy" in texts
+    assert "lower is better" in " ".join(texts)
+
+
+def test_concurrency_scaling_chart(quick_run: Path, tmp_path: Path) -> None:
+    _benchmarks("chart", str(quick_run), "--out", str(tmp_path))
+
+    svg = tmp_path / "concurrency-scaling.svg"
+    texts = _texts(svg)
+    assert len(list(_root(svg).iter(f"{SVG}polyline"))) == 3
+    assert {"1", "4"} <= set(texts)
+    assert {"direct", "proxy", "proxy+nodelay"} <= set(texts)
+
+
+def test_compare_chart(quick_run: Path, tmp_path: Path) -> None:
+    results = json.loads(quick_run.read_text())
+    dropped = results["rows"].pop()
+    baseline = tmp_path / "baseline.json"
+    baseline.write_text(json.dumps(results))
+    chart = tmp_path / "before-after.svg"
+
+    _benchmarks("compare", str(baseline), str(quick_run), "--chart", str(chart))
+
+    texts = _texts(chart)
+    assert texts.count("+0.0%") == len(results["rows"])
+    assert f"{dropped['scenario']} · {dropped['case']} · {dropped['path']}" not in texts
+
+
+def test_flamegraph_trims_and_has_legend(tmp_path: Path) -> None:
+    counts = {
+        "run (worker.py:1);sock_sendall (socket.py:2)": 600,
+        "run (worker.py:1);emit (logging/__init__.py:3)": 399,
+        "run (worker.py:1);rare (simple_socks5/relays.py:4)": 1,
+    }
+    svg = tmp_path / "flame.svg"
+
+    profiles.render_flamegraph(counts, svg, "test")
+
+    texts = _texts(svg)
+    assert not any("rare" in text for text in texts)
+    assert {"socket data I/O", "logging", "other"} <= set(texts)
+    assert "relay loop (Python)" not in texts

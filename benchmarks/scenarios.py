@@ -34,6 +34,11 @@ class Row:
     primary: str  # the metric the "vs direct" column compares
     notes: list[str] = field(default_factory=list)
 
+    @property
+    def key(self) -> tuple[str, str, str]:
+        """What identifies the same measurement in two runs."""
+        return self.scenario, self.case, self.path
+
 
 @dataclass
 class Bench:

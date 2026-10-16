@@ -185,8 +185,13 @@ _COLOURS: Final = {
 }
 
 
-def render_flamegraph(counts: dict[str, int], path: Path, title: str, width: int = 1600) -> None:
-    """Writes an SVG icicle graph (root at the top) of collapsed stacks, coloured by category."""
+def render_flamegraph(
+    counts: dict[str, int], path: Path, title: str, width: int = 1600, min_share: float = 0.005
+) -> None:
+    """
+    Writes an SVG icicle graph (root at the top) of collapsed stacks, coloured by category, with a legend of the
+    categories drawn. Frames under min_share of the samples are left out, which keeps a committed graph small.
+    """
     tree: dict[str, object] = {}
     for stack, n in counts.items():
         node = tree
@@ -196,33 +201,48 @@ def render_flamegraph(counts: dict[str, int], path: Path, title: str, width: int
             child["#"] = int(child["#"]) + n
             node = child
     total = sum(counts.values()) or 1
-    row, rects = 17, []
+    row, rects, drawn = 17, [], set()
 
     def draw(node: dict[str, object], x: float, depth: int) -> int:
         deepest = depth
         for frame, child in sorted(node.items()):
             if frame == "#" or not isinstance(child, dict):
                 continue
-            w = width * int(child["#"]) / total
-            if w >= 0.5:
-                pct = 100 * int(child["#"]) / total
-                colour = _COLOURS.get(categorize(_with_source(frame)), "#b0b8c0")
+            share = int(child["#"]) / total
+            w = width * share
+            if share >= min_share:
+                category = categorize(_with_source(frame))
+                drawn.add(category)
                 label = html.escape(_function(frame))
                 text = label if len(label) * 7 < w else label[: max(0, int(w / 7) - 2)] + ".." if w > 30 else ""
                 rects.append(
-                    f"<g><title>{html.escape(_with_source(frame))} ({pct:.1f}%)</title>"
-                    f'<rect x="{x:.1f}" y="{20 + depth * row}" width="{w:.1f}" height="{row - 1}" fill="{colour}"/>'
-                    f'<text x="{x + 3:.1f}" y="{20 + depth * row + 12}">{text}</text></g>'
+                    f"<g><title>{html.escape(_with_source(frame))} ({100 * share:.1f}%)</title>"
+                    f'<rect x="{x:.1f}" y="{depth * row}" width="{w:.1f}" height="{row - 1}" '
+                    f'fill="{_COLOURS[category]}"/><text x="{x + 3:.1f}" y="{depth * row + 12}">{text}</text></g>'
                 )
                 deepest = max(deepest, draw(child, x, depth + 1))
             x += w
         return deepest
 
     depth = draw(tree, 0.0, 0)
-    height = 30 + (depth + 1) * row
+    legend, x, y = [], 4, 24
+    for category, colour in _COLOURS.items():
+        if category not in drawn:
+            continue
+        if x + 30 + len(category) * 7 > width:
+            x, y = 4, y + 18
+        legend.append(
+            f'<rect x="{x}" y="{y}" width="12" height="12" fill="{colour}"/>'
+            f'<text x="{x + 16}" y="{y + 10}">{html.escape(category)}</text>'
+        )
+        x += 30 + len(category) * 7
+    top = y + 22
+    height = top + 10 + (depth + 1) * row
     path.write_text(
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" font-family="monospace" '
-        f'font-size="11"><text x="4" y="13">{html.escape(title)} ({total} samples)</text>{"".join(rects)}</svg>\n'
+        f'font-size="11"><rect width="100%" height="100%" fill="#ffffff"/>'
+        f'<text x="4" y="13">{html.escape(title)} ({total} samples, frames under {100 * min_share:g}% left out)</text>'
+        f'{"".join(legend)}<g transform="translate(0,{top})">{"".join(rects)}</g></svg>\n'
     )
 
 

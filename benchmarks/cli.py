@@ -1,6 +1,7 @@
 """
 python -m benchmarks <scenario>... runs scenarios and prints a results table; python -m benchmarks compare A B
-compares two results.json files. See benchmarks/README.md.
+compares two results.json files; python -m benchmarks chart A draws a results.json file as SVG charts. See
+benchmarks/README.md.
 """
 
 import argparse
@@ -20,6 +21,7 @@ from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 from typing import Final
 
+from . import charts
 from .client import warm_up
 from .processes import ROOT, Origins, ProxySettings, interpreter_version
 from .scenarios import SCENARIOS, Bench, Row, format_value
@@ -181,7 +183,7 @@ def run(argv: Sequence[str]) -> int:
             repeat=1 if args.quick else args.repeat,
         )
         for name in names:
-            print(f"\n{name}: {(SCENARIOS[name].__doc__ or '').strip().splitlines()[0]}", flush=True)
+            print(f"\n{name}: {_summary(name)}", flush=True)
             SCENARIOS[name](bench)
 
     results = {"environment": environment, "rows": [dataclasses.asdict(row) for row in bench.rows]}
@@ -254,36 +256,69 @@ def _md(cells: list[str]) -> str:
 
 
 def compare(argv: Sequence[str]) -> int:
-    """Prints each row's primary metric in two results files side by side."""
+    """Prints each row's primary metric in two results files side by side, and optionally charts them."""
     parser = argparse.ArgumentParser(prog="python -m benchmarks compare")
     parser.add_argument("baseline", type=Path)
     parser.add_argument("candidate", type=Path)
+    parser.add_argument("--chart", type=Path, metavar="FILE.svg", help="also write a before/after chart")
     args = parser.parse_args(argv)
-    baseline = {_key(row): row for row in json.loads(args.baseline.read_text())["rows"]}
+    baseline, candidate = _rows(args.baseline), _rows(args.candidate)
+    before = {row.key: row for row in baseline}
     lines = [
         _md(["scenario", "case", "path", "metric", "baseline", "candidate", "change"]),
         _md(["---"] * 4 + ["--:"] * 3),
     ]
-    for row in json.loads(args.candidate.read_text())["rows"]:
-        before = baseline.get(_key(row))
-        if before is None:
+    for row in candidate:
+        old_row = before.get(row.key)
+        if old_row is None:
             continue
-        metric = row["primary"]
-        old, new = before["metrics"].get(metric), row["metrics"].get(metric)
+        metric = row.primary
+        old, new = old_row.metrics.get(metric), row.metrics.get(metric)
         change = f"{100 * (new - old) / old:+.1f}%" if old and new is not None else ""
-        lines.append(
-            _md([row["scenario"], row["case"], row["path"], metric, format_value(old), format_value(new), change])
-        )
+        lines.append(_md([row.scenario, row.case, row.path, metric, format_value(old), format_value(new), change]))
     print("\n".join(lines))
+    if args.chart:
+        names = (args.baseline.stem, args.candidate.stem)
+        if names[0] == names[1]:
+            names = ("baseline", "candidate")
+        _write(args.chart, charts.before_after(baseline, candidate, names))
     return 0
 
 
-def _key(row: dict[str, object]) -> tuple[object, ...]:
-    return row["scenario"], row["case"], row["path"]
+def chart(argv: Sequence[str]) -> int:
+    """Writes an SVG chart per scenario in a results file, plus the scaling curve of the concurrency scenario."""
+    parser = argparse.ArgumentParser(prog="python -m benchmarks chart")
+    parser.add_argument("results", type=Path)
+    parser.add_argument("--out", type=Path, help="directory for the SVGs (default: the results file's)")
+    args = parser.parse_args(argv)
+    out_dir = args.out or args.results.parent
+    out_dir.mkdir(parents=True, exist_ok=True)
+    rows = _rows(args.results)
+    for scenario in dict.fromkeys(row.scenario for row in rows):
+        group = [row for row in rows if row.scenario == scenario]
+        _write(out_dir / f"{scenario}.svg", charts.bars(group, f"{scenario}: {_summary(scenario)}"))
+        if scenario == "concurrency":
+            _write(out_dir / "concurrency-scaling.svg", charts.scaling(group))
+    return 0
+
+
+def _summary(scenario: str) -> str:
+    return (SCENARIOS[scenario].__doc__ or "").strip().splitlines()[0]
+
+
+def _rows(results: Path) -> list[Row]:
+    return [Row(**row) for row in json.loads(results.read_text())["rows"]]
+
+
+def _write(path: Path, svg: str) -> None:
+    path.write_text(svg)
+    print(path)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     if argv[:1] == ["compare"]:
         return compare(argv[1:])
+    if argv[:1] == ["chart"]:
+        return chart(argv[1:])
     return run(argv)
