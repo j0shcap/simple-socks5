@@ -219,12 +219,14 @@ def render_flamegraph(
             if share >= min_share:
                 category = categorize(_with_source(frame))
                 drawn.add(category)
-                label = html.escape(_function(frame))
+                label = _function(frame)
+                # Cut before escaping, so a cut never splits an entity such as the &lt; of <module>
                 text = label if len(label) * 7 < w else label[: max(0, int(w / 7) - 2)] + ".." if w > 30 else ""
                 rects.append(
                     f"<g><title>{html.escape(_with_source(frame))} ({100 * share:.1f}%)</title>"
                     f'<rect x="{x:.1f}" y="{depth * row}" width="{w:.1f}" height="{row - 1}" '
-                    f'fill="{_COLOURS[category]}"/><text x="{x + 3:.1f}" y="{depth * row + 12}">{text}</text></g>'
+                    f'fill="{_COLOURS[category]}"/><text x="{x + 3:.1f}" y="{depth * row + 12}">'
+                    f"{html.escape(text)}</text></g>"
                 )
                 deepest = max(deepest, draw(child, x, depth + 1))
             x += w

@@ -183,6 +183,16 @@ def test_flamegraph_trims_and_has_legend(tmp_path: Path) -> None:
     assert "relay loop (Python)" not in texts
 
 
+def test_flamegraph_truncates_labels_before_escaping(tmp_path: Path) -> None:
+    # At this width the <module> frame's label is cut where escaping first would split "&lt;" into "&l.."
+    counts = {"<module> (main.py:1)": 1, "serve_forever (socketserver.py:2)": 1}
+    svg = tmp_path / "flame.svg"
+
+    profiles.render_flamegraph(counts, svg, "test", width=61)
+
+    assert "<m.." in _texts(svg)
+
+
 def test_read_collapsed_merges_threads_by_name(tmp_path: Path) -> None:
     collapsed = tmp_path / "stacks.collapsed"
     collapsed.write_text(
