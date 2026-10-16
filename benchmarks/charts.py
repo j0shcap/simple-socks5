@@ -88,11 +88,11 @@ def _path_colour(path: str) -> str:
     return {"direct": MUTED, "proxy": SERIES[0]}.get(path, SERIES[1])
 
 
-def bars(rows: list[Row], title: str) -> str:
+def bars(rows: list[Row], title: str, subtitle: str) -> str:
     """Horizontal bars of each row's primary metric, one group per case, each scaled to its own largest value."""
     label_width = max(120.0, max(len(row.path) for row in rows) * CHAR + 24)
     plot = WIDTH - label_width - 200
-    body = _heading(title, f"Bars are scaled per case. {TIMES}N is how many times better than the default proxy.")
+    body = _heading(title, subtitle)
     y = 64.0
     for case in dict.fromkeys(row.case for row in rows):
         group = [row for row in rows if row.case == case]
@@ -116,7 +116,9 @@ def bars(rows: list[Row], title: str) -> str:
                 body.append(_text(x + len(label) * CHAR + 10, y + 12, f"{times} vs proxy", SECONDARY))
             y += ROW
         y += 10
-    return _svg(y + 6, body)
+    note = f"Bars are scaled per case. {TIMES}N is how many times better than the default proxy."
+    body.append(_text(16, y + 8, note, MUTED))
+    return _svg(y + 20, body)
 
 
 def _nice_step(largest: float) -> float:

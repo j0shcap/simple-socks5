@@ -50,6 +50,8 @@ CATEGORIES: Final = (
     ("other simple_socks5", r"simple_socks5"),
 )
 _COMPILED: Final = tuple((name, re.compile(pattern)) for name, pattern in CATEGORIES)
+_THREAD_ID: Final = re.compile(r"^thread \(\d+\): ")
+_THREAD_NUMBER: Final = re.compile(r"(?<=^thread: )Thread-\d+")
 _FRAME: Final = re.compile(r"^(?P<name>.*) \((?P<path>[^()]*?):(?P<line>\d+)\)$")
 
 
@@ -102,11 +104,15 @@ def summarize_collapsed(counts: dict[str, int], kind: str, top: int = 25) -> dic
 
 
 def read_collapsed(path: Path) -> dict[str, int]:
+    """
+    Reads py-spy's collapsed stacks, merging threads by name: its --threads root frame names every thread by id, so
+    a run with thousands of short-lived handler threads would otherwise have thousands of tiny roots.
+    """
     counts: Counter[str] = Counter()
     for line in path.read_text().splitlines():
         stack, _, n = line.rpartition(" ")
         if stack and n.isdigit():
-            counts[stack] += int(n)
+            counts[_THREAD_NUMBER.sub("Thread-N", _THREAD_ID.sub("thread: ", stack, count=1), count=1)] += int(n)
     return dict(counts)
 
 

@@ -116,6 +116,7 @@ def test_chart_writes_an_svg_per_scenario(quick_run: Path, tmp_path: Path) -> No
 
     for scenario in ("first-byte", "small-writes", "concurrency"):
         texts = _texts(tmp_path / f"{scenario}.svg")
+        assert texts[0] == scenario
         assert {"direct", "proxy", "proxy+nodelay"} <= set(texts)
         assert any(text.endswith((" ms", " MB/s")) for text in texts)
 
@@ -180,3 +181,17 @@ def test_flamegraph_trims_and_has_legend(tmp_path: Path) -> None:
     assert not any("rare" in text for text in texts)
     assert {"socket data I/O", "logging", "other"} <= set(texts)
     assert "relay loop (Python)" not in texts
+
+
+def test_read_collapsed_merges_threads_by_name(tmp_path: Path) -> None:
+    collapsed = tmp_path / "stacks.collapsed"
+    collapsed.write_text(
+        "thread (11): Thread-1 (process_request_thread);handle (h.py:1) 3\n"
+        "thread (12): Thread-2 (process_request_thread);handle (h.py:1) 4\n"
+        "thread (10): MainThread;serve_forever (s.py:1) 5\n"
+    )
+
+    assert profiles.read_collapsed(collapsed) == {
+        "thread: Thread-N (process_request_thread);handle (h.py:1)": 7,
+        "thread: MainThread;serve_forever (s.py:1)": 5,
+    }

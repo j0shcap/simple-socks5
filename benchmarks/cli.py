@@ -296,7 +296,7 @@ def chart(argv: Sequence[str]) -> int:
     rows = _rows(args.results)
     for scenario in dict.fromkeys(row.scenario for row in rows):
         group = [row for row in rows if row.scenario == scenario]
-        _write(out_dir / f"{scenario}.svg", charts.bars(group, f"{scenario}: {_summary(scenario)}"))
+        _write(out_dir / f"{scenario}.svg", charts.bars(group, scenario, _summary(scenario)))
         if scenario == "concurrency":
             _write(out_dir / "concurrency-scaling.svg", charts.scaling(group))
     return 0
