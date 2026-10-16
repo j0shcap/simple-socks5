@@ -14,6 +14,8 @@ to make the proxy safer; each such change is marked **Behaviour change** and is 
 - The package ships a `py.typed` marker, so type checkers use its annotations.
 - `SECURITY.md` says how to report a vulnerability privately and which versions get fixes;
   `CONTRIBUTING.md` covers development and releases.
+- `python -m benchmarks` measures the proxy against direct connections, profiles it and charts the
+  results, from a checkout. `benchmarks/README.md` has the results and the optimizations they point to.
 
 ### Changed
 - The code is now the `simple_socks5` package under `src/`, and `pip install .` installs it.
