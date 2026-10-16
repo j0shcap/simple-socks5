@@ -174,7 +174,7 @@ samplers, an SVG flame graph to the results directory.
 - `py-spy`: CPU samples of every thread. Needs root on macOS, so use `run-in-docker.sh`, which grants
   `CAP_SYS_PTRACE`. `BENCH_PY_SPY_ARGS=--gil` samples only the thread holding the GIL; `--native` adds C frames.
 
-The flame graphs and `.collapsed` stack files also load in [speedscope](https://www.speedscope.app/).
+The `.collapsed` stack files also load in [speedscope](https://www.speedscope.app/).
 
 ## Tests and coverage
 
