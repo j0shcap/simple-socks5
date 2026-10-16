@@ -265,8 +265,9 @@ def first_byte(bench: Bench) -> None:
 
 def small_writes(bench: Bench) -> None:
     """
-    Request/response round trips over one connection where each message is written in two parts, which is where
-    Nagle's algorithm on the proxy's sockets would add delay.
+    Request/response round trips over one connection, each message written in two parts.
+
+    This is where Nagle's algorithm on the proxy's sockets would add delay.
     """
     count = bench.size(300, 30)
     for path, proxy in _paths(bench, "small-writes", ("nodelay",)):

@@ -303,7 +303,8 @@ def chart(argv: Sequence[str]) -> int:
 
 
 def _summary(scenario: str) -> str:
-    return (SCENARIOS[scenario].__doc__ or "").strip().splitlines()[0]
+    """The first paragraph of the scenario's docstring, on one line."""
+    return " ".join((SCENARIOS[scenario].__doc__ or "").strip().split("\n\n")[0].split())
 
 
 def _rows(results: Path) -> list[Row]:

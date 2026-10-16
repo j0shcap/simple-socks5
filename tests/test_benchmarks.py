@@ -117,6 +117,7 @@ def test_chart_writes_an_svg_per_scenario(quick_run: Path, tmp_path: Path) -> No
     for scenario in ("first-byte", "small-writes", "concurrency"):
         texts = _texts(tmp_path / f"{scenario}.svg")
         assert texts[0] == scenario
+        assert texts[1].endswith("."), "the subtitle is the docstring's whole first paragraph"
         assert {"direct", "proxy", "proxy+nodelay"} <= set(texts)
         assert any(text.endswith((" ms", " MB/s")) for text in texts)
 
