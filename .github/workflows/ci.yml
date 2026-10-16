@@ -70,6 +70,28 @@ jobs:
       run: |
         pytest --cov=simple_socks5 --cov-fail-under=85
 
+  # Checks the benchmark harness still runs. It asserts no timings and never blocks a merge or a release.
+  bench:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    timeout-minutes: 15
+
+    steps:
+    - uses: actions/checkout@v7
+
+    - name: Set up Python
+      uses: actions/setup-python@v7
+      with:
+        python-version: "3.13"
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        python -m pip install -e '.[dev]'
+
+    - name: Run the benchmark harness with tiny sizes
+      run: pytest -m bench
+
   smoke:
     name: smoke (${{ matrix.variant.name }})
     needs: test
