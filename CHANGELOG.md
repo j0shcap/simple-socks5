@@ -8,6 +8,10 @@ to make the proxy safer; each such change is marked **Behaviour change** and is 
 
 ## [Unreleased]
 
+### Changed
+- Relayed TCP connections send small writes immediately (`TCP_NODELAY`), so a message written in
+  two parts no longer waits about 40–80 ms for the peer's delayed ACK on Linux.
+
 ## [2.2.0] - 2026-10-16
 
 ### Upgrading from 2.1 (behaviour changes)

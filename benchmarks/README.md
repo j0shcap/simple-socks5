@@ -20,14 +20,17 @@ was discarded.
 | 10 / 50 / 200 connections, MB/s | 8,041 / 7,695 / 5,862 | 1,786 / 1,251 / 935 | 8,303 / 6,830 / 6,451 | 2,242 / 1,799 / 1,508 |
 | Setup c=50, req/s (p99 ms) | 7,030 (18.5) | 1,354 (71.0) | 13,387 (6.6) | 2,163 (44.2) |
 | Time to first byte p50, ms | 0.13 | 0.50 | 0.11 | 0.36 |
-| Split-write round trip p50, ms | 1.48 | **85.0** | 1.66 | 1.74 |
+| Split-write round trip p50, ms | 1.58 | 1.68 (85.1 before `TCP_NODELAY`) | 1.66 | 1.74 |
 | UDP round trips/s, 1 / 8 associations | 23,570 / 77,372 | 9,613 / 10,085 | 32,284 / 80,733 | 8,237 / 13,633 |
 | Idle connection | | 28.9 KiB RSS, 1 thread, 8 MiB virtual | | ~15 KiB RSS (noisy) |
 
-Three things stand out. A message written in two parts waits about 83 ms on Linux: Nagle's algorithm holds the
-second part until the first is acknowledged, and the receiver delays that acknowledgement. Aggregate throughput
-falls as connections are added while direct transfers hold up, because every relay competes for one GIL. And
-connection setup runs at a fifth of direct at c=50.
+A message written in two parts used to wait about 83 ms on Linux: Nagle's algorithm held the second part until
+the first was acknowledged, and the receiver delayed that acknowledgement. The proxy now sets `TCP_NODELAY` on
+both relay sockets, and the split-write row is from a rerun after that change (medians of 5, on a loaded host;
+throughput and setup were unchanged within that run's noise, so their rows are the original quiet-host numbers).
+
+Two things stand out. Aggregate throughput falls as connections are added while direct transfers hold up,
+because every relay competes for one GIL. And connection setup runs at a fifth of direct at c=50.
 
 ![Split-write round trips](images/small-writes.svg)
 
@@ -64,7 +67,7 @@ proxy row of the same run.
 
 | # | Candidate | Evidence | Expected gain | Effort | Risk | Compatible |
 |--:|---|---|---|:-:|---|:-:|
-| 1 | `TCP_NODELAY` on both relay sockets | Split-write p50 85.0 → 1.60 ms (×53); no consistent change elsewhere: bulk −0.3% / −2%, setup +1% / +4%, concurrency −8% to +17% by level | Removes a ~83 ms stall from request/response traffic | S | Low: more small packets for chatty clients | Yes |
+| 1 | ~~`TCP_NODELAY` on both relay sockets~~ **Done** | Split-write p50 85.1 → 1.68 ms in the proxy itself; bulk, setup and concurrency within run-to-run noise | Removes a ~83 ms stall from request/response traffic | S | Low: more small packets for chatty clients | Yes |
 | 2 | 256 KiB relay buffer instead of 64 KiB | Single stream +14% / +24% (download / upload); ×3.1 / ×2.8 / ×2.9 at 10 / 50 / 200 connections | ~3× aggregate throughput | S | Low: up to 512 KiB of buffers per busy connection, in flight only | Yes |
 | 3 | `BaseRequestHandler` instead of `StreamRequestHandler` | RSS per idle connection 28.9 → 21.3 KiB (−26%); the unused `rfile` and `wfile` | A quarter less memory per connection | S | Low | Yes |
 | 4 | Trim per-connection work | `_cleanup` raises two `KeyError`s that `repr()` sockets (`getpeername` syscalls); a `settimeout` per handshake `recv`; a second `getpeername`. About 4% of GIL samples | A few % setup rate | S | Low | Yes |
@@ -116,7 +119,7 @@ three times and the median is kept (`--repeat`). Each scenario takes under two m
 |---|---|
 | `--quick` | Tiny sizes: checks the harness runs. Measures nothing. |
 | `--candidates` | Adds the scenario's candidate variants (below) as extra proxy rows. |
-| `--variant SPEC` | Adds a proxy row with a variant, e.g. `nodelay` or `pumps+buf=262144`. |
+| `--variant SPEC` | Adds a proxy row with a variant, e.g. `buf=262144` or `pumps+buf=262144`. |
 | `-L LEVEL`, `--env NAME=VALUE` | The proxy's log level (default `info`, as in the image) and extra environment. |
 | `--python PATH`, `--installed` | The interpreter running the proxy; use its installed `simple_socks5` instead of `src/`. |
 | `--profile KIND` | `cprofile`, `cprofile-cpu`, `sample` or `py-spy`: see [Profiling](#profiling). |
@@ -150,7 +153,6 @@ the benchmark's proxy process only. These are sketches made to be measured, not 
 
 | Variant | Change |
 |---|---|
-| `nodelay` | `TCP_NODELAY` on both relay sockets |
 | `buf=N` | `RELAY_BUFFER_SIZE` of N bytes instead of 64 KiB |
 | `recv_into` | `recv_into()` a buffer reused for the whole relay instead of `recv()` allocating each chunk |
 | `blocking` | Blocking sockets, with the write timeout as the kernel's `SO_SNDTIMEO` |
