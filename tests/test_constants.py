@@ -11,6 +11,7 @@ import pytest
 
 from simple_socks5.constants import (
     RELAY_BUFFER_SIZE,
+    RELAY_INITIAL_BUFFER_SIZE,
     UDP_BUFFER_SIZE,
     AddressTypeCodes,
     CommandCodes,
@@ -103,6 +104,9 @@ class TestCommandCodes(unittest.TestCase):
 class TestRelayConstants(unittest.TestCase):
     def test_relay_buffer_size(self) -> None:
         assert RELAY_BUFFER_SIZE == 262144
+
+    def test_relay_initial_buffer_size(self) -> None:
+        assert RELAY_INITIAL_BUFFER_SIZE == 65536
 
     def test_udp_buffer_size(self) -> None:
         assert UDP_BUFFER_SIZE == 65536

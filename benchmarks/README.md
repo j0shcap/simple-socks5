@@ -153,7 +153,7 @@ the benchmark's proxy process only. These are sketches made to be measured, not 
 
 | Variant | Change |
 |---|---|
-| `buf=N` | `RELAY_BUFFER_SIZE` of N bytes instead of 256 KiB |
+| `buf=N` | Relay reads of N bytes throughout, instead of 64 KiB growing to 256 KiB |
 | `recv_into` | `recv_into()` a buffer reused for the whole relay instead of `recv()` allocating each chunk |
 | `blocking` | Blocking sockets, with the write timeout as the kernel's `SO_SNDTIMEO` |
 | `pumps` | Two threads per relay, one per direction, blocking in `recv()`; no selector |

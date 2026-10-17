@@ -8,7 +8,12 @@ from unittest.mock import MagicMock, NonCallableMagicMock, call, create_autospec
 
 import pytest
 
-from simple_socks5.constants import RELAY_BUFFER_SIZE, RELAY_WRITE_TIMEOUT, AddressTypeCodes
+from simple_socks5.constants import (
+    RELAY_BUFFER_SIZE,
+    RELAY_INITIAL_BUFFER_SIZE,
+    RELAY_WRITE_TIMEOUT,
+    AddressTypeCodes,
+)
 from simple_socks5.exceptions import PolicyDeniedError
 from simple_socks5.models import DetailedAddress
 from simple_socks5.relays.tcp_relay import TCPRelay
@@ -300,16 +305,29 @@ class TestTCPRelay(unittest.TestCase):
         proxy.recv.side_effect = [b"response", b""]
         return relay, client, proxy
 
-    def test_reads_up_to_buffer_size_and_writes_with_sendall(self) -> None:
+    def test_reads_up_to_initial_buffer_size_and_writes_with_sendall(self) -> None:
         relay, client, proxy = self._relay_one_exchange()
 
         relay.listen_and_relay()
 
-        assert client.recv.call_args_list == [call(RELAY_BUFFER_SIZE)] * 2
+        assert client.recv.call_args_list == [call(RELAY_INITIAL_BUFFER_SIZE)] * 2
         proxy.sendall.assert_called_once_with(b"request data")
         client.sendall.assert_called_once_with(b"response")
         proxy.send.assert_not_called()
         client.send.assert_not_called()
+
+    def test_read_that_fills_the_buffer_grows_only_that_direction(self) -> None:
+        relay, client, proxy, selector = self._create_relay()
+        selector.select.side_effect = [
+            [(_event(sock), selectors.EVENT_READ)] for sock in (client, client, proxy, client, proxy)
+        ]
+        client.recv.side_effect = [b"x" * RELAY_INITIAL_BUFFER_SIZE, b"rest", b""]
+        proxy.recv.side_effect = [b"response", b""]
+
+        relay.listen_and_relay()
+
+        assert client.recv.call_args_list == [call(RELAY_INITIAL_BUFFER_SIZE)] + [call(RELAY_BUFFER_SIZE)] * 2
+        assert proxy.recv.call_args_list == [call(RELAY_INITIAL_BUFFER_SIZE)] * 2
 
     def test_counts_bytes_each_direction(self) -> None:
         relay, _, _ = self._relay_one_exchange()

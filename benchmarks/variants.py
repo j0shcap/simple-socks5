@@ -4,7 +4,7 @@ optimization candidate can be measured before anyone implements it. The proxy's 
 
 A variant spec joins names with "+", e.g. "pumps+buf=1048576". Available:
 
-    buf=N        relay buffer of N bytes instead of 256 KiB
+    buf=N        relay reads of N bytes throughout, instead of 64 KiB growing to 256 KiB
     recv_into    recv_into() a buffer reused for the life of the relay, instead of recv() allocating each chunk
     blocking     blocking sockets with the write timeout as the kernel's SO_SNDTIMEO. A socket with a Python
                  timeout poll()s before every recv() and send(), on top of the selector's select()
@@ -68,7 +68,8 @@ def _blocking(_: str) -> None:
 
 
 def _buf(value: str) -> None:
-    _patch(tcp_relay, "RELAY_BUFFER_SIZE", int(value))
+    for name in ("RELAY_INITIAL_BUFFER_SIZE", "RELAY_BUFFER_SIZE"):
+        _patch(tcp_relay, name, int(value))
 
 
 def _stack(value: str) -> None:
