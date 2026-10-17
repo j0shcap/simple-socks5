@@ -50,7 +50,11 @@ docker run -p 127.0.0.1:1080:1080 -e SOCKS5_AUTH_REQUIRED=false jcaponigro20/sim
 
 Setting `SOCKS5_AUTH_REQUIRED=false` explicitly acknowledges the choice: the open-proxy warning banner is replaced by a single INFO line. The default-credentials warning still appears unless you set your own `SOCKS5_USERNAME`/`SOCKS5_PASSWORD`. See [Security](#security).
 
-### Upgrading to 2.1
+### Upgrading to 2.2
+
+If you override the image's command or healthcheck, or parse its logs, read [Upgrading from 2.1](CHANGELOG.md#upgrading-from-21-behaviour-changes). The healthcheck is now `python -m simple_socks5.healthcheck`, ERROR lines mean a fault in the proxy, and repeated handshake-timeout and failed-login warnings are rate-limited. To keep the 2.1 behaviour, pin `jcaponigro20/simple-socks5:2.1.0`.
+
+### Upgrading from 2.0 to 2.1
 
 2.1 changes some defaults: the image logs at `info`, proxying to loopback and link-local addresses is refused unless `SOCKS5_ALLOW_LOOPBACK=true`, nothing is written to `/app/errors.log` unless `SOCKS5_LOG_FILE` is set, and `latest` moves only on releases. Each of these has an opt-out. An empty `SOCKS5_USERNAME` or `SOCKS5_PASSWORD` can no longer be used to log in, with no opt-out. See [Upgrading from 2.0](CHANGELOG.md#upgrading-from-20-behaviour-changes). To keep the 2.0 behaviour, pin `jcaponigro20/simple-socks5:2.0.0`.
 
@@ -137,18 +141,19 @@ Docker's default bridge network has no IPv6. A client that resolves names itself
 ### Version tags and pinning
 
 ```bash
-docker pull jcaponigro20/simple-socks5:2.1.0   # exact release, recommended for production
-docker pull jcaponigro20/simple-socks5:2.1     # 2.1.x patch releases
+docker pull jcaponigro20/simple-socks5:2.2.0   # exact release, recommended for production
+docker pull jcaponigro20/simple-socks5:2.2     # 2.2.x patch releases
 docker pull jcaponigro20/simple-socks5:2       # 2.x minor and patch releases
 ```
 
 | Tag | Follows |
 |-----|---------|
-| `X.Y.Z` (e.g. `2.1.0`) | One release; never moves. |
+| `X.Y.Z` (e.g. `2.2.0`) | One release; never moves. |
 | `X.Y`, `X` | The newest release in that line. |
 | `latest` | The newest stable release. |
 | `main` | The `main` branch; unreleased, for testing only. |
 | `X.Y.Z-logging-disabled`, `logging-disabled` | The same, with logging disabled. |
+| `2.1.0`, `2.1.0-logging-disabled` | The pre-2.2 behaviour. |
 | `2.0.0`, `2.0.0-logging-disabled` | The pre-2.1 behaviour. |
 
 The image's `HEALTHCHECK` runs `python -m simple_socks5.healthcheck` every 30 seconds. It sends a SOCKS5 greeting to `127.0.0.1` on `SOCKS5_HEALTHCHECK_PORT` (default `1080`) and passes on any SOCKS5 reply, so it works with and without authentication, and the proxy logs it at `debug` only. If you override the command with a different `--port`, set `SOCKS5_HEALTHCHECK_PORT` to match. If you bind a specific non-loopback address instead of `0.0.0.0` or `::`, the healthcheck can't reach it.
