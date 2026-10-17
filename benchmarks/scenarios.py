@@ -267,10 +267,10 @@ def small_writes(bench: Bench) -> None:
     """
     Request/response round trips over one connection, each message written in two parts.
 
-    This is where Nagle's algorithm on the proxy's sockets would add delay.
+    This is the case Nagle's algorithm delays; the proxy turns it off on both relay sockets.
     """
     count = bench.size(300, 30)
-    for path, proxy in _paths(bench, "small-writes", ("nodelay",)):
+    for path, proxy in _paths(bench, "small-writes"):
         m = bench.run(
             "round_trips", _route(bench, proxy), size=ROUND_TRIP_MESSAGE, concurrency=1, count=count, proxy=proxy
         )
