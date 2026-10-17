@@ -1,3 +1,4 @@
+import contextlib
 import errno
 import logging
 import selectors
@@ -99,6 +100,41 @@ class TestTCPRelay(unittest.TestCase):
 
         proxy.close.assert_called_once()
         mock_sel_cls.return_value.close.assert_called_once()
+
+    def test_init_disables_nagle_on_both_sockets(self) -> None:
+        _relay, client, proxy, _selector = self._create_relay()
+        for sock in (client, proxy):
+            sock.setsockopt.assert_any_call(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+
+    @patch("simple_socks5.relays.tcp_relay.selectors.DefaultSelector", autospec=True)
+    @patch("simple_socks5.relays.tcp_relay.connect_any", autospec=True)
+    def test_init_closes_proxy_socket_when_setsockopt_fails(
+        self, mock_connect_any: MagicMock, mock_sel_cls: MagicMock
+    ) -> None:
+        proxy = _socket()
+        proxy.setsockopt.side_effect = OSError(errno.EINVAL, "Invalid argument")
+        mock_connect_any.return_value = (proxy, RESOLVED)
+
+        with pytest.raises(OSError, match="Invalid argument"):
+            TCPRelay(_socket(), DOMAIN)
+
+        proxy.close.assert_called_once()
+        mock_sel_cls.return_value.close.assert_called_once()
+
+    def test_init_sets_nodelay_on_real_sockets(self) -> None:
+        with contextlib.ExitStack() as stack:
+            listener = stack.enter_context(socket.create_server(("127.0.0.1", 0)))
+            stack.enter_context(socket.create_connection(listener.getsockname()))
+            client = stack.enter_context(listener.accept()[0])
+            upstream = stack.enter_context(socket.create_connection(listener.getsockname()))
+            stack.enter_context(listener.accept()[0])
+
+            with patch("simple_socks5.relays.tcp_relay.connect_any", autospec=True, return_value=(upstream, RESOLVED)):
+                relay = TCPRelay(client, DOMAIN)
+            stack.callback(relay.selector.close)
+
+            for sock in (relay.client_connection, relay.proxy_connection):
+                assert sock.getsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY) != 0
 
     def test_relay_data_eof_triggers_cleanup(self) -> None:
         relay, client, proxy, selector = self._create_relay()
@@ -224,6 +260,8 @@ class TestTCPRelay(unittest.TestCase):
         ]
         client.recv.return_value = b""
         proxy.recv.return_value = b""
+        for sock in (client, proxy):
+            sock.setsockopt.reset_mock()  # TCP_NODELAY, set in __init__
 
         relay.listen_and_relay()
 

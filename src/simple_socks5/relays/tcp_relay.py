@@ -29,6 +29,7 @@ class TCPRelay(BaseRelay):
         sock: socket.socket | None = None
         try:
             sock, self.dst_address = connect_any(dst_address)
+            self._disable_nagle(sock)
             self.selector.register(client_connection, selectors.EVENT_READ)
             self.selector.register(sock, selectors.EVENT_READ)
         except Exception:
@@ -86,6 +87,15 @@ class TCPRelay(BaseRelay):
         if ready is self.client_connection:
             return self.client_connection, self.proxy_connection
         return self.proxy_connection, self.client_connection
+
+    def _disable_nagle(self, upstream: socket.socket) -> None:
+        """
+        Sends small writes at once. Otherwise the second part of a message written in two waits until the first is
+        acknowledged, which the peer delays (about 40 ms on Linux). Set before the CONNECT reply, so that isn't held
+        either.
+        """
+        for sock in (self.client_connection, upstream):
+            sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
 
     def _prepare_sockets(self) -> None:
         """
