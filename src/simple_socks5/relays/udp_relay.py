@@ -3,7 +3,7 @@ import selectors
 import socket
 import time
 
-from ..constants import RELAY_BUFFER_SIZE, UDP_FORWARD_TIMEOUT, UDP_RECV_TIMEOUT
+from ..constants import UDP_BUFFER_SIZE, UDP_FORWARD_TIMEOUT, UDP_RECV_TIMEOUT
 from ..exceptions import MalformedDatagramError, PolicyDeniedError
 from ..handlers import UDPHandler
 from ..logger import get_logger
@@ -63,7 +63,7 @@ class UDPRelay(BaseRelay):
 
                 if self.proxy_connection in ready:
                     try:
-                        data, addr = self.proxy_connection.recvfrom(RELAY_BUFFER_SIZE)
+                        data, addr = self.proxy_connection.recvfrom(UDP_BUFFER_SIZE)
                     except BlockingIOError:
                         continue
                     if self._handle_datagram(data, addr):
@@ -84,7 +84,7 @@ class UDPRelay(BaseRelay):
         Nothing is expected on it after the reply, so any data is discarded.
         """
         try:
-            data = self.client_connection.recv(RELAY_BUFFER_SIZE)
+            data = self.client_connection.recv(UDP_BUFFER_SIZE)
         except OSError as e:
             logger.debug("UDP control connection error: %s", e)
             return False
@@ -142,7 +142,7 @@ class UDPRelay(BaseRelay):
             )
 
             try:
-                response, remote_addr = forward_socket.recvfrom(RELAY_BUFFER_SIZE)
+                response, remote_addr = forward_socket.recvfrom(UDP_BUFFER_SIZE)
                 header = UDPHandler.build_udp_response_header(remote_addr[0], remote_addr[1])
                 encapsulated = header + response
                 self.proxy_connection.sendto(encapsulated, client_addr)

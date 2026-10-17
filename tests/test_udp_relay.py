@@ -5,11 +5,11 @@ import socket
 import struct
 import threading
 import unittest
-from unittest.mock import MagicMock, NonCallableMagicMock, create_autospec, patch
+from unittest.mock import MagicMock, NonCallableMagicMock, call, create_autospec, patch
 
 import pytest
 
-from simple_socks5.constants import AddressTypeCodes
+from simple_socks5.constants import UDP_BUFFER_SIZE, AddressTypeCodes
 from simple_socks5.handlers.udp import UDPHandler
 from simple_socks5.models import DetailedAddress
 from simple_socks5.relays.udp_relay import UDPRelay
@@ -96,6 +96,13 @@ class TestHandleDatagram(unittest.TestCase):
         # RSV(2) + FRAG(1) + ATYP(1)=IPv4 + ADDR(4) + PORT(2) + DATA
         expected = b"\x00\x00\x00\x01" + socket.inet_aton("10.0.0.1") + struct.pack("!H", 53) + b"response"
         self.relay_socket.sendto.assert_called_once_with(expected, CLIENT_ADDR)
+
+    def test_forward_reads_with_udp_buffer_size(self) -> None:
+        forward_socket = mock_forward_socket()
+        with patch("simple_socks5.relays.udp_relay.socket.socket", autospec=True, return_value=forward_socket):
+            self.relay._handle_datagram(build_udp_datagram("10.0.0.1", 53, b"hello"), CLIENT_ADDR)
+
+        forward_socket.recvfrom.assert_called_once_with(UDP_BUFFER_SIZE)
 
     def test_counts_payload_bytes_each_direction(self) -> None:
         with patch(
@@ -280,6 +287,20 @@ class TestListenAndRelay(unittest.TestCase):
             self.assert_relay_ends(thread)
         forward.assert_called_once()
         assert forward.call_args[0][0].data == b"hello"
+
+    def test_reads_with_udp_buffer_size(self) -> None:
+        self.relay.proxy_connection = MagicMock(wraps=self.relay.proxy_connection)
+        self.relay.client_connection = MagicMock(wraps=self.relay.client_connection)
+        forwarded = threading.Event()
+        with patch.object(self.relay, "_forward_packet", autospec=True, side_effect=lambda *_: forwarded.set()):
+            thread = self.start_relay()
+            self.send_datagrams(build_udp_datagram("10.0.0.1", 53, b"hello"))
+            assert forwarded.wait(JOIN_TIMEOUT)
+            self.control.close()
+            self.assert_relay_ends(thread)
+
+        assert self.relay.proxy_connection.recvfrom.call_args_list == [call(UDP_BUFFER_SIZE)]
+        assert self.relay.client_connection.recv.call_args_list == [call(UDP_BUFFER_SIZE)]
 
     def test_spurious_readiness_keeps_association(self) -> None:
         """select() may report a datagram that recvfrom then finds discarded (e.g. a bad UDP checksum)."""
