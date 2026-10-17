@@ -9,3 +9,4 @@ tests
 **/*.egg-info
 errors.log
 CLAUDE.md
+benchmarks

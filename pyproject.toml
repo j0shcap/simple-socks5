@@ -11,16 +11,20 @@ license = "MIT"
 
 [project.optional-dependencies]
 # Ruff and mypy are pinned exactly so local runs and CI lint, format and type-check identically; bump them on purpose.
-dev = ["ruff==0.16.10", "mypy==2.4.0", "pytest", "pytest-cov"]
+# py-spy samples the proxy's threads for benchmarks/ (python -m benchmarks --profile py-spy).
+dev = ["ruff==0.16.10", "mypy==2.4.0", "pytest", "pytest-cov", "py-spy"]
 
 [project.scripts]
 simple-socks5 = "simple_socks5.main:cli"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# The benchmark harness smoke test is slow and only checks it runs: pytest -m bench
+addopts = ["-m", "not bench"]
+markers = ["bench: runs the benchmark harness in benchmarks/ with tiny sizes"]
 
 [tool.mypy]
-files = ["src", "tests"]
+files = ["src", "tests", "benchmarks"]
 mypy_path = "src"
 python_version = "3.10"
 strict = true
@@ -54,4 +58,10 @@ ignore = [
     "PLR2004",               # expected values in assertions are the point of a test
     "S104",                  # tests exercise bind-all ("0.0.0.0") handling
     "S105", "S106", "S107",  # fixed fake credentials
+]
+"benchmarks/**" = [
+    "T201",          # a command-line tool that prints its results
+    "S603", "S607",  # starts the proxy, origins, py-spy and git as subprocesses by design
+    "PLR2004",       # sizes and counts are spelled out where they are used
+    "S101",          # asserts narrow types for mypy
 ]

@@ -11,3 +11,4 @@ build/
 
 # Coverage data from pytest --cov
 .coverage
+benchmarks/results/

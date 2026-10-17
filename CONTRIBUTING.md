@@ -28,6 +28,12 @@ the suite, or on their own with `pytest tests/e2e`. CI also builds the image and
 docker build -t simple-socks5:dev . && bash .github/scripts/smoke-test.sh simple-socks5:dev
 ```
 
+## Benchmarks
+
+`python -m benchmarks <scenario>` measures the proxy against direct connections and can profile it; see
+[benchmarks/README.md](benchmarks/README.md). Run it before and after a change that is meant to be faster, and
+compare the two with `python -m benchmarks compare`.
+
 ## Rules
 
 - The runtime is standard library only. Tools go in the `dev` extra.
