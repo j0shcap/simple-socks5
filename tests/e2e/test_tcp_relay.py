@@ -1,12 +1,19 @@
 import contextlib
 import hashlib
 import socket
+import statistics
 import threading
 import time
 
 from tests.e2e import socks_client as sc
 from tests.e2e.conftest import ProxyHandle, RecordingOrigin
-from tests.e2e.origins import Origin, deterministic_payload
+from tests.e2e.origins import (
+    SPLIT_WRITE_GAP,
+    SPLIT_WRITE_HEADER,
+    SPLIT_WRITE_SIZE,
+    Origin,
+    deterministic_payload,
+)
 
 SLOW_READER_SIZE = 20 * 1024 * 1024
 SLOW_READER_RATE = 10 * 1024 * 1024  # bytes/s; far below loopback, well inside the origin's 5 s sendall
@@ -15,6 +22,7 @@ SLOW_READER_CHUNK = 16384
 BULK_SIZE = 10 * 1024 * 1024
 UPLOAD_SIZE = 1024 * 1024
 DISCONNECT_AFTER_BYTES = 256 * 1024
+SPLIT_WRITE_ROUNDS = 20
 
 
 def _sha256(data: bytes) -> str:
@@ -142,3 +150,21 @@ def test_origin_reset_closes_client_promptly(proxy: ProxyHandle, reset_origin: R
         closed_at = time.monotonic()
 
     assert closed_at - reset_origin.results.get(timeout=sc.TIMEOUT) < 1.0
+
+
+def test_split_writes_are_not_delayed(proxy: ProxyHandle, split_reply_origin: Origin) -> None:
+    # Each message goes both ways in two writes. Unless the relay disables Nagle's algorithm, its second write waits
+    # for the peer's delayed ACK, 40 ms or more on Linux
+    header, body = bytes(SPLIT_WRITE_HEADER), bytes(SPLIT_WRITE_SIZE - SPLIT_WRITE_HEADER)
+    latencies = []
+    with sc.open_tunnel(proxy.address, "127.0.0.1", split_reply_origin.port) as tunnel:
+        tunnel.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        for _ in range(SPLIT_WRITE_ROUNDS):
+            start = time.monotonic()
+            tunnel.sendall(header)
+            time.sleep(SPLIT_WRITE_GAP)
+            tunnel.sendall(body)
+            sc.recv_exact(tunnel, SPLIT_WRITE_SIZE)
+            latencies.append(time.monotonic() - start)
+
+    assert statistics.median(latencies) < 0.020

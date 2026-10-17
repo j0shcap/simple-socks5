@@ -38,6 +38,9 @@ TRICKLE_CHUNK = b"x" * 1024
 TRICKLE_INTERVAL = 0.1  # seconds
 STREAM_CHUNK_SIZE = 65536
 RESET_AFTER_BYTES = 1024 * 1024
+SPLIT_WRITE_SIZE = 512
+SPLIT_WRITE_HEADER = 6
+SPLIT_WRITE_GAP = 0.001  # seconds
 
 ServerT = TypeVar("ServerT", bound=socketserver.BaseServer)
 ResultT = TypeVar("ResultT")
@@ -152,6 +155,27 @@ class ResetMidTransferHandler(socketserver.BaseRequestHandler):
         self.request.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))
         self.request.close()
         self.server.results.put(time.monotonic())
+
+
+class SplitReplyHandler(socketserver.BaseRequestHandler):
+    """
+    Answers each SPLIT_WRITE_SIZE message once it has all of it, in two writes SPLIT_WRITE_GAP apart: the pattern
+    Nagle's algorithm delays.
+    """
+
+    def handle(self) -> None:
+        self.request.settimeout(HANDLER_TIMEOUT)
+        # Each write leaves at once, so any delay comes from the proxy
+        self.request.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        reply = bytes(SPLIT_WRITE_SIZE)
+        pending = 0
+        while data := self.request.recv(65536):
+            pending += len(data)
+            while pending >= SPLIT_WRITE_SIZE:
+                pending -= SPLIT_WRITE_SIZE
+                self.request.sendall(reply[:SPLIT_WRITE_HEADER])
+                time.sleep(SPLIT_WRITE_GAP)
+                self.request.sendall(reply[SPLIT_WRITE_HEADER:])
 
 
 class PayloadHTTPHandler(BaseHTTPRequestHandler):

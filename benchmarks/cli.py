@@ -55,7 +55,7 @@ def _parser() -> argparse.ArgumentParser:
         action="append",
         default=[],
         metavar="SPEC",
-        help="also run the proxy with this variant, e.g. nodelay or pumps+buf=262144 (repeatable)",
+        help="also run the proxy with this variant, e.g. buf=262144 or pumps+buf=262144 (repeatable)",
     )
     parser.add_argument(
         "-L",

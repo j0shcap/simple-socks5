@@ -62,6 +62,7 @@ from tests.e2e.origins import (
     RecordingOriginTCPServer,
     ReplyThenReadHandler,
     ResetMidTransferHandler,
+    SplitReplyHandler,
     StreamUntilClosedHandler,
     TrickleHandler,
     UDPEchoHandler,
@@ -191,6 +192,11 @@ def reset_origin() -> Iterator[RecordingOrigin[float]]:
 @pytest.fixture
 def trickle_origin() -> Iterator[Origin]:
     yield from _serve_origin(OriginTCPServer(("127.0.0.1", 0), TrickleHandler))
+
+
+@pytest.fixture
+def split_reply_origin() -> Iterator[Origin]:
+    yield from _serve_origin(OriginTCPServer(("127.0.0.1", 0), SplitReplyHandler))
 
 
 @pytest.fixture

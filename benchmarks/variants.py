@@ -2,9 +2,8 @@
 Experimental changes to the proxy, applied by the launcher inside the benchmark's proxy process only, so an
 optimization candidate can be measured before anyone implements it. The proxy's code is never modified.
 
-A variant spec joins names with "+", e.g. "nodelay+buf=262144". Available:
+A variant spec joins names with "+", e.g. "pumps+buf=262144". Available:
 
-    nodelay      TCP_NODELAY on both relay sockets
     buf=N        relay buffer of N bytes instead of 64 KiB
     recv_into    recv_into() a buffer reused for the life of the relay, instead of recv() allocating each chunk
     blocking     blocking sockets with the write timeout as the kernel's SO_SNDTIMEO. A socket with a Python
@@ -47,17 +46,6 @@ def _patch(owner: object, name: str, value: object) -> None:
 
 def _buffer_size() -> int:
     return int(vars(tcp_relay)["RELAY_BUFFER_SIZE"])  # read at call time, so buf=N applies
-
-
-def _nodelay(_: str) -> None:
-    prepare = TCPRelay._prepare_sockets
-
-    def prepare_with_nodelay(self: TCPRelay) -> None:
-        prepare(self)
-        for sock in (self.client_connection, self.proxy_connection):
-            sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-
-    _patch(TCPRelay, "_prepare_sockets", prepare_with_nodelay)
 
 
 def _kernel_write_timeout(sock: socket.socket) -> None:
@@ -203,7 +191,6 @@ def _splice(_: str) -> None:
 
 
 _VARIANTS: dict[str, Callable[[str], None]] = {
-    "nodelay": _nodelay,
     "buf": _buf,
     "recv_into": _recv_into,
     "blocking": _blocking,

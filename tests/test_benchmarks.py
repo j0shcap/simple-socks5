@@ -57,7 +57,7 @@ def test_candidates_and_profilers_run(tmp_path: Path) -> None:
     results = _bench(tmp_path, "bulk", "small-writes", "idle", "--candidates", "--profile", "sample", "--tracemalloc")
 
     paths = {row["path"] for row in results["rows"]}
-    assert {"proxy+nodelay", "proxy+pumps", "proxy+stack=262144", "proxy+buf=262144"} <= paths
+    assert {"proxy+pumps", "proxy+stack=262144", "proxy+buf=262144"} <= paths
     assert list(tmp_path.glob("*.sample.svg"))
 
 
@@ -107,7 +107,7 @@ def _texts(svg: Path) -> list[str]:
 @pytest.fixture(scope="module")
 def quick_run(tmp_path_factory: pytest.TempPathFactory) -> Path:
     out = tmp_path_factory.mktemp("quick")
-    _bench(out, "first-byte", "small-writes", "concurrency", "--variant", "nodelay")
+    _bench(out, "first-byte", "small-writes", "concurrency", "--variant", "buf=262144")
     return out / "results.json"
 
 
@@ -118,7 +118,7 @@ def test_chart_writes_an_svg_per_scenario(quick_run: Path, tmp_path: Path) -> No
         texts = _texts(tmp_path / f"{scenario}.svg")
         assert texts[0] == scenario
         assert texts[1].endswith("."), "the subtitle is the docstring's whole first paragraph"
-        assert {"direct", "proxy", "proxy+nodelay"} <= set(texts)
+        assert {"direct", "proxy", "proxy+buf=262144"} <= set(texts)
         assert any(text.endswith((" ms", " MB/s")) for text in texts)
 
 
@@ -132,7 +132,7 @@ def test_chart_marks_lower_is_better(tmp_path: Path) -> None:
             "primary": "p50 ms",
             "notes": [],
         }
-        for path, p50 in (("direct", 1.43), ("proxy", 85.5), ("proxy+nodelay", 1.9))
+        for path, p50 in (("direct", 1.43), ("proxy", 85.5), ("proxy+buf=262144", 1.9))
     ]
     results = tmp_path / "results.json"
     results.write_text(json.dumps({"environment": {}, "rows": rows}))
@@ -151,7 +151,7 @@ def test_concurrency_scaling_chart(quick_run: Path, tmp_path: Path) -> None:
     texts = _texts(svg)
     assert len(list(_root(svg).iter(f"{SVG}polyline"))) == 3
     assert {"1", "4"} <= set(texts)
-    assert {"direct", "proxy", "proxy+nodelay"} <= set(texts)
+    assert {"direct", "proxy", "proxy+buf=262144"} <= set(texts)
 
 
 def test_compare_chart(quick_run: Path, tmp_path: Path) -> None:
