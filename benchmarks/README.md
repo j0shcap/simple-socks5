@@ -119,7 +119,7 @@ three times and the median is kept (`--repeat`). Each scenario takes under two m
 |---|---|
 | `--quick` | Tiny sizes: checks the harness runs. Measures nothing. |
 | `--candidates` | Adds the scenario's candidate variants (below) as extra proxy rows. |
-| `--variant SPEC` | Adds a proxy row with a variant, e.g. `buf=262144` or `pumps+buf=262144`. |
+| `--variant SPEC` | Adds a proxy row with a variant, e.g. `buf=65536` or `pumps+buf=1048576`. |
 | `-L LEVEL`, `--env NAME=VALUE` | The proxy's log level (default `info`, as in the image) and extra environment. |
 | `--python PATH`, `--installed` | The interpreter running the proxy; use its installed `simple_socks5` instead of `src/`. |
 | `--profile KIND` | `cprofile`, `cprofile-cpu`, `sample` or `py-spy`: see [Profiling](#profiling). |
@@ -153,7 +153,7 @@ the benchmark's proxy process only. These are sketches made to be measured, not 
 
 | Variant | Change |
 |---|---|
-| `buf=N` | `RELAY_BUFFER_SIZE` of N bytes instead of 64 KiB |
+| `buf=N` | `RELAY_BUFFER_SIZE` of N bytes instead of 256 KiB |
 | `recv_into` | `recv_into()` a buffer reused for the whole relay instead of `recv()` allocating each chunk |
 | `blocking` | Blocking sockets, with the write timeout as the kernel's `SO_SNDTIMEO` |
 | `pumps` | Two threads per relay, one per direction, blocking in `recv()`; no selector |
