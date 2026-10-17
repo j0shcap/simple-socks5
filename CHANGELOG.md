@@ -8,6 +8,27 @@ to make the proxy safer; each such change is marked **Behaviour change** and is 
 
 ## [Unreleased]
 
+## [2.2.0] - 2026-10-16
+
+### Upgrading from 2.1 (behaviour changes)
+
+These changes affect you if you override the image's command or healthcheck, or parse its logs:
+
+1. **Healthcheck command.** The image healthcheck runs `python -m simple_socks5.healthcheck`. If
+   you copied `python -m src.healthcheck` into a compose file or Kubernetes probe, update it.
+2. **Default command.** The image runs `python -m simple_socks5 --host 0.0.0.0 --port 1080`.
+   Overrides that run `python app.py ...` keep working.
+3. **Log file logger names.** `SOCKS5_LOG_FILE` lines name loggers `[simple_socks5.…]` instead of
+   `[src.…]`. Console lines are unchanged.
+4. **Log levels.** ERROR now means a fault in the proxy: client mistakes log at DEBUG and
+   unreachable destinations at INFO. `Authenticated user` logs at DEBUG.
+5. **Rate-limited warnings.** Handshake-timeout and failed-login warnings are logged at most once
+   every 10 s. Set `LOGGING_LEVEL=debug` to see every failure with the client's IP.
+6. **CONNECTION lines.** A CONNECT logs its `CONNECTION` line only once the destination has
+   connected, so these lines no longer count failed attempts.
+7. **Keep 2.1 entirely.** Pin `jcaponigro20/simple-socks5:2.1.0` (or
+   `:2.1.0-logging-disabled`).
+
 ### Added
 - `pip install .` installs a `simple-socks5` command, which takes the same flags as
   `python3 app.py`. `python -m simple_socks5` works too.
@@ -243,7 +264,8 @@ defaults changed:
 - Host, port and logging level set on the command line.
 - Docker image running as a non-root user, with a variant that has logging disabled.
 
-[Unreleased]: https://github.com/j0shcap/simple-socks5/compare/v2.1.0...HEAD
+[Unreleased]: https://github.com/j0shcap/simple-socks5/compare/v2.2.0...HEAD
+[2.2.0]: https://github.com/j0shcap/simple-socks5/compare/v2.1.0...v2.2.0
 [2.1.0]: https://github.com/j0shcap/simple-socks5/compare/v2.0.0...v2.1.0
 [2.0.0]: https://github.com/j0shcap/simple-socks5/compare/v1.0.0...v2.0.0
 [1.0.0]: https://github.com/j0shcap/simple-socks5/releases/tag/v1.0.0
