@@ -14,8 +14,10 @@ from xml.etree import ElementTree
 
 import pytest
 
+import simple_socks5.main
 from benchmarks import profiles, variants
 from simple_socks5.relays import tcp_relay
+from simple_socks5.relays.tcp_relay import TCPRelay
 
 ROOT = Path(__file__).resolve().parents[1]
 SVG = "{http://www.w3.org/2000/svg}"
@@ -59,7 +61,7 @@ def test_candidates_and_profilers_run(tmp_path: Path) -> None:
     results = _bench(tmp_path, "bulk", "small-writes", "idle", "--candidates", "--profile", "sample", "--tracemalloc")
 
     paths = {row["path"] for row in results["rows"]}
-    assert {"proxy+pumps", "proxy+stack=262144", "proxy+buf=65536"} <= paths
+    assert {"proxy+recv_into", "proxy+stack=262144", "proxy+buf=65536"} <= paths
     assert list(tmp_path.glob("*.sample.svg"))
 
 
@@ -69,6 +71,23 @@ def test_buf_variant_fixes_the_relay_read_size() -> None:
         variants.apply("buf=16384")
 
         assert (module["RELAY_INITIAL_BUFFER_SIZE"], module["RELAY_BUFFER_SIZE"]) == (16384, 16384)
+
+
+def test_stack_variant_replaces_the_stack_size_main_sets() -> None:
+    with patch.dict(vars(simple_socks5.main)):
+        variants.apply("stack=262144")
+
+        assert vars(simple_socks5.main)["THREAD_STACK_SIZE"] == 262144
+
+
+def test_copy_variants_replace_only_how_the_relay_moves_a_chunk() -> None:
+    for name in ("recv_into", "splice") if sys.platform == "linux" else ("recv_into",):
+        with patch.object(TCPRelay, "_move", TCPRelay._move), patch.object(TCPRelay, "_cleanup", TCPRelay._cleanup):
+            move, pump = TCPRelay._move, TCPRelay._pump
+            variants.apply(name)
+
+            assert TCPRelay._move is not move
+            assert TCPRelay._pump is pump
 
 
 def test_cprofile_runs(tmp_path: Path) -> None:

@@ -54,6 +54,9 @@ def connect_timeout() -> float:
 
 
 DEFAULT_MAX_CONNECTIONS: Final[int] = 200
+# Each connection has two threads, one per relay direction. Glibc's default 8 MiB stack is virtual memory only, but
+# at the connection limit it would take more address space than a 32-bit process has. 512 KiB is macOS's default.
+THREAD_STACK_SIZE: Final[int] = 524288
 CONNECTION_LIMIT_WARNING_INTERVAL: Final[float] = 10.0  # seconds between "connection limit reached" warnings
 POLICY_DENIED_WARNING_INTERVAL: Final[float] = 10.0  # seconds between "destination denied" warnings
 HANDSHAKE_TIMEOUT_WARNING_INTERVAL: Final[float] = 10.0  # seconds between "handshake timed out" warnings
@@ -102,8 +105,9 @@ def healthcheck_port() -> int:
 RELAY_INITIAL_BUFFER_SIZE: Final[int] = 65536
 RELAY_BUFFER_SIZE: Final[int] = 262144
 UDP_BUFFER_SIZE: Final[int] = 65536  # the largest datagram
-TCP_SELECTOR_TIMEOUT: Final[int] = 3  # seconds
-# Bounds a whole sendall() call, so a reader slower than RELAY_BUFFER_SIZE per this many seconds is dropped
+# How often a relay blocked in a read checks that both of its sockets are still open
+RELAY_IDLE_CHECK_INTERVAL: Final[int] = 3  # seconds
+# Bounds the whole write of one chunk, so a reader slower than RELAY_BUFFER_SIZE per this many seconds is dropped
 RELAY_WRITE_TIMEOUT: Final[float] = 300.0  # seconds
 LOG_FILE_MAX_BYTES: Final[int] = 1048576  # 1 MB
 LOG_FILE_BACKUP_COUNT: Final[int] = 5

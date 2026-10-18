@@ -7,40 +7,45 @@ its time goes. It is development tooling: stdlib only, not packaged, not in the 
 
 ### Environment
 
-Linux numbers come from the image (Python 3.13, `-L info`) under Docker Desktop on an Apple M2 with 8 CPUs, via
-`run-in-docker.sh`; macOS numbers run the proxy from `src/` on the same machine. Docker Desktop's loopback is not a
-production host's, so read every number as a ratio against the proxy row of the same run. Throughput, setup,
-small writes and idle memory are medians of 5, rerun after the relay buffer change below; time to first byte and
-UDP are medians of 3 from before it, which doesn't touch them. A throughput run on a loaded host (load average 16)
-was discarded.
+The image (Python 3.13, `-L info`) under Docker Desktop on an Apple M2 with 8 CPUs, via `run-in-docker.sh`, every
+scenario with `--repeat 5` (medians). Docker Desktop's loopback is not a production host's, so read every number as
+a ratio against the direct row of the same run. Every row is rerun whenever a change lands, so the table shows only
+current numbers.
 
-| Measurement | Linux direct | Linux proxy | macOS direct | macOS proxy |
-|---|--:|--:|--:|--:|
-| 1 stream download, MB/s | 6,599 | 5,621 | 8,747 | 5,829 |
-| 10 / 50 / 200 connections, MB/s | 7,786 / 6,809 / 6,224 | 4,367 / 3,236 / 2,459 | 7,990 / 6,403 / 4,724 | 3,601 / 2,520 / 3,252 |
-| Setup c=50, req/s (p99 ms) | 7,252 (27.7) | 1,486 (62.2) | 13,387 (6.6) | 2,163 (44.2) |
-| Time to first byte p50, ms | 0.13 | 0.50 | 0.11 | 0.36 |
-| Split-write round trip p50, ms | 1.56 | 1.71 (85.1 before `TCP_NODELAY`) | 1.66 | 1.74 |
-| UDP round trips/s, 1 / 8 associations | 23,570 / 77,372 | 9,613 / 10,085 | 32,284 / 80,733 | 8,237 / 13,633 |
-| Idle connection | | 29.1 KiB RSS, 1 thread, 8 MiB virtual | | ~15 KiB RSS (noisy) |
+| Measurement | Direct | Proxy |
+|---|--:|--:|
+| 1 stream download / upload, MB/s | 6,983 / 6,476 | 6,425 / 6,169 |
+| 10 / 50 / 200 connections, MB/s | 8,506 / 6,926 / 6,391 | 7,278 / 5,560 / 3,881 |
+| Setup c=1 / c=50, req/s | 5,686 / 8,199 | 1,681 / 1,650 |
+| Time to first byte p50, ms | 0.14 | 0.50 |
+| Split-write round trip p50, ms | 1.62 | 1.59 |
+| UDP round trips/s, 1 / 8 associations | 23,090 / 60,404 | 10,018 / 9,291 |
+| Idle connection | | 54.1 KiB RSS, 2 threads, 1.1 MiB virtual |
 
-A message written in two parts used to wait about 83 ms on Linux: Nagle's algorithm held the second part until
-the first was acknowledged, and the receiver delayed that acknowledgement. The proxy now sets `TCP_NODELAY` on
-both relay sockets.
+What recent changes did, each from back-to-back runs against `main`:
 
-The relay used to read 64 KiB at a time. Each direction now starts there and reads 256 KiB at a time once a read
-fills the buffer, which took aggregate throughput from 1,920 / 1,376 / 1,036 to 4,174 / 3,148 / 2,698 MB/s at
-10 / 50 / 200 connections and one stream from 3,956 / 3,759 to 4,855 / 5,575 MB/s (download / upload), in a
-back-to-back pair against `main`. macOS setup and its other rows are from before both changes.
+- **`TCP_NODELAY` on both relay sockets.** A message written in two parts used to wait about 83 ms: Nagle's
+  algorithm held the second part until the first was acknowledged, and the receiver delayed that acknowledgement.
+- **Reads growing from 64 KiB to 256 KiB once one fills the buffer.** ×2.2 / ×2.3 / ×2.6 aggregate throughput at
+  10 / 50 / 200 connections, +23% / +48% on one stream (download / upload).
+- **A thread per relay direction, blocking in the kernel.** Each relay had one thread and a selector loop, with a
+  `poll()` before every `recv()` and `send()`. Each direction now blocks in `recv()` and then `send()`, with the
+  write timeout and the idle check enforced by the kernel (`SO_SNDTIMEO`, `SO_RCVTIMEO`): +12% / +16% / +31% at
+  10 / 50 / 200 connections, +8–11% on one stream and +8–10% setup at c=50 (medians of three pairs); setup at c=1
+  stayed within run-to-run noise. An idle connection holds two threads and 54 KiB of RSS instead of one and
+  29 KiB. Threads start with a 512 KiB stack, which takes virtual size per connection from 8 MiB to 1.1 MiB, so
+  200 connections still fit a 32-bit process.
 
 Two things stand out. Aggregate throughput still falls as connections are added while direct transfers hold up,
 because every relay competes for one GIL. And connection setup runs at a fifth of direct at c=50.
 
 ![Split-write round trips](images/small-writes.svg)
 
-![Throughput against connections](images/buffer-scaling-after.svg)
+![Throughput against connections](images/pumps-scaling-after.svg)
 
-![Single-stream throughput by relay variant, at 64 KiB](images/bulk.svg)
+![Before and after the pump threads](images/pumps-before-after.svg)
+
+![Single-stream throughput](images/bulk.svg)
 
 ![Connection setup](images/setup.svg)
 
@@ -59,11 +64,16 @@ because every relay competes for one GIL. And connection setup runs at a fifth o
   256 KiB; none in Python (`splice`) is the next step.
 - **Under concurrency, threads wait for the GIL.** Proxy CPU stays at 290–360% with 10 to 200 connections while
   throughput falls by 44%: the relays queue for the GIL after each syscall. With 256 KiB reads, socket I/O went
-  from 66% to 25% of GIL samples and starting threads became the largest share, 36%.
+  from 66% to 25% of GIL samples and starting threads became the largest share, 36%. With a thread per relay
+  direction, the selector's 8% of GIL samples is gone, and starting threads and taking locks are 38%.
 - **UDP is per-datagram Python work.** `_log_relay` formats a DEBUG line for every datagram even at INFO, 12.8% of
   GIL samples, and 8 associations reach 10.1k round trips/s against 9.6k for one.
 
 ![Connection setup: where the thread holding the GIL is](images/flame-setup.svg)
+
+![50 and 200 connections before the pump threads: where the thread holding the GIL is](images/pumps-flame-before.svg)
+
+![The same after the pump threads](images/pumps-flame-after.svg)
 
 ### Ranked optimization candidates
 
@@ -75,17 +85,18 @@ proxy row of the same run.
 | 1 | ~~`TCP_NODELAY` on both relay sockets~~ **Done** | Split-write p50 85.1 → 1.68 ms in the proxy itself; bulk, setup and concurrency within run-to-run noise | Removes a ~83 ms stall from request/response traffic | S | Low: more small packets for chatty clients | Yes |
 | 2 | ~~256 KiB relay buffer instead of 64 KiB~~ **Done**, growing from 64 KiB | Single stream +23% / +48% (download / upload); ×2.2 / ×2.3 / ×2.6 at 10 / 50 / 200 connections; idle memory and setup unchanged. A fixed 256 KiB buffer cost 8–11% of the setup rate at c=1 and 2.4 KiB per lightly used connection, hence the growth | ×2.2–2.6 aggregate throughput, measured | S | Low: up to 512 KiB of buffers per busy connection, in flight only | Yes |
 | 3 | `BaseRequestHandler` instead of `StreamRequestHandler` | RSS per idle connection 28.9 → 21.3 KiB (−26%); the unused `rfile` and `wfile` | A quarter less memory per connection | S | Low | Yes |
-| 4 | Trim per-connection work | `_cleanup` raises two `KeyError`s that `repr()` sockets (`getpeername` syscalls); a `settimeout` per handshake `recv`; a second `getpeername`. About 4% of GIL samples | A few % setup rate | S | Low | Yes |
+| 4 | Trim per-connection work | A `settimeout` per handshake `recv`; a second `getpeername`. The two `KeyError`s `_cleanup` raised went with the selector. About 4% of GIL samples before that | A few % setup rate | S | Low | Yes |
 | 5 | Format UDP DEBUG lines lazily | `_log_relay` is 12.8% of GIL samples at INFO | ~10% UDP round trips/s | S | Low | Yes |
-| 6 | Two pump threads per relay, no selector | Against a 64 KiB proxy: ×2.4 / ×2.8 at 10 / 50 connections with 64 KiB pumps, ×3.5 / ×3.9 / ×4.5 at 10 / 50 / 200 with 256 KiB ones | Up to 1.5× more than #2 alone | M | Medium: 2 threads and 158 KiB RSS per connection (×5.5) | Yes |
-| 7 | `os.splice` on Linux, on top of #6 | Against a 64 KiB proxy: single stream +76% at 67% CPU instead of 97%; ×4.2 / ×4.5 / ×4.3 at 10 / 50 / 200 connections | Near direct throughput on Linux | L | Medium: Linux-only path, pipes per relay, needs a fallback | Yes |
+| 6 | ~~Two pump threads per relay, no selector~~ **Done** | +12% / +16% / +31% at 10 / 50 / 200 connections over #2, one stream +8–11%, setup at c=50 +8–10%, at c=1 within noise. The sketch's ×1.5 over #2, from one run, didn't reproduce | ×1.1–1.3 aggregate throughput, measured | M | Medium: 2 threads and 54 KiB RSS per idle connection instead of 1 and 29 KiB | Yes |
+| 7 | `os.splice` on Linux, on top of #6 (the `splice` variant) | Against a 64 KiB proxy: single stream +76% at 67% CPU instead of 97%; ×4.2 / ×4.5 / ×4.3 at 10 / 50 / 200 connections | Near direct throughput on Linux | L | Medium: Linux-only path, pipes per relay, needs a fallback | Yes |
 | 8 | A worker pool instead of a thread per connection | `process_request` is 41% of GIL samples during setup, `Thread.start` 26% | Higher setup rate; the accept thread is the bottleneck | M | Medium: a bounded pool changes behaviour at the connection limit | Yes |
 | 9 | One forwarding socket per UDP association, reused | 8 associations: 10.1k round trips/s against 9.6k for one | UDP that scales with associations | M | Medium | Yes |
-| 10 | Smaller thread stack size | Virtual size per connection 8 MiB → 0.3 MiB; RSS unchanged | Only matters on 32-bit arm/v7 with a raised connection limit | S | Low: deep recursion would overflow | Yes |
+| 10 | ~~Smaller thread stack size~~ **Done**, 512 KiB with #6 | Virtual size per connection 8 MiB → 1.1 MiB; RSS unchanged | Two threads per connection need it on 32-bit arm/v7: 400 × 8 MiB is more address space than it has | S | Low: deep recursion would overflow | Yes |
 
 **Refuted:**
 
-- `recv_into` with a reused buffer: −4%.
+- `recv_into` with a reused buffer: −4%, and on the pump threads +6% / −12% / −9% at 10 / 50 / 200 connections
+  for 504 KiB per idle connection.
 - Blocking sockets alone: ±5%.
 - Buffers above 256 KiB: 1 MiB is erratic, from 1.9 to 6.8 GB/s across runs.
 - INFO logging cost: setup at c=50 ran at 1,377 / 1,398 req/s disabled against 1,480 / 1,512 at INFO, over two runs of 7.
@@ -100,6 +111,7 @@ A PR that implements a candidate shows its effect with:
 - `python -m benchmarks compare before.json after.json --chart before-after.svg`, with the chart in the PR body;
 - a py-spy flame graph of the targeted scenario before and after, from `--profile py-spy` with
   `BENCH_PY_SPY_ARGS=--gil`.
+- every row of the Results table rerun on the branch with `--repeat 5`, so it shows one current set of numbers.
 
 ## Running
 
@@ -159,11 +171,9 @@ the benchmark's proxy process only. These are sketches made to be measured, not 
 | Variant | Change |
 |---|---|
 | `buf=N` | Relay reads of N bytes throughout, instead of 64 KiB growing to 256 KiB |
-| `recv_into` | `recv_into()` a buffer reused for the whole relay instead of `recv()` allocating each chunk |
-| `blocking` | Blocking sockets, with the write timeout as the kernel's `SO_SNDTIMEO` |
-| `pumps` | Two threads per relay, one per direction, blocking in `recv()`; no selector |
-| `splice` | `pumps` moving data with `os.splice()` through a pipe, so it never enters Python (Linux) |
-| `stack=N` | `threading.stack_size(N)` for every thread the proxy starts |
+| `recv_into` | Each relay direction `recv_into()` a buffer reused for its life instead of `recv()` allocating each chunk |
+| `splice` | Each relay direction moves data with `os.splice()` through a pipe, so it never enters Python (Linux) |
+| `stack=N` | A thread stack of N bytes instead of 512 KiB |
 | `no_makefile` | The connection handler without `StreamRequestHandler`'s buffered `rfile` and `wfile`, which it never uses |
 
 ## Profiling
