@@ -1,8 +1,13 @@
 import contextlib
-import selectors
+import functools
+import logging
+import math
 import socket
+import struct
+import threading
+import time
 
-from ..constants import RELAY_BUFFER_SIZE, RELAY_INITIAL_BUFFER_SIZE, RELAY_WRITE_TIMEOUT, TCP_SELECTOR_TIMEOUT
+from ..constants import RELAY_BUFFER_SIZE, RELAY_IDLE_CHECK_INTERVAL, RELAY_INITIAL_BUFFER_SIZE, RELAY_WRITE_TIMEOUT
 from ..logger import get_logger
 from ..models import DetailedAddress
 from ..resolver import connect_any
@@ -11,9 +16,16 @@ from .base import BaseRelay
 logger = get_logger(__name__)
 
 
+class _WriteTimeoutError(TimeoutError):
+    """A peer read nothing, or too little, for RELAY_WRITE_TIMEOUT."""
+
+
 class TCPRelay(BaseRelay):
     """
     Class responsible for relaying data between a client socket and a remote socket via TCP.
+
+    Each direction has its own thread that blocks in recv() and then in send(): the handler thread relays
+    destination -> client, and a thread the relay starts relays client -> destination.
     """
 
     def __init__(self, client_connection: socket.socket, dst_address: DetailedAddress) -> None:
@@ -25,17 +37,15 @@ class TCPRelay(BaseRelay):
             dst_address (DetailedAddress): The address to connect to. self.dst_address becomes the address reached.
         """
         super().__init__(client_connection, dst_address)
-        self.selector: selectors.BaseSelector = selectors.DefaultSelector()
+        # Taken by the first direction to fail, which alone logs why the relay ended
+        self._ended = threading.Lock()
         sock: socket.socket | None = None
         try:
             sock, self.dst_address = connect_any(dst_address)
             self._disable_nagle(sock)
-            self.selector.register(client_connection, selectors.EVENT_READ)
-            self.selector.register(sock, selectors.EVENT_READ)
         except Exception:
             if sock is not None:
                 sock.close()
-            self.selector.close()
             raise
         self.proxy_connection = sock
 
@@ -46,51 +56,106 @@ class TCPRelay(BaseRelay):
         EOF from one side is passed on as a half-close; relaying continues in the other direction
         until it reaches EOF too. Each direction reads larger chunks once a read fills the initial size.
         """
-        open_readers = {self.client_connection, self.proxy_connection}
-        read_sizes = dict.fromkeys(open_readers, RELAY_INITIAL_BUFFER_SIZE)
         try:
             self._prepare_sockets()
-            while open_readers:
-                events = self.selector.select(timeout=TCP_SELECTOR_TIMEOUT)
-                if not events:
-                    if self.client_connection.fileno() == -1 or self.proxy_connection.fileno() == -1:
-                        break
-                    continue
-
-                for key, _ in events:
-                    sock, other_sock = self._direction(key.fileobj)
-
-                    data = sock.recv(read_sizes[sock])
-                    if not data:
-                        self._half_close(sock, other_sock)
-                        open_readers.discard(sock)
-                        continue
-                    if len(data) == read_sizes[sock]:
-                        read_sizes[sock] = RELAY_BUFFER_SIZE
-
-                    # Blocks while the receiver is slow: that is the backpressure
-                    other_sock.sendall(data)
-                    if sock is self.client_connection:
-                        self.bytes_up += len(data)
-                    else:
-                        self.bytes_down += len(data)
-                    del data  # otherwise the last chunk, up to RELAY_BUFFER_SIZE, stays allocated while idle
-
-        except TimeoutError:
-            logger.warning("Relay write timed out after %s seconds", RELAY_WRITE_TIMEOUT)
-        except OSError as e:
-            logger.debug("Relay ended: %s", e)
+            upstream = threading.Thread(
+                target=self._pump,
+                args=(self.client_connection, self.proxy_connection),
+                name=f"{threading.current_thread().name}-up",
+                daemon=True,
+            )
+            upstream.start()
+        except (OSError, RuntimeError) as e:  # RuntimeError: can't start new thread
+            self._end(logging.DEBUG, "Relay ended: %s", e)
+            self._cleanup()
+            return
+        try:
+            self._pump(self.proxy_connection, self.client_connection)
         finally:
+            upstream.join()
             self._cleanup()
 
-    def _direction(self, ready: object) -> tuple[socket.socket, socket.socket]:
+    def _pump(self, src: socket.socket, dst: socket.socket) -> None:
         """
-        Returns the socket the selector reported readable and the socket its data goes to. The selector types its
-        file objects as any file, so the socket is found by identity.
+        Relays src to dst until src sends EOF, which is passed on to dst as a half-close. A failure ends both
+        directions.
         """
-        if ready is self.client_connection:
-            return self.client_connection, self.proxy_connection
-        return self.proxy_connection, self.client_connection
+        size = RELAY_INITIAL_BUFFER_SIZE
+        upstream = src is self.client_connection
+        try:
+            while True:
+                try:
+                    n = self._move(src, dst, size)
+                except BlockingIOError:  # nothing to read for RELAY_IDLE_CHECK_INTERVAL
+                    if self.client_connection.fileno() == -1 or self.proxy_connection.fileno() == -1:
+                        return
+                    continue
+                if not n:
+                    dst.shutdown(socket.SHUT_WR)
+                    return
+                if n == size:
+                    size = RELAY_BUFFER_SIZE
+                if upstream:
+                    self.bytes_up += n
+                else:
+                    self.bytes_down += n
+        except _WriteTimeoutError:
+            self._end(logging.WARNING, "Relay write timed out after %s seconds", RELAY_WRITE_TIMEOUT)
+        except OSError as e:
+            self._end(logging.DEBUG, "Relay ended: %s", e)
+        except BaseException:
+            self._wake()  # otherwise the other direction waits for its peer
+            raise
+
+    def _move(self, src: socket.socket, dst: socket.socket, size: int) -> int:
+        """
+        Reads up to size bytes from src and writes them all to dst. Returns how many, 0 at EOF. The chunk is released
+        on return, so it isn't held while the next read waits.
+        """
+        data = src.recv(size)
+        if data:
+            self._send_all(dst, data)
+        return len(data)
+
+    def _send_all(self, sock: socket.socket, data: bytes | memoryview) -> None:
+        """
+        Writes all of data within RELAY_WRITE_TIMEOUT. The kernel's SO_SNDTIMEO bounds each send(), so a reader that
+        takes only part of it gets what is left of the timeout for the rest. Blocks while the reader is slow: that is
+        the backpressure.
+        """
+        started = time.monotonic()
+        try:
+            sent = sock.send(data)
+            if sent == len(data):
+                return
+            rest = memoryview(data)[sent:]
+            try:
+                while rest:
+                    remaining = started + RELAY_WRITE_TIMEOUT - time.monotonic()
+                    if remaining <= 0:
+                        raise _WriteTimeoutError
+                    sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDTIMEO, _timeval(remaining))
+                    rest = rest[sock.send(rest) :]
+            finally:
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDTIMEO, _timeval(RELAY_WRITE_TIMEOUT))
+        except BlockingIOError as e:  # SO_SNDTIMEO passed without the reader taking anything
+            raise _WriteTimeoutError from e
+
+    def _end(self, level: int, msg: str, *args: object) -> None:
+        """
+        Logs why the relay ended and wakes the other direction, unless another failure already did.
+        """
+        if self._ended.acquire(blocking=False):
+            logger.log(level, msg, *args)
+            self._wake()
+
+    def _wake(self) -> None:
+        """
+        Shuts both sockets down, which returns from a recv() or send() blocked on either.
+        """
+        for sock in (self.client_connection, self.proxy_connection):
+            with contextlib.suppress(OSError):
+                sock.shutdown(socket.SHUT_RDWR)
 
     def _disable_nagle(self, upstream: socket.socket) -> None:
         """
@@ -103,29 +168,41 @@ class TCPRelay(BaseRelay):
 
     def _prepare_sockets(self) -> None:
         """
-        Makes both sockets blocking with a bounded write time, and enables keepalive to detect dead peers.
+        Makes both sockets blocking with kernel timeouts, and enables keepalive to detect dead peers. A Python
+        socket timeout would poll() before every recv() and send().
         """
         for sock in (self.client_connection, self.proxy_connection):
-            sock.settimeout(RELAY_WRITE_TIMEOUT)
+            sock.settimeout(None)
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
-
-    def _half_close(self, eof_sock: socket.socket, other_sock: socket.socket) -> None:
-        """
-        Stops reading from the side that sent EOF and passes the EOF on to the other side.
-        """
-        self.selector.unregister(eof_sock)
-        other_sock.shutdown(socket.SHUT_WR)
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDTIMEO, _timeval(RELAY_WRITE_TIMEOUT))
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVTIMEO, _timeval(RELAY_IDLE_CHECK_INTERVAL))
 
     def _cleanup(self) -> None:
         logger.info(self.closed_line())
-        # Unregister both sockets from the selector
-        for sock in [self.client_connection, self.proxy_connection]:
-            with contextlib.suppress(OSError, ValueError, KeyError):
-                self.selector.unregister(sock)
         # Only close proxy_connection — client_connection is owned by the server
         with contextlib.suppress(OSError):
             self.proxy_connection.shutdown(socket.SHUT_RDWR)
         with contextlib.suppress(OSError):
             self.proxy_connection.close()
-        with contextlib.suppress(OSError):
-            self.selector.close()
+
+
+def _timeval_format(optlen: int) -> str:
+    """
+    The struct format of a struct timeval of optlen bytes: two 32-bit fields where time_t is 32 bits, else 16 bytes,
+    which also fits macOS's long and padded int.
+    """
+    return "@ii" if optlen == struct.calcsize("@ii") else "@qq"
+
+
+@functools.cache
+def _timeval_layout() -> str:
+    with socket.socket() as probe:
+        return _timeval_format(len(probe.getsockopt(socket.SOL_SOCKET, socket.SO_SNDTIMEO, 32)))
+
+
+def _timeval(seconds: float) -> bytes:
+    """
+    seconds as the struct timeval that SO_SNDTIMEO and SO_RCVTIMEO take, rounded up to a microsecond: a timeval of 0
+    means no timeout.
+    """
+    return struct.pack(_timeval_layout(), *divmod(math.ceil(seconds * 1_000_000), 1_000_000))

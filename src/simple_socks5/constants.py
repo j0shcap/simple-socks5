@@ -102,8 +102,9 @@ def healthcheck_port() -> int:
 RELAY_INITIAL_BUFFER_SIZE: Final[int] = 65536
 RELAY_BUFFER_SIZE: Final[int] = 262144
 UDP_BUFFER_SIZE: Final[int] = 65536  # the largest datagram
-TCP_SELECTOR_TIMEOUT: Final[int] = 3  # seconds
-# Bounds a whole sendall() call, so a reader slower than RELAY_BUFFER_SIZE per this many seconds is dropped
+# How often a relay blocked in a read checks that both of its sockets are still open
+RELAY_IDLE_CHECK_INTERVAL: Final[int] = 3  # seconds
+# Bounds the whole write of one chunk, so a reader slower than RELAY_BUFFER_SIZE per this many seconds is dropped
 RELAY_WRITE_TIMEOUT: Final[float] = 300.0  # seconds
 LOG_FILE_MAX_BYTES: Final[int] = 1048576  # 1 MB
 LOG_FILE_BACKUP_COUNT: Final[int] = 5
