@@ -59,14 +59,14 @@ class TCPRelay(BaseRelay):
         try:
             self._prepare_sockets()
             upstream = threading.Thread(
-                target=self._pump,
-                args=(self.client_connection, self.proxy_connection),
+                target=self._pump_upstream,
                 name=f"{threading.current_thread().name}-up",
                 daemon=True,
             )
             upstream.start()
-        except (OSError, RuntimeError) as e:  # RuntimeError: can't start new thread
-            self._end(logging.DEBUG, "Relay ended: %s", e)
+        except (OSError, RuntimeError) as e:
+            # RuntimeError: can't start new thread, so the process is out of threads or memory
+            self._end(logging.WARNING if isinstance(e, RuntimeError) else logging.DEBUG, "Relay ended: %s", e)
             self._cleanup()
             return
         try:
@@ -74,6 +74,16 @@ class TCPRelay(BaseRelay):
         finally:
             upstream.join()
             self._cleanup()
+
+    def _pump_upstream(self) -> None:
+        """
+        _pump from the client on the thread the relay starts. Logs a bug there as the server's handle_error does for
+        the handler thread: threading.excepthook would print it to stderr, ignoring -L.
+        """
+        try:
+            self._pump(self.client_connection, self.proxy_connection)
+        except Exception:
+            logger.exception("Unhandled error serving %s", self.client_address.ip)
 
     def _pump(self, src: socket.socket, dst: socket.socket) -> None:
         """

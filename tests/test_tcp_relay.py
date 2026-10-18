@@ -291,9 +291,9 @@ class TestTCPRelay(unittest.TestCase):
         assert [(r.levelno, r.exc_info) for r in relay_ended] == [(logging.DEBUG, None)]
         assert sum(r.getMessage().startswith("CLOSED") for r in logs.records) == 1
 
-    def test_unexpected_error_in_a_pump_still_ends_the_relay(self) -> None:
+    def test_unexpected_error_in_the_upstream_pump_is_logged_and_ends_the_relay(self) -> None:
         move = TCPRelay._move
-        failures: list[type[BaseException]] = []
+        hooked: list[type[BaseException]] = []
 
         def failing_move(self: TCPRelay, src: socket.socket, dst: socket.socket, size: int) -> int:
             if src is self.client_connection:
@@ -301,7 +301,7 @@ class TestTCPRelay(unittest.TestCase):
             return move(self, src, dst, size)
 
         def excepthook(args: threading.ExceptHookArgs) -> None:
-            failures.append(args.exc_type)
+            hooked.append(args.exc_type)
 
         with (
             patch.object(TCPRelay, "_move", autospec=True, side_effect=failing_move),
@@ -311,7 +311,11 @@ class TestTCPRelay(unittest.TestCase):
         ):
             self._wait_for_relay(1)
 
-        assert failures == [ValueError]
+        assert hooked == [], "threading.excepthook prints to stderr, ignoring -L"
+        errors = [r for r in logs.records if r.levelno == logging.ERROR]
+        assert [(r.getMessage(), r.exc_info and r.exc_info[0]) for r in errors] == [
+            ("Unhandled error serving 127.0.0.1", ValueError)
+        ]
         assert sum(r.getMessage().startswith("CLOSED") for r in logs.records) == 1
 
     def test_routine_and_other_socket_errors_log_debug_once_without_traceback(self) -> None:
@@ -372,7 +376,7 @@ class TestTCPRelay(unittest.TestCase):
         ):
             relay.listen_and_relay()
 
-        assert [r.getMessage() for r in logs.records if r.levelno == logging.DEBUG] == ["Relay ended: can't start"]
+        assert [r.getMessage() for r in logs.records if r.levelno == logging.WARNING] == ["Relay ended: can't start"]
         client.recv.assert_not_called()
         proxy.close.assert_called_once()
         client.close.assert_not_called()
