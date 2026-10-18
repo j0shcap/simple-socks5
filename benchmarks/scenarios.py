@@ -216,7 +216,7 @@ def concurrency(bench: Bench) -> None:
     """Aggregate download throughput at 1/10/50/200 connections, the same total bytes at each level."""
     total = bench.size(2 * GIB, 32 * MIB)
     levels = (1, 4) if bench.quick else (1, 10, 50, 200)
-    for path, proxy in _paths(bench, "concurrency", ("blocking+recv_into", "pumps")):
+    for path, proxy in _paths(bench, "concurrency", ("buf=65536", "blocking+recv_into", "pumps")):
         for level in levels:
             m = bench.run(
                 "download", _route(bench, proxy), size=total // level, concurrency=level, count=1, proxy=proxy
