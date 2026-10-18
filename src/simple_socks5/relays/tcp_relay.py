@@ -2,7 +2,7 @@ import contextlib
 import selectors
 import socket
 
-from ..constants import RELAY_BUFFER_SIZE, RELAY_WRITE_TIMEOUT, TCP_SELECTOR_TIMEOUT
+from ..constants import RELAY_BUFFER_SIZE, RELAY_INITIAL_BUFFER_SIZE, RELAY_WRITE_TIMEOUT, TCP_SELECTOR_TIMEOUT
 from ..logger import get_logger
 from ..models import DetailedAddress
 from ..resolver import connect_any
@@ -44,9 +44,10 @@ class TCPRelay(BaseRelay):
         Relays data between the client socket and the remote socket.
 
         EOF from one side is passed on as a half-close; relaying continues in the other direction
-        until it reaches EOF too.
+        until it reaches EOF too. Each direction reads larger chunks once a read fills the initial size.
         """
         open_readers = {self.client_connection, self.proxy_connection}
+        read_sizes = dict.fromkeys(open_readers, RELAY_INITIAL_BUFFER_SIZE)
         try:
             self._prepare_sockets()
             while open_readers:
@@ -59,11 +60,13 @@ class TCPRelay(BaseRelay):
                 for key, _ in events:
                     sock, other_sock = self._direction(key.fileobj)
 
-                    data = sock.recv(RELAY_BUFFER_SIZE)
+                    data = sock.recv(read_sizes[sock])
                     if not data:
                         self._half_close(sock, other_sock)
                         open_readers.discard(sock)
                         continue
+                    if len(data) == read_sizes[sock]:
+                        read_sizes[sock] = RELAY_BUFFER_SIZE
 
                     # Blocks while the receiver is slow: that is the backpressure
                     other_sock.sendall(data)
@@ -71,6 +74,7 @@ class TCPRelay(BaseRelay):
                         self.bytes_up += len(data)
                     else:
                         self.bytes_down += len(data)
+                    del data  # otherwise the last chunk, up to RELAY_BUFFER_SIZE, stays allocated while idle
 
         except TimeoutError:
             logger.warning("Relay write timed out after %s seconds", RELAY_WRITE_TIMEOUT)

@@ -11,6 +11,12 @@ to make the proxy safer; each such change is marked **Behaviour change** and is 
 ### Changed
 - Relayed TCP connections send small writes immediately (`TCP_NODELAY`), so a message written in
   two parts no longer waits about 40–80 ms for the peer's delayed ACK on Linux.
+- A TCP relay reads up to 256 KiB at a time instead of 64 KiB once a read fills the smaller
+  buffer: about 2.2–2.6× the aggregate throughput with 10 to 200 connections and +23% / +48% on
+  one stream (download / upload) on Linux. Short and idle connections keep 64 KiB reads, so
+  their memory and the connection setup rate are unchanged. A busy connection can hold up to
+  512 KiB of buffers in flight, and a reader must take about 0.9 KB/s to stay within the
+  300-second write timeout. The UDP receive buffer stays at 64 KiB.
 
 ## [2.2.0] - 2026-10-16
 

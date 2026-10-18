@@ -96,7 +96,12 @@ def healthcheck_port() -> int:
 
 
 # Buffer and timeout constants
-RELAY_BUFFER_SIZE: Final[int] = 65536
+# A relay reads each direction in RELAY_INITIAL_BUFFER_SIZE chunks until one read fills that, then in
+# RELAY_BUFFER_SIZE ones: bulk transfers make fewer, larger syscalls, and short exchanges don't allocate the larger
+# buffer for every read. Either is held only while a chunk is in flight.
+RELAY_INITIAL_BUFFER_SIZE: Final[int] = 65536
+RELAY_BUFFER_SIZE: Final[int] = 262144
+UDP_BUFFER_SIZE: Final[int] = 65536  # the largest datagram
 TCP_SELECTOR_TIMEOUT: Final[int] = 3  # seconds
 # Bounds a whole sendall() call, so a reader slower than RELAY_BUFFER_SIZE per this many seconds is dropped
 RELAY_WRITE_TIMEOUT: Final[float] = 300.0  # seconds
