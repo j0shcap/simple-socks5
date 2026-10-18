@@ -74,6 +74,7 @@ class TCPRelay(BaseRelay):
                         self.bytes_up += len(data)
                     else:
                         self.bytes_down += len(data)
+                    del data  # otherwise the last chunk, up to RELAY_BUFFER_SIZE, stays allocated while idle
 
         except TimeoutError:
             logger.warning("Relay write timed out after %s seconds", RELAY_WRITE_TIMEOUT)

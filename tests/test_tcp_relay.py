@@ -1,5 +1,6 @@
 import contextlib
 import errno
+import inspect
 import logging
 import selectors
 import socket
@@ -328,6 +329,24 @@ class TestTCPRelay(unittest.TestCase):
 
         assert client.recv.call_args_list == [call(RELAY_INITIAL_BUFFER_SIZE)] + [call(RELAY_BUFFER_SIZE)] * 2
         assert proxy.recv.call_args_list == [call(RELAY_INITIAL_BUFFER_SIZE)] * 2
+
+    def test_waits_for_the_next_read_without_holding_the_last_chunk(self) -> None:
+        relay, client, proxy, selector = self._create_relay()
+        readable = iter((client, client, proxy))
+        held: list[object] = []
+
+        def select(**_: float) -> list[tuple[selectors.SelectorKey, int]]:
+            relay_frame = next(f.frame for f in inspect.stack() if f.function == "listen_and_relay")
+            held.append(relay_frame.f_locals.get("data"))
+            return [(_event(next(readable)), selectors.EVENT_READ)]
+
+        selector.select.side_effect = select
+        client.recv.side_effect = [b"x" * RELAY_INITIAL_BUFFER_SIZE, b""]
+        proxy.recv.side_effect = [b""]
+
+        relay.listen_and_relay()
+
+        assert held[1] is None, "the chunk already sent stays allocated while the relay waits"
 
     def test_counts_bytes_each_direction(self) -> None:
         relay, _, _ = self._relay_one_exchange()
