@@ -407,12 +407,23 @@ class TestTCPRelay(unittest.TestCase):
             client.shutdown(socket.SHUT_WR)
             dst.shutdown(socket.SHUT_WR)
 
-    def test_timeval_layout(self) -> None:
-        # Two 32-bit fields on 32-bit platforms with a 32-bit time_t, 16 bytes everywhere else
-        assert struct.calcsize(_timeval_format(8)) == 8
-        assert struct.calcsize(_timeval_format(16)) == 16
-        assert struct.unpack(_timeval_format(16), struct.pack(_timeval_format(16), 1, 500000)) == (1, 500000)
-        assert struct.unpack(_timeval_format(len(_timeval(1.5))), _timeval(1.5)) == (1, 500000)
+    def test_timeval_layout_follows_the_width_of_time_t(self) -> None:
+        cases = (
+            ("64-bit time_t", None, 16),
+            ("32-bit time_t", OverflowError("timestamp out of range for platform time_t"), 8),
+        )
+        for name, error, size in cases:
+            with self.subTest(name), patch("simple_socks5.relays.tcp_relay.time.gmtime", side_effect=error):
+                _timeval_format.cache_clear()
+                try:
+                    assert struct.calcsize(_timeval_format()) == size
+                    assert struct.unpack(_timeval_format(), _timeval(1.5)) == (1, 500000)
+                finally:
+                    _timeval_format.cache_clear()
+
+    def test_timeval_rounds_up_to_a_microsecond(self) -> None:
+        assert struct.unpack(_timeval_format(), _timeval(1e-9)) == (0, 1), "a timeval of 0 means no timeout"
+        assert struct.unpack(_timeval_format(), _timeval(2.9999999)) == (3, 0)
 
     def test_wake_up_ends_a_relay_blocked_in_both_directions(self) -> None:
         with self._real_relay() as (relay, _client, _dst):

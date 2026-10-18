@@ -186,18 +186,18 @@ class TCPRelay(BaseRelay):
             self.proxy_connection.close()
 
 
-def _timeval_format(optlen: int) -> str:
-    """
-    The struct format of a struct timeval of optlen bytes: two 32-bit fields where time_t is 32 bits, else 16 bytes,
-    which also fits macOS's long and padded int.
-    """
-    return "@ii" if optlen == struct.calcsize("@ii") else "@qq"
-
-
 @functools.cache
-def _timeval_layout() -> str:
-    with socket.socket() as probe:
-        return _timeval_format(len(probe.getsockopt(socket.SOL_SOCKET, socket.SO_SNDTIMEO, 32)))
+def _timeval_format() -> str:
+    """
+    The struct format of a struct timeval: two 32-bit fields where time_t is 32 bits, else 16 bytes, which also fits
+    macOS's long and padded int. The width of time_t also decides which SO_SNDTIMEO the socket module has: 32-bit
+    platforms built with a 64-bit time_t, such as Debian's armhf, have the one that takes 16 bytes.
+    """
+    try:
+        time.gmtime(2**31)
+    except (OverflowError, OSError):
+        return "@ii"
+    return "@qq"
 
 
 def _timeval(seconds: float) -> bytes:
@@ -205,4 +205,4 @@ def _timeval(seconds: float) -> bytes:
     seconds as the struct timeval that SO_SNDTIMEO and SO_RCVTIMEO take, rounded up to a microsecond: a timeval of 0
     means no timeout.
     """
-    return struct.pack(_timeval_layout(), *divmod(math.ceil(seconds * 1_000_000), 1_000_000))
+    return struct.pack(_timeval_format(), *divmod(math.ceil(seconds * 1_000_000), 1_000_000))
