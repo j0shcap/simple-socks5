@@ -17,6 +17,17 @@ to make the proxy safer; each such change is marked **Behaviour change** and is 
   their memory and the connection setup rate are unchanged. A busy connection can hold up to
   512 KiB of buffers in flight, and a reader must take about 0.9 KB/s to stay within the
   300-second write timeout. The UDP receive buffer stays at 64 KiB.
+- Each relayed TCP connection uses a thread per direction, blocking in the kernel with its
+  write timeout and idle check set as socket options, instead of one thread polling both
+  sockets: +12% / +16% / +31% aggregate throughput at 10 / 50 / 200 connections, +8–11% on one
+  stream and +8–10% connection setup rate at 50 concurrent clients on Linux. An idle connection
+  now holds two threads and about 54 KiB of memory instead of one and 29 KiB. The write timeout
+  still bounds the whole write of each chunk.
+- The proxy starts its threads with a 512 KiB stack instead of the platform default (8 MiB on
+  Linux), so two threads per connection still fit the address space of a 32-bit (arm/v7) process
+  at the connection limit. Virtual memory per connection falls from 8 MiB to about 1.1 MiB.
+- A relay ended by a dead peer that keepalive detected is logged at DEBUG like other
+  disconnects, instead of as a WARNING that the write timed out.
 
 ## [2.2.0] - 2026-10-16
 
