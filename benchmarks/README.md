@@ -7,40 +7,34 @@ its time goes. It is development tooling: stdlib only, not packaged, not in the 
 
 ### Environment
 
-Linux numbers come from the image (Python 3.13, `-L info`) under Docker Desktop on an Apple M2 with 8 CPUs, via
-`run-in-docker.sh`; macOS numbers run the proxy from `src/` on the same machine. Docker Desktop's loopback is not a
-production host's, so read every number as a ratio against the proxy row of the same run. Throughput, setup,
-small writes and idle memory are medians of 5, rerun after the pump-thread change below; time to first byte and
-UDP are medians of 3 from before it, which doesn't touch them. A throughput run on a loaded host (load average 16)
-was discarded.
+The image (Python 3.13, `-L info`) under Docker Desktop on an Apple M2 with 8 CPUs, via `run-in-docker.sh`, every
+scenario with `--repeat 5` (medians). Docker Desktop's loopback is not a production host's, so read every number as
+a ratio against the direct row of the same run. Every row is rerun whenever a change lands, so the table shows only
+current numbers.
 
-| Measurement | Linux direct | Linux proxy | macOS direct | macOS proxy |
-|---|--:|--:|--:|--:|
-| 1 stream download, MB/s | 6,983 | 6,425 | 8,747 | 5,829 |
-| 10 / 50 / 200 connections, MB/s | 8,506 / 6,926 / 6,391 | 7,278 / 5,560 / 3,881 | 7,990 / 6,403 / 4,724 | 3,601 / 2,520 / 3,252 |
-| Setup c=50, req/s (p99 ms) | 8,199 (10.0) | 1,650 (56.0) | 13,387 (6.6) | 2,163 (44.2) |
-| Time to first byte p50, ms | 0.13 | 0.50 | 0.11 | 0.36 |
-| Split-write round trip p50, ms | 1.62 | 1.59 (85.1 before `TCP_NODELAY`) | 1.66 | 1.74 |
-| UDP round trips/s, 1 / 8 associations | 23,570 / 77,372 | 9,613 / 10,085 | 32,284 / 80,733 | 8,237 / 13,633 |
-| Idle connection | | 54.1 KiB RSS, 2 threads, 1.1 MiB virtual (29.1 KiB, 1 thread, 8 MiB before the pump threads) | | ~15 KiB RSS (noisy) |
+| Measurement | Direct | Proxy |
+|---|--:|--:|
+| 1 stream download / upload, MB/s | 6,983 / 6,476 | 6,425 / 6,169 |
+| 10 / 50 / 200 connections, MB/s | 8,506 / 6,926 / 6,391 | 7,278 / 5,560 / 3,881 |
+| Setup c=1 / c=50, req/s | 5,686 / 8,199 | 1,681 / 1,650 |
+| Time to first byte p50, ms | 0.14 | 0.50 |
+| Split-write round trip p50, ms | 1.62 | 1.59 |
+| UDP round trips/s, 1 / 8 associations | 23,090 / 60,404 | 10,018 / 9,291 |
+| Idle connection | | 54.1 KiB RSS, 2 threads, 1.1 MiB virtual |
 
-A message written in two parts used to wait about 83 ms on Linux: Nagle's algorithm held the second part until
-the first was acknowledged, and the receiver delayed that acknowledgement. The proxy now sets `TCP_NODELAY` on
-both relay sockets.
+What recent changes did, each from back-to-back runs against `main`:
 
-The relay used to read 64 KiB at a time. Each direction now starts there and reads 256 KiB at a time once a read
-fills the buffer, which took aggregate throughput from 1,920 / 1,376 / 1,036 to 4,174 / 3,148 / 2,698 MB/s at
-10 / 50 / 200 connections and one stream from 3,956 / 3,759 to 4,855 / 5,575 MB/s (download / upload), in a
-back-to-back pair against `main`.
-
-Each relay then had one thread and a selector loop. It now has a thread per direction, each blocking in `recv()`
-and then `send()`, with the write timeout and the idle check enforced by the kernel (`SO_SNDTIMEO`,
-`SO_RCVTIMEO`) instead of a `poll()` before every call. Over three back-to-back pairs against `main` (medians),
-aggregate throughput went from 6,585 / 4,679 / 3,142 to 7,379 / 5,447 / 4,123 MB/s at 10 / 50 / 200 connections
-(+12% / +16% / +31%), one stream gained 8–11%, setup at c=50 8–10%, and setup at c=1 stayed within run-to-run
-noise. An idle connection now holds two threads and 54 KiB of RSS instead of 29 KiB. Threads start with a 512 KiB
-stack, which takes virtual size per connection from 8 MiB to 1.1 MiB, so 200 connections still fit a 32-bit
-process. macOS setup and its other rows are from before these changes.
+- **`TCP_NODELAY` on both relay sockets.** A message written in two parts used to wait about 83 ms: Nagle's
+  algorithm held the second part until the first was acknowledged, and the receiver delayed that acknowledgement.
+- **Reads growing from 64 KiB to 256 KiB once one fills the buffer.** ×2.2 / ×2.3 / ×2.6 aggregate throughput at
+  10 / 50 / 200 connections, +23% / +48% on one stream (download / upload).
+- **A thread per relay direction, blocking in the kernel.** Each relay had one thread and a selector loop, with a
+  `poll()` before every `recv()` and `send()`. Each direction now blocks in `recv()` and then `send()`, with the
+  write timeout and the idle check enforced by the kernel (`SO_SNDTIMEO`, `SO_RCVTIMEO`): +12% / +16% / +31% at
+  10 / 50 / 200 connections, +8–11% on one stream and +8–10% setup at c=50 (medians of three pairs); setup at c=1
+  stayed within run-to-run noise. An idle connection holds two threads and 54 KiB of RSS instead of one and
+  29 KiB. Threads start with a 512 KiB stack, which takes virtual size per connection from 8 MiB to 1.1 MiB, so
+  200 connections still fit a 32-bit process.
 
 Two things stand out. Aggregate throughput still falls as connections are added while direct transfers hold up,
 because every relay competes for one GIL. And connection setup runs at a fifth of direct at c=50.
@@ -51,7 +45,7 @@ because every relay competes for one GIL. And connection setup runs at a fifth o
 
 ![Before and after the pump threads](images/pumps-before-after.svg)
 
-![Single-stream throughput by relay variant, at 64 KiB](images/bulk.svg)
+![Single-stream throughput](images/bulk.svg)
 
 ![Connection setup](images/setup.svg)
 
@@ -117,6 +111,7 @@ A PR that implements a candidate shows its effect with:
 - `python -m benchmarks compare before.json after.json --chart before-after.svg`, with the chart in the PR body;
 - a py-spy flame graph of the targeted scenario before and after, from `--profile py-spy` with
   `BENCH_PY_SPY_ARGS=--gil`.
+- every row of the Results table rerun on the branch with `--repeat 5`, so it shows one current set of numbers.
 
 ## Running
 
