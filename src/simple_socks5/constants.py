@@ -54,6 +54,9 @@ def connect_timeout() -> float:
 
 
 DEFAULT_MAX_CONNECTIONS: Final[int] = 200
+# Each connection has two threads, one per relay direction. Glibc's default 8 MiB stack is virtual memory only, but
+# at the connection limit it would take more address space than a 32-bit process has. 512 KiB is macOS's default.
+THREAD_STACK_SIZE: Final[int] = 524288
 CONNECTION_LIMIT_WARNING_INTERVAL: Final[float] = 10.0  # seconds between "connection limit reached" warnings
 POLICY_DENIED_WARNING_INTERVAL: Final[float] = 10.0  # seconds between "destination denied" warnings
 HANDSHAKE_TIMEOUT_WARNING_INTERVAL: Final[float] = 10.0  # seconds between "handshake timed out" warnings

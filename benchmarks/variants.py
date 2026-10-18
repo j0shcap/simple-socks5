@@ -9,7 +9,7 @@ A variant spec joins names with "+", e.g. "recv_into+buf=1048576". Available:
                  chunk
     splice       each direction of a relay moves data with os.splice() through a pipe, never copying it into Python
                  (Linux)
-    stack=N      threading.stack_size(N) for every thread the proxy starts
+    stack=N      a thread stack of N bytes instead of THREAD_STACK_SIZE
     no_makefile  the connection handler without StreamRequestHandler's buffered rfile and wfile, which it never uses
 
 These are sketches good enough to measure, not reviewed implementations. recv_into and splice replace only how
@@ -20,9 +20,9 @@ import contextlib
 import fcntl
 import os
 import socket
-import threading
 from collections.abc import Callable
 
+from simple_socks5 import main
 from simple_socks5.relays import tcp_relay
 from simple_socks5.relays.tcp_relay import TCPRelay
 from simple_socks5.server import TCPProxyServer
@@ -52,7 +52,7 @@ def _buf(value: str) -> None:
 
 
 def _stack(value: str) -> None:
-    threading.stack_size(int(value))
+    _patch(main, "THREAD_STACK_SIZE", int(value))  # main() sets it before the server starts
 
 
 def _no_makefile(_: str) -> None:

@@ -12,12 +12,12 @@ import threading
 import unittest
 from contextlib import redirect_stderr
 from pathlib import Path
-from unittest.mock import NonCallableMagicMock, create_autospec, patch
+from unittest.mock import DEFAULT, MagicMock, NonCallableMagicMock, create_autospec, patch
 
 import pytest
 
 from simple_socks5.config import LoggingLevelName, ProxyConfiguration
-from simple_socks5.constants import SHUTDOWN_FORCE_CLOSE_TIMEOUT, SHUTDOWN_GRACE_PERIOD
+from simple_socks5.constants import SHUTDOWN_FORCE_CLOSE_TIMEOUT, SHUTDOWN_GRACE_PERIOD, THREAD_STACK_SIZE
 from simple_socks5.main import GracefulShutdown, cli, main
 from simple_socks5.server import ThreadingTCPServer
 from simple_socks5.startup import DEFAULT_CREDENTIALS_MESSAGE, OPEN_PROXY_BANNER
@@ -55,6 +55,18 @@ class TestMainStartupAdvisories(unittest.TestCase):
         self.serve_forever.assert_called_once()
         assert BANNER_HEADLINE in logged_before_serving[0]
         assert DEFAULT_CREDENTIALS_MESSAGE in logged_before_serving[0]
+
+    @patch("simple_socks5.main.threading.stack_size", autospec=True)
+    def test_threads_get_a_smaller_stack_before_the_server_starts(self, stack_size: MagicMock) -> None:
+        def server(*_: object) -> object:
+            stack_size.assert_called_once_with(THREAD_STACK_SIZE)
+            return DEFAULT
+
+        self.server_class.side_effect = server
+
+        self.run_main()
+
+        self.serve_forever.assert_called_once()
 
     def test_banner_visible_at_warning_level(self) -> None:
         assert BANNER_HEADLINE in self.run_main(logging_level="warning")

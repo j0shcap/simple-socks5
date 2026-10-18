@@ -8,7 +8,7 @@ from typing import Final, Protocol, TypeAlias
 
 from .argument_parser import parse_arguments
 from .config import ProxyConfiguration
-from .constants import SHUTDOWN_FORCE_CLOSE_TIMEOUT, SHUTDOWN_GRACE_PERIOD
+from .constants import SHUTDOWN_FORCE_CLOSE_TIMEOUT, SHUTDOWN_GRACE_PERIOD, THREAD_STACK_SIZE
 from .logger import get_logger, update_loggers
 from .server import (
     TCPProxyServer,
@@ -101,6 +101,8 @@ def main(config: ProxyConfiguration) -> None:
     for level, message in collect_startup_advisories(config.host):
         logger.log(level, message)
 
+    # For every thread started from here on: connection handlers, their relays and DNS lookups
+    threading.stack_size(THREAD_STACK_SIZE)
     try:
         with ThreadingTCPServer((config.host, config.port), TCPProxyServer) as tcp_server:
             graceful_shutdown = GracefulShutdown(tcp_server)
